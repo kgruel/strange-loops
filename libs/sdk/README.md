@@ -218,6 +218,26 @@ signs nothing and does not require private custody to remain available.
 Mapped providers are supported on Arrival targets; legacy writers explicitly
 refuse them. The default `CustodyCredentialProvider` remains unchanged.
 
+The runnable [two-observer mapped workload](tests/test_arrival_mapped_workload.py)
+shows the complete public lifecycle: create Alice and Bob bindings under one
+persisted provider root and exact namespace; initialize with Alice; grant Bob
+using Bob's pre-created public key; then emit with both authors. For a locator
+move that keeps the same physical file-backed store, initialize with an
+**absolute** `location` and move only the `.vertex` file while retaining its
+store clause, lineage, and role. Recreate `MappedCredentialProvider` with the
+same provider root, namespace, and receipt observer before continuing work.
+The absolute store location keeps the same store residence, while
+mapped key selection comes only from the provider namespace and exact observer
+label; neither the vertex filename nor its new directory chooses a key.
+
+After relocation, `verify_target(relocated_vertex)` provides a `Full`
+verification of the captured prefix's grammar, dense ordinals, lineage, and
+record-hash chain. It does not establish projection agreement, signature
+authorship, key trust, or the identity of an observer across lineages. The
+mapped workload exercises public writes with captured authorization; the
+[mapped signing tests](tests/test_arrival_mapped_credentials.py) separately
+verify domain-specific signatures and key-history behavior.
+
 `import_legacy(vertex_path, observer, token=...)` explicitly copies a verified
 legacy key into managed storage without changing the original. It preserves
 flat/nested ambiguity and alias refusals. After import, locator moves do not

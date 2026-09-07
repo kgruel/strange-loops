@@ -1,0 +1,33 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06",
+  "due_at": "2026-09-07T00:41:17.422551+00:00",
+  "baseline": "a36487dc",
+  "scope": "Public SDK two-observer conformance followup",
+  "jobs": [
+    {
+      "name": "followup",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/followup-prompt.txt",
+      "sha256": "f717b118ec76c00e3f0a216cb8b341ddc5439a2d69236cdab6dbc182992c6fdd",
+      "sources": {
+        "libs/sdk/tests/test_arrival_mapped_workload.py": "241f73336fe57b2047d549e2cddcfcfbf6bb489a060e2c58becdbb3dfd46869e",
+        "libs/sdk/README.md": "e3717a232a90d69950145e36b7d8092eeea0363604e37bedcd09abc1604dc768",
+        "docs/scratch/arrival-break/sdk-conformance-two-observer-2026-09-06.md": "d0794d998219864fc7c7313c63d03982ac44021e206d5b1403cb2d86fa805d17",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/final-findings.md": "6ffe6c021b6f6b56f67ebc5536747acbc0163ab93eeded443c23224a303c774d",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/primary-triage.md": "07cec1c289760db79c68f4c5c69bfe03d12b31c55d1a52ea4625e80da3102d1b",
+        "libs/engine/src/engine/credentials.py": "6773a4aa60db1767a0c26ad7d344e294b65bd9c99bdaa0b82c4aefff40121882",
+        "libs/sdk/src/sdk/errors.py": "a96a5a23ad8c9e1fa8e12d53b7c5a92f9a084181182c1981a8ce989ec1611266",
+        "libs/sdk/src/sdk/verify.py": "301162d7ec3ca18c7e60b0b0fd3702a4900b121a5225baf0dbf271777e94f525",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/correction-focused.txt": "8d34dce37c27a3c4769b56bc43d98ab45ce99d5cdba361ac49363da850458329",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/correction-ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-after.txt": "c87ae9421937a9c25c7a1adf8d4da2b4154ecbdf50b85b5240e35d6fc0866fdc",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-before.txt": "4eb59afa998c1e892e00eeb31c4a10cd2d3f1b471e7e68cf3281c7a894aee160",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-probe.py.txt": "cd86ea2ef4c2599fa74f7340eae46aaf67aeb3b95ed26813a948262c612fcc2b",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/pre-review-workload.py.txt": "8c8fe02bede187484e73f093ad88cc67bb7d21190d062733888d1ca6925e6e3b"
+      },
+      "status": "pending"
+    }
+  ]
+}

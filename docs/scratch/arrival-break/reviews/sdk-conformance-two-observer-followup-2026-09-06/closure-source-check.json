@@ -1,0 +1,20 @@
+{
+  "checked_before_closeout_doc_updates": true,
+  "all_match": true,
+  "sources": {
+    "libs/sdk/tests/test_arrival_mapped_workload.py": true,
+    "libs/sdk/README.md": true,
+    "docs/scratch/arrival-break/sdk-conformance-two-observer-2026-09-06.md": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/final-findings.md": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/primary-triage.md": true,
+    "libs/engine/src/engine/credentials.py": true,
+    "libs/sdk/src/sdk/errors.py": true,
+    "libs/sdk/src/sdk/verify.py": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/correction-focused.txt": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/correction-ruff.txt": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-after.txt": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-before.txt": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-probe.py.txt": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/pre-review-workload.py.txt": true
+  }
+}

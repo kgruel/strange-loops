@@ -1,0 +1,20 @@
+{
+  "instruction": "You are the Fable 5.1 LOW adversarial follow-up reviewer for the two-observer public SDK workload conformance slice, baseline a36487dc. The prior static review returned REVISE because wrong-namespace CredentialBindingRefused could be a provider failure rather than captured key authorization refusal. Root independently reproduced that false positive. This follow-up is bounded: determine whether the final test corrects that blocker and whether documentation accurately limits its claims. Test now proves distinct alternate public key, successful public resolve, exact reason/full request/key evidence/successor use_position, plus positive ordinal progress and lineage continuity; docs clarify Alice case alias is admission-only alongside independent public resolution. No production files changed. Full SDK 579 and architecture101 passed before these assertion-only refinements; final focused13 and Ruff passed afterward. The supplied probe first confirms the old false positive; on the corrected test it permits first other-tenant preflight resolve then forces write-time resolver failure, which the test now rejects with AssertionError. Do not claim you executed tools/tests; this is static supplied evidence. Review the current source (not the archived pre-review test), prior finding/triage, and before/after probe. Return ACCEPT or REVISE, with concrete remaining blocker and counterexample if any; separate optional suggestions. Do not require unrelated SDK surface expansion, relative-path relocation, concurrent/multi-machine migration, production signature changes, C9 retirement or other deferred conformance workflows.",
+  "sources": [
+    "libs/sdk/tests/test_arrival_mapped_workload.py",
+    "libs/sdk/README.md",
+    "docs/scratch/arrival-break/sdk-conformance-two-observer-2026-09-06.md",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/final-findings.md",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/primary-triage.md",
+    "libs/engine/src/engine/credentials.py",
+    "libs/sdk/src/sdk/errors.py",
+    "libs/sdk/src/sdk/verify.py",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/correction-focused.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/correction-ruff.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-after.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-before.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-probe.py.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/pre-review-workload.py.txt"
+  ],
+  "patch": true
+}

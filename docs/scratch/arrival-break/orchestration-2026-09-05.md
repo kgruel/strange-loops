@@ -1,3 +1,46 @@
+## September 6: two-observer SDK conformance checkpoint; declaration recovery next
+
+The first public SDK workload-conformance slice is complete on `arrival/finish`
+in `loops-wt/arrival-finish`, based on D0/D2 checkpoint `a36487dc`. This checkpoint
+contains the accepted tests, guidance and review evidence; nothing pushed.
+No production change was needed. Sol added the
+executable lifecycle, Terra audited relocation and updated SDK guidance, Luna
+validated the SDK/architecture suites, and root independently reproduced and
+triaged the adversarial review finding.
+
+The flow prepares mapped Alice/Bob bindings, initializes Arrival, grants Bob's
+explicit public key, emits a mixed-author batch, and matches commit/read/Full
+prefix evidence. It moves a byte-identical descriptor retaining an absolute
+store location, reconstructs the provider, and continues writing as Bob with
+the same keys and history. Refusal controls cover ungranted Bob, wrong-namespace
+Alice, and a case-distinct undeclared Alice. This is a fact-read and verification
+workflow; it does not claim every SDK read surface or relative-location moves.
+
+Fable-low initially returned REVISE: a generic credential refusal could let the
+wrong-namespace test pass on provider failure. Root reproduced that false
+positive. The corrected test checks the exact captured-authorization refusal,
+request and key evidence; a write-time broken resolver now fails the test.
+Focused follow-up Fable-low and primary verdicts are **ACCEPT**, no blockers.
+All code/test hashes match the accepted packet. No jobs remain.
+
+Validation: full SDK **579 passed** /17.53s; architecture **101 passed** /6.02s
+before assertion-only review corrections. Final focused mapped/workload suite
+**13 passed** /1.09s and Ruff passed after those corrections. Every test process
+isolated XDG state/config and `LOOPS_HOME`; no live stores or keys were used.
+Review packets, original REVISE, correction probes and final acceptance remain
+in the [workload report](sdk-conformance-two-observer-2026-09-06.md).
+
+**Next bounded slice:** interrupt a declaration edit, recover, inspect, and
+continue writing through public SDK operations, using Sol/Terra/Luna and
+Fable-low review. Follow with partial source tiers and captured-prefix export,
+restore-forward, verify, explicit sync and read. These are conformance
+prerequisites; C9 SDK/minimal-CLI transition and legacy retirement remain
+separate, alongside the larger maintenance/transfer/adoption roadmap. Do not
+automatically migrate live stores. Resume the next slice after the user's
+compaction; no declaration-recovery implementation began in this checkpoint.
+
+Earlier entries below preserve their status at the time of writing.
+
 ## September 6: D0/D2 checkpoint; resume with public SDK workload conformance
 
 This checkpoint contains the accepted D0/D2 implementation, recovery/durability

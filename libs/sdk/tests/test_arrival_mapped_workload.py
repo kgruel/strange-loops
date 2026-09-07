@@ -1,0 +1,305 @@
+"""Public mapped-custody workflow conformance for an Arrival vertex."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
+
+from sdk import (
+    AdmissionFailed,
+    ArrivalRefusal,
+    MappedCredentialProvider,
+    emit_batch,
+    emit_fact,
+    grant_observer,
+    init_vertex,
+    read_facts,
+    verify_target,
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
+
+
+def test_mapped_two_observer_workload_survives_descriptor_relocation(
+    tmp_path: Path,
+) -> None:
+    custody_root = tmp_path / "custody"
+    namespace = "workload-tenant"
+    provider = MappedCredentialProvider(
+        custody_root,
+        namespace=namespace,
+        receipt_observer="alice",
+    )
+    alice = provider.create_binding("alice", token="create-alice")
+    bob = provider.create_binding("bob", token="create-bob")
+    alice_case_alias = provider.create_binding("Alice", token="create-uppercase-alice")
+    assert alice_case_alias.key_ref != alice.key_ref
+    assert alice_case_alias.public_key != alice.public_key
+
+    vertex = tmp_path / "original" / "workload.vertex"
+    store = (tmp_path / "data" / "workload.arrival").resolve()
+    initialized = init_vertex(
+        vertex,
+        name="workload",
+        store_type="arrival",
+        location=store,
+        observer="alice",
+        credentials=provider,
+    )
+    assert initialized.lineage is not None
+    assert initialized.store is not None
+    assert initialized.store.location == str(store)
+
+    before_grant = verify_target(vertex).verified_through
+    assert before_grant is not None
+    assert initialized.head == {
+        "lineage": before_grant.lineage,
+        "ordinal": before_grant.ordinal,
+        "record_hash": before_grant.record_hash,
+    }
+    with pytest.raises(AdmissionFailed) as ungranted:
+        emit_fact(
+            vertex,
+            "item",
+            {"owner": "bob", "phase": "before-grant"},
+            observer="bob",
+            origin="workload-test",
+            ts=9.0,
+            id_override="bob-before-grant",
+            credentials=provider,
+        )
+    assert ungranted.value.observer == "bob"
+    assert ungranted.value.kind == "item"
+    assert verify_target(vertex).verified_through == before_grant
+
+    granted = grant_observer(
+        vertex,
+        "bob",
+        grants=["item"],
+        key=bob.public_key,
+        observer="alice",
+        credentials=provider,
+    )
+    assert granted.status == "applied"
+    assert granted.commit is not None
+    assert granted.commit.before == before_grant
+    assert granted.commit.after.lineage == granted.commit.before.lineage
+    assert granted.commit.after.ordinal > granted.commit.before.ordinal
+
+    batch = emit_batch(
+        vertex,
+        [
+            {
+                "id": "alice-item",
+                "kind": "item",
+                "payload": {"owner": "alice"},
+                "observer": "alice",
+                "origin": "workload-test",
+                "ts": 10.0,
+            },
+            {
+                "id": "bob-item",
+                "kind": "item",
+                "payload": {"owner": "bob"},
+                "observer": "bob",
+                "origin": "workload-test",
+                "ts": 11.0,
+            },
+        ],
+        credentials=provider,
+    )
+    assert batch.atomic is True
+    assert batch.atomicity == "single-append"
+    assert batch.commit is not None
+    assert batch.commit.before == granted.commit.after
+    assert batch.commit.after.lineage == batch.commit.before.lineage
+    assert batch.commit.after.ordinal > batch.commit.before.ordinal
+    assert batch.captured_head == batch.commit.before
+    assert batch.witnessed is True
+    assert batch.projection == "synced"
+    assert [(item.id, item.observer, item.stored, item.signed) for item in batch.items] == [
+        ("alice-item", "alice", True, True),
+        ("bob-item", "bob", True, True),
+    ]
+    assert all(item.captured_head == batch.captured_head for item in batch.items)
+    assert all(item.commit is None for item in batch.items)
+    assert all(item.witnessed is True for item in batch.items)
+    assert all(item.projection == "synced" for item in batch.items)
+
+    first_read = read_facts(vertex, limit=20, order="oldest")
+    assert first_read.basis is not None
+    assert first_read.basis.lineage == initialized.lineage
+    assert first_read.basis.captured_head == batch.commit.after
+    assert first_read.basis.projected_through == first_read.basis.captured_head
+    assert [
+        (item["id"], item["observer"], item["payload"])
+        for item in first_read.items
+    ] == [
+        ("alice-item", "alice", {"owner": "alice"}),
+        ("bob-item", "bob", {"owner": "bob"}),
+    ]
+    first_verified = verify_target(vertex)
+    assert first_verified.captured_head == batch.commit.after
+    assert first_verified.verified_through == first_read.basis.captured_head
+    assert first_verified.claims == ("grammar", "density", "lineage", "hash-chain")
+    assert "signature-authorship" in first_verified.excludes
+
+    relocated = tmp_path / "relocated" / "renamed.vertex"
+    relocated.parent.mkdir()
+    original_declaration = vertex.read_bytes()
+    vertex.rename(relocated)
+    assert relocated.read_bytes() == original_declaration
+
+    reopened = MappedCredentialProvider(
+        custody_root,
+        namespace=namespace,
+        receipt_observer="alice",
+    )
+    for observer, created in (("alice", alice), ("bob", bob)):
+        resolved = reopened.resolve(
+            CredentialRequest(
+                namespace,
+                observer,
+                SigningDomain.FACT,
+                CredentialPurpose.AUTHORSHIP,
+            )
+        )
+        assert resolved is not None
+        assert resolved.evidence.key_ref == created.key_ref
+        assert resolved.evidence.public_key == created.public_key
+    resolved_case_alias = reopened.resolve(
+        CredentialRequest(
+            namespace,
+            "Alice",
+            SigningDomain.FACT,
+            CredentialPurpose.AUTHORSHIP,
+        )
+    )
+    assert resolved_case_alias is not None
+    assert resolved_case_alias.evidence.key_ref == alice_case_alias.key_ref
+    assert resolved_case_alias.evidence.public_key == alice_case_alias.public_key
+    assert resolved_case_alias.evidence.key_ref != alice.key_ref
+
+    relocated_verified = verify_target(relocated)
+    assert relocated_verified.verified_through == first_verified.verified_through
+    relocated_read = read_facts(relocated, limit=20, order="oldest")
+    assert relocated_read.basis == first_read.basis
+    assert relocated_read.items == first_read.items
+    assert relocated_read.store is not None
+    assert relocated_read.store.location == str(store)
+
+    other_namespace = MappedCredentialProvider(
+        custody_root,
+        namespace="other-tenant",
+        receipt_observer="alice",
+    )
+    other_alice = other_namespace.create_binding(
+        "alice", token="create-other-tenant-alice"
+    )
+    assert other_alice.public_key != alice.public_key
+    other_resolved = other_namespace.resolve(
+        CredentialRequest(
+            "other-tenant",
+            "alice",
+            SigningDomain.FACT,
+            CredentialPurpose.AUTHORSHIP,
+        )
+    )
+    assert other_resolved is not None
+    assert other_resolved.evidence.key_ref == other_alice.key_ref
+    assert other_resolved.evidence.public_key == other_alice.public_key
+    with pytest.raises(ArrivalRefusal) as wrong_namespace:
+        emit_fact(
+            relocated,
+            "item",
+            {"owner": "alice", "phase": "wrong-namespace"},
+            observer="alice",
+            origin="workload-test",
+            ts=11.5,
+            id_override="alice-wrong-namespace",
+            credentials=other_namespace,
+        )
+    assert wrong_namespace.value.source_type == "CredentialBindingRefused"
+    credential_refusal = wrong_namespace.value.details["credential_binding"]
+    assert credential_refusal["reason"] == (
+        "resolved public key is not authorized at the captured position"
+    )
+    assert credential_refusal["request"] == {
+        "namespace": "other-tenant",
+        "observer": "alice",
+        "domain": "fact",
+        "purpose": "authorship",
+    }
+    assert credential_refusal["use_position"] == (
+        first_verified.verified_through.ordinal + 1
+    )
+    assert credential_refusal["binding"]["key_ref"] == other_alice.key_ref
+    assert credential_refusal["binding"]["public_key"] == other_alice.public_key
+    assert wrong_namespace.value.details["captured_head"] == {
+        "lineage": first_verified.verified_through.lineage,
+        "ordinal": first_verified.verified_through.ordinal,
+        "record_hash": first_verified.verified_through.record_hash,
+    }
+    assert verify_target(relocated).verified_through == first_verified.verified_through
+
+    with pytest.raises(AdmissionFailed) as wrong_case:
+        emit_fact(
+            relocated,
+            "item",
+            {"owner": "Alice", "phase": "case-alias"},
+            observer="Alice",
+            origin="workload-test",
+            ts=11.75,
+            id_override="uppercase-alice",
+            credentials=reopened,
+        )
+    assert wrong_case.value.observer == "Alice"
+    assert wrong_case.value.kind == "item"
+    assert verify_target(relocated).verified_through == first_verified.verified_through
+
+    continued = emit_fact(
+        relocated,
+        "item",
+        {"owner": "bob", "phase": "relocated"},
+        observer="bob",
+        origin="workload-test",
+        ts=12.0,
+        id_override="bob-after-relocation",
+        credentials=reopened,
+    )
+    assert continued.stored is True
+    assert continued.signed is True
+    assert continued.commit is not None
+    assert continued.commit.before == first_verified.verified_through
+    assert continued.commit.after.lineage == continued.commit.before.lineage
+    assert continued.commit.after.ordinal > continued.commit.before.ordinal
+    assert continued.witnessed is True
+    assert continued.projection == "synced"
+
+    final_read = read_facts(relocated, limit=20, order="oldest")
+    assert final_read.basis is not None
+    assert final_read.basis.lineage == initialized.lineage
+    assert final_read.basis.captured_head == continued.commit.after
+    assert final_read.basis.projected_through == final_read.basis.captured_head
+    assert [
+        (item["id"], item["observer"], item["payload"])
+        for item in final_read.items
+    ] == [
+        ("alice-item", "alice", {"owner": "alice"}),
+        ("bob-item", "bob", {"owner": "bob"}),
+        (
+            "bob-after-relocation",
+            "bob",
+            {"owner": "bob", "phase": "relocated"},
+        ),
+    ]
+    final_verified = verify_target(relocated)
+    assert final_verified.captured_head == continued.commit.after
+    assert final_verified.verified_through == final_read.basis.captured_head

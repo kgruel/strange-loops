@@ -1,0 +1,2551 @@
+You are the Fable 5.1 LOW adversarial follow-up reviewer for the two-observer public SDK workload conformance slice, baseline a36487dc. The prior static review returned REVISE because wrong-namespace CredentialBindingRefused could be a provider failure rather than captured key authorization refusal. Root independently reproduced that false positive. This follow-up is bounded: determine whether the final test corrects that blocker and whether documentation accurately limits its claims. Test now proves distinct alternate public key, successful public resolve, exact reason/full request/key evidence/successor use_position, plus positive ordinal progress and lineage continuity; docs clarify Alice case alias is admission-only alongside independent public resolution. No production files changed. Full SDK 579 and architecture101 passed before these assertion-only refinements; final focused13 and Ruff passed afterward. The supplied probe first confirms the old false positive; on the corrected test it permits first other-tenant preflight resolve then forces write-time resolver failure, which the test now rejects with AssertionError. Do not claim you executed tools/tests; this is static supplied evidence. Review the current source (not the archived pre-review test), prior finding/triage, and before/after probe. Return ACCEPT or REVISE, with concrete remaining blocker and counterexample if any; separate optional suggestions. Do not require unrelated SDK surface expansion, relative-path relocation, concurrent/multi-machine migration, production signature changes, C9 retirement or other deferred conformance workflows.
+
+===== libs/sdk/tests/test_arrival_mapped_workload.py =====
+1: """Public mapped-custody workflow conformance for an Arrival vertex."""
+2: 
+3: from __future__ import annotations
+4: 
+5: from pathlib import Path
+6: 
+7: import pytest
+8: from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
+9: 
+10: from sdk import (
+11:     AdmissionFailed,
+12:     ArrivalRefusal,
+13:     MappedCredentialProvider,
+14:     emit_batch,
+15:     emit_fact,
+16:     grant_observer,
+17:     init_vertex,
+18:     read_facts,
+19:     verify_target,
+20: )
+21: 
+22: 
+23: @pytest.fixture(autouse=True)
+24: def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+25:     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+26:     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+27:     monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
+28: 
+29: 
+30: def test_mapped_two_observer_workload_survives_descriptor_relocation(
+31:     tmp_path: Path,
+32: ) -> None:
+33:     custody_root = tmp_path / "custody"
+34:     namespace = "workload-tenant"
+35:     provider = MappedCredentialProvider(
+36:         custody_root,
+37:         namespace=namespace,
+38:         receipt_observer="alice",
+39:     )
+40:     alice = provider.create_binding("alice", token="create-alice")
+41:     bob = provider.create_binding("bob", token="create-bob")
+42:     alice_case_alias = provider.create_binding("Alice", token="create-uppercase-alice")
+43:     assert alice_case_alias.key_ref != alice.key_ref
+44:     assert alice_case_alias.public_key != alice.public_key
+45: 
+46:     vertex = tmp_path / "original" / "workload.vertex"
+47:     store = (tmp_path / "data" / "workload.arrival").resolve()
+48:     initialized = init_vertex(
+49:         vertex,
+50:         name="workload",
+51:         store_type="arrival",
+52:         location=store,
+53:         observer="alice",
+54:         credentials=provider,
+55:     )
+56:     assert initialized.lineage is not None
+57:     assert initialized.store is not None
+58:     assert initialized.store.location == str(store)
+59: 
+60:     before_grant = verify_target(vertex).verified_through
+61:     assert before_grant is not None
+62:     assert initialized.head == {
+63:         "lineage": before_grant.lineage,
+64:         "ordinal": before_grant.ordinal,
+65:         "record_hash": before_grant.record_hash,
+66:     }
+67:     with pytest.raises(AdmissionFailed) as ungranted:
+68:         emit_fact(
+69:             vertex,
+70:             "item",
+71:             {"owner": "bob", "phase": "before-grant"},
+72:             observer="bob",
+73:             origin="workload-test",
+74:             ts=9.0,
+75:             id_override="bob-before-grant",
+76:             credentials=provider,
+77:         )
+78:     assert ungranted.value.observer == "bob"
+79:     assert ungranted.value.kind == "item"
+80:     assert verify_target(vertex).verified_through == before_grant
+81: 
+82:     granted = grant_observer(
+83:         vertex,
+84:         "bob",
+85:         grants=["item"],
+86:         key=bob.public_key,
+87:         observer="alice",
+88:         credentials=provider,
+89:     )
+90:     assert granted.status == "applied"
+91:     assert granted.commit is not None
+92:     assert granted.commit.before == before_grant
+93:     assert granted.commit.after.lineage == granted.commit.before.lineage
+94:     assert granted.commit.after.ordinal > granted.commit.before.ordinal
+95: 
+96:     batch = emit_batch(
+97:         vertex,
+98:         [
+99:             {
+100:                 "id": "alice-item",
+101:                 "kind": "item",
+102:                 "payload": {"owner": "alice"},
+103:                 "observer": "alice",
+104:                 "origin": "workload-test",
+105:                 "ts": 10.0,
+106:             },
+107:             {
+108:                 "id": "bob-item",
+109:                 "kind": "item",
+110:                 "payload": {"owner": "bob"},
+111:                 "observer": "bob",
+112:                 "origin": "workload-test",
+113:                 "ts": 11.0,
+114:             },
+115:         ],
+116:         credentials=provider,
+117:     )
+118:     assert batch.atomic is True
+119:     assert batch.atomicity == "single-append"
+120:     assert batch.commit is not None
+121:     assert batch.commit.before == granted.commit.after
+122:     assert batch.commit.after.lineage == batch.commit.before.lineage
+123:     assert batch.commit.after.ordinal > batch.commit.before.ordinal
+124:     assert batch.captured_head == batch.commit.before
+125:     assert batch.witnessed is True
+126:     assert batch.projection == "synced"
+127:     assert [(item.id, item.observer, item.stored, item.signed) for item in batch.items] == [
+128:         ("alice-item", "alice", True, True),
+129:         ("bob-item", "bob", True, True),
+130:     ]
+131:     assert all(item.captured_head == batch.captured_head for item in batch.items)
+132:     assert all(item.commit is None for item in batch.items)
+133:     assert all(item.witnessed is True for item in batch.items)
+134:     assert all(item.projection == "synced" for item in batch.items)
+135: 
+136:     first_read = read_facts(vertex, limit=20, order="oldest")
+137:     assert first_read.basis is not None
+138:     assert first_read.basis.lineage == initialized.lineage
+139:     assert first_read.basis.captured_head == batch.commit.after
+140:     assert first_read.basis.projected_through == first_read.basis.captured_head
+141:     assert [
+142:         (item["id"], item["observer"], item["payload"])
+143:         for item in first_read.items
+144:     ] == [
+145:         ("alice-item", "alice", {"owner": "alice"}),
+146:         ("bob-item", "bob", {"owner": "bob"}),
+147:     ]
+148:     first_verified = verify_target(vertex)
+149:     assert first_verified.captured_head == batch.commit.after
+150:     assert first_verified.verified_through == first_read.basis.captured_head
+151:     assert first_verified.claims == ("grammar", "density", "lineage", "hash-chain")
+152:     assert "signature-authorship" in first_verified.excludes
+153: 
+154:     relocated = tmp_path / "relocated" / "renamed.vertex"
+155:     relocated.parent.mkdir()
+156:     original_declaration = vertex.read_bytes()
+157:     vertex.rename(relocated)
+158:     assert relocated.read_bytes() == original_declaration
+159: 
+160:     reopened = MappedCredentialProvider(
+161:         custody_root,
+162:         namespace=namespace,
+163:         receipt_observer="alice",
+164:     )
+165:     for observer, created in (("alice", alice), ("bob", bob)):
+166:         resolved = reopened.resolve(
+167:             CredentialRequest(
+168:                 namespace,
+169:                 observer,
+170:                 SigningDomain.FACT,
+171:                 CredentialPurpose.AUTHORSHIP,
+172:             )
+173:         )
+174:         assert resolved is not None
+175:         assert resolved.evidence.key_ref == created.key_ref
+176:         assert resolved.evidence.public_key == created.public_key
+177:     resolved_case_alias = reopened.resolve(
+178:         CredentialRequest(
+179:             namespace,
+180:             "Alice",
+181:             SigningDomain.FACT,
+182:             CredentialPurpose.AUTHORSHIP,
+183:         )
+184:     )
+185:     assert resolved_case_alias is not None
+186:     assert resolved_case_alias.evidence.key_ref == alice_case_alias.key_ref
+187:     assert resolved_case_alias.evidence.public_key == alice_case_alias.public_key
+188:     assert resolved_case_alias.evidence.key_ref != alice.key_ref
+189: 
+190:     relocated_verified = verify_target(relocated)
+191:     assert relocated_verified.verified_through == first_verified.verified_through
+192:     relocated_read = read_facts(relocated, limit=20, order="oldest")
+193:     assert relocated_read.basis == first_read.basis
+194:     assert relocated_read.items == first_read.items
+195:     assert relocated_read.store is not None
+196:     assert relocated_read.store.location == str(store)
+197: 
+198:     other_namespace = MappedCredentialProvider(
+199:         custody_root,
+200:         namespace="other-tenant",
+201:         receipt_observer="alice",
+202:     )
+203:     other_alice = other_namespace.create_binding(
+204:         "alice", token="create-other-tenant-alice"
+205:     )
+206:     assert other_alice.public_key != alice.public_key
+207:     other_resolved = other_namespace.resolve(
+208:         CredentialRequest(
+209:             "other-tenant",
+210:             "alice",
+211:             SigningDomain.FACT,
+212:             CredentialPurpose.AUTHORSHIP,
+213:         )
+214:     )
+215:     assert other_resolved is not None
+216:     assert other_resolved.evidence.key_ref == other_alice.key_ref
+217:     assert other_resolved.evidence.public_key == other_alice.public_key
+218:     with pytest.raises(ArrivalRefusal) as wrong_namespace:
+219:         emit_fact(
+220:             relocated,
+221:             "item",
+222:             {"owner": "alice", "phase": "wrong-namespace"},
+223:             observer="alice",
+224:             origin="workload-test",
+225:             ts=11.5,
+226:             id_override="alice-wrong-namespace",
+227:             credentials=other_namespace,
+228:         )
+229:     assert wrong_namespace.value.source_type == "CredentialBindingRefused"
+230:     credential_refusal = wrong_namespace.value.details["credential_binding"]
+231:     assert credential_refusal["reason"] == (
+232:         "resolved public key is not authorized at the captured position"
+233:     )
+234:     assert credential_refusal["request"] == {
+235:         "namespace": "other-tenant",
+236:         "observer": "alice",
+237:         "domain": "fact",
+238:         "purpose": "authorship",
+239:     }
+240:     assert credential_refusal["use_position"] == (
+241:         first_verified.verified_through.ordinal + 1
+242:     )
+243:     assert credential_refusal["binding"]["key_ref"] == other_alice.key_ref
+244:     assert credential_refusal["binding"]["public_key"] == other_alice.public_key
+245:     assert wrong_namespace.value.details["captured_head"] == {
+246:         "lineage": first_verified.verified_through.lineage,
+247:         "ordinal": first_verified.verified_through.ordinal,
+248:         "record_hash": first_verified.verified_through.record_hash,
+249:     }
+250:     assert verify_target(relocated).verified_through == first_verified.verified_through
+251: 
+252:     with pytest.raises(AdmissionFailed) as wrong_case:
+253:         emit_fact(
+254:             relocated,
+255:             "item",
+256:             {"owner": "Alice", "phase": "case-alias"},
+257:             observer="Alice",
+258:             origin="workload-test",
+259:             ts=11.75,
+260:             id_override="uppercase-alice",
+261:             credentials=reopened,
+262:         )
+263:     assert wrong_case.value.observer == "Alice"
+264:     assert wrong_case.value.kind == "item"
+265:     assert verify_target(relocated).verified_through == first_verified.verified_through
+266: 
+267:     continued = emit_fact(
+268:         relocated,
+269:         "item",
+270:         {"owner": "bob", "phase": "relocated"},
+271:         observer="bob",
+272:         origin="workload-test",
+273:         ts=12.0,
+274:         id_override="bob-after-relocation",
+275:         credentials=reopened,
+276:     )
+277:     assert continued.stored is True
+278:     assert continued.signed is True
+279:     assert continued.commit is not None
+280:     assert continued.commit.before == first_verified.verified_through
+281:     assert continued.commit.after.lineage == continued.commit.before.lineage
+282:     assert continued.commit.after.ordinal > continued.commit.before.ordinal
+283:     assert continued.witnessed is True
+284:     assert continued.projection == "synced"
+285: 
+286:     final_read = read_facts(relocated, limit=20, order="oldest")
+287:     assert final_read.basis is not None
+288:     assert final_read.basis.lineage == initialized.lineage
+289:     assert final_read.basis.captured_head == continued.commit.after
+290:     assert final_read.basis.projected_through == final_read.basis.captured_head
+291:     assert [
+292:         (item["id"], item["observer"], item["payload"])
+293:         for item in final_read.items
+294:     ] == [
+295:         ("alice-item", "alice", {"owner": "alice"}),
+296:         ("bob-item", "bob", {"owner": "bob"}),
+297:         (
+298:             "bob-after-relocation",
+299:             "bob",
+300:             {"owner": "bob", "phase": "relocated"},
+301:         ),
+302:     ]
+303:     final_verified = verify_target(relocated)
+304:     assert final_verified.captured_head == continued.commit.after
+305:     assert final_verified.verified_through == final_read.basis.captured_head
+
+===== libs/sdk/README.md =====
+1: # sdk — Loops Apex Composition Library
+2: 
+3: `sdk` is the headless composition layer uniting `engine`, `custody`, `lang`, `store`, `atoms`, and `sign` into unified, typed operations. It serves as the single foundation for presentation layers (`apps/loops`, TUI, external agents, Python scripts) without leaking presentation logic into the core substrate.
+4: 
+5: ---
+6: 
+7: ## Architectural Guarantees
+8: 
+9: - **Zero Presentation Logic**: Returns pure typed dataclasses; never formats terminal escape codes or parses CLI flags.
+10: - **Descriptor-First Arrival Reads**: An explicitly declared backend and instance role select the adapter; store locations remain opaque to the SDK.
+11: - **Visible Legacy Boundary**: Bare `.jsonl`/SQLite inputs remain transitional and every read result labels its path as `legacy` with `basis=None`.
+12: - **Witness-Axis Honesty**: Fact listing and pagination use append-order cursors (`WitnessPosition`) ensuring deterministic, non-lossy walks.
+13: - **Declared Admission & Attestation**: Fact emission enforces declared observer and kind admission policies, signing with operation-fresh custody keys.
+14: - **AST-Verified Ceremonies**: Declarative vertex modifications are verified against the language grammar and executed via transactional plan/apply ceremonies.
+15: 
+16: ---
+17: 
+18: ## API Reference
+19: 
+20: ### 1. Target Resolution & Discovery
+21: 
+22: ```python
+23: from sdk import resolve_arrival_target, resolve_target, discover_targets, TargetInfo
+24: 
+25: # Supported Arrival target: the descriptor carries backend, opaque location,
+26: # optional lineage pin, and mandatory instance role.
+27: arrival = resolve_arrival_target("path/to/target.vertex")
+28: # -> ArrivalTarget(store=StoreDescriptorInfo(backend='file', location='...', role='replica'))
+29: 
+30: # Single target probe
+31: info = resolve_target("path/to/target.vertex")
+32: # -> TargetInfo(target_type='vertex', canonical_mode='sqlite', canonical_path=..., index_path=..., exists=True, ...)
+33: 
+34: # Multi-target workspace discovery
+35: targets = discover_targets(".", recursive=True)
+36: ```
+37: 
+38: - **`resolve_target(target: Path | str) -> TargetInfo`**:
+39:   Transitional filesystem probe for legacy targets. Raises `TargetNotFound` or `TargetUnsupported`.
+40: - **`resolve_arrival_target(target: Path | str) -> ArrivalTarget`**:
+41:   Parses an explicit vertex descriptor without probing or normalizing its backend-owned location. It refuses suffix inference and an omitted instance role.
+42: - **`discover_targets(root_path=".", *, recursive=True, include_bare=True) -> list[TargetInfo]`**:
+43:   Discovers all Loops vertices and bare stores in a directory tree.
+44: 
+45: ---
+46: 
+47: ### 2. Read Operations
+48: 
+49: ```python
+50: from sdk import (
+51:     read_summary,
+52:     read_facts,
+53:     read_state,
+54:     read_ticks,
+55:     read_fact_by_id,
+56:     search_facts,
+57:     resolve_entity,
+58:     read_timeline,
+59:     sync_target,
+60: )
+61: 
+62: # Target statistical summary & kind inventory
+63: summary = read_summary("target.vertex")
+64: # -> ReadSummary(read_path='arrival', basis=ReadBasis(...), store=StoreDescriptorInfo(...), ...)
+65: 
+66: # Bounded, cursor-bearing fact pagination
+67: page = read_facts("target.vertex", limit=10, order="newest")
+68: # -> FactPageResult(items=[...], next_cursor=..., truncated=True, order='newest')
+69: 
+70: # Arrival continuations are process-local capabilities. Pass next_cursor back
+71: # to read_facts() directly; as_dict() reports has_continuation=True and redacts
+72: # the engine value instead of emitting an unprotected wire token.
+73: 
+74: # Folded vertex state
+75: state = read_state("target.vertex", kind="note")
+76: # -> FoldStateResult(vertex_name='target', sections={'note': {'count': 10, 'items': [...]}})
+77: 
+78: # Full-text search across observation payloads
+79: search_res = search_facts("target.vertex", query="refactor auth", limit=10)
+80: # -> SearchResult(query='refactor auth', matches=[...], total_matches=1)
+81: 
+82: # Domain entity fold-key resolution
+83: fact_id = resolve_entity("target.vertex", kind="task", key="task_id", value="T-100")
+84: 
+85: # Interleaved chronological timeline (facts + ticks)
+86: timeline = read_timeline("target.vertex", limit=50)
+87: 
+88: # Explicit projection synchronization. Arrival sync first attests custody and
+89: # catches a missing or behind projection up through the captured head.
+90: sync_res = sync_target("target.vertex")
+91: # -> SyncResult(read_path='arrival', captured_head=..., target=...,
+92: #               projected_before=..., projected_after=..., changed=True, ...)
+93: 
+94: # Tick records
+95: ticks = read_ticks("target.vertex", name="default")
+96: for tick in ticks.items:
+97:     print(tick["name"])
+98: 
+99: # Fact lookup by full ID or prefix
+100: lookup = read_fact_by_id("target.vertex", "01M01...")
+101: fact = lookup.fact
+102: ```
+103: 
+104: `read_summary`, `read_facts`, `read_state`, `read_ticks`, and
+105: `read_fact_by_id` always return typed result models. Descriptor-first results
+106: carry the custody head and represented projection prefix in `basis`; legacy
+107: results carry `read_path="legacy"` and `basis=None`. Descriptor reads require a
+108: current projection and never materialize, repair, or catch it up. Search,
+109: entity resolution, and timelines carry the same captured basis. Aggregate
+110: state, summary and timeline results retain per-occurrence member bases rather
+111: than inventing one shared head. `sync_target` is the
+112: explicit maintenance boundary: it may catch up a missing or behind Arrival
+113: projection, while inconsistent existing state and rebuild requests refuse.
+114: 
+115: Arrival read operations, including `resolve_entity`, `read_timeline`, and
+116: `inspect_declaration`, accept an optional keyword-only `registry=` for custom
+117: `engine.arrival_registry.BackendRegistry` instances. Omission selects the
+118: built-in backends. A supplied registry handles every supported root and member
+119: Arrival open; unknown backends refuse without fallback, and non-file locations reach
+120: the named adapter unchanged. Timeline reuses its captured root when the
+121: effective declaration selects aggregation. Entity resolution and declaration
+122: inspection retain their current Arrival aggregate restrictions.
+123: Legacy targets keep their existing behavior and do not consult the registry.
+124: 
+125: `export_target("target.vertex", "snapshot.jsonl")` writes an exact captured
+126: wire prefix and returns its manifest, selected/captured heads and byte count.
+127: It refuses to replace an existing output. A late source failure publishes no
+128: partial artifact; a directory-sync failure after publication raises
+129: `ExportPublicationError` with `published=True` and the complete artifact's
+130: identity. Export requires no current query projection. Import and replication
+131: are still pending their explicit initialization/restoration boundary.
+132: 
+133: ---
+134: 
+135: ### 3. Fact Emission
+136: 
+137: ```python
+138: from sdk import BatchEmitResult, EmitReceipt, emit_batch, emit_fact, preview_emission
+139: from atoms import Fact
+140: 
+141: # Emitting by kind and payload
+142: receipt = emit_fact(
+143:     "target.vertex",
+144:     kind_or_fact="note",
+145:     payload={"title": "Meeting Notes", "body": "Discussed SDK API"},
+146:     observer="alice",
+147: )
+148: # Descriptor-first Arrival receipts carry the captured head, durable Commit,
+149: # witness state, and post-commit projection status.
+150: 
+151: # Or preflight dry-run simulation
+152: preview = preview_emission("target.vertex", "note", {"title": "Test"}, observer="alice")
+153: 
+154: # A descriptor-first batch is planned from one snapshot and uses one append.
+155: batch = emit_batch(
+156:     "target.vertex",
+157:     [fact, ("note", {"title": "Batch item"})],
+158:     observer="alice",
+159: )
+160: for receipt in batch.items:
+161:     print(receipt.id, receipt.stored)
+162: print(batch.commit, batch.atomicity, batch.projection)
+163: ```
+164: 
+165: - **`emit_fact(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, id_override=None, credentials=None, admit_undeclared=False, dry_run=False, registry=None) -> EmitReceipt`**:
+166:   Emits a fact (or `Fact` atom) under declared admission rules. Descriptor-first Arrival writes prepare from one CURRENT snapshot, append once against its captured full head, witness the commit, then explicitly synchronize the projection. Bypassing strict kind admission requires `admit_undeclared=True`. Deterministic IDs can be specified with `id_override`. `dry_run=True` simulates emission without storage.
+167: - **`preview_emission(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, admit_undeclared=False, credentials=None, registry=None) -> EmitPreviewResult`**:
+168:   Simulates emission against declared policies, checking fold key requirements without disk side effects. Arrival policy and fold metadata come from the same bounded effective declaration used for planning; a missing projection refuses without materializing it.
+169: - **`emit_batch(target, facts, *, observer=None, origin="", credentials=None, admit_undeclared=False, registry=None) -> BatchEmitResult`**:
+170:   Normalizes every item before resolving the target. A descriptor-first Arrival batch derives all per-item admission decisions from one current snapshot, appends the packed records under one head comparison, witnesses one shared commit, and explicitly synchronizes the projection. Each mapping item may set its own boolean `admit_undeclared`; duplicate receipts retain `stored=False`. Empty input is an explicit zero-write result. Legacy targets return the same wrapper with `atomic=False`, `atomicity="legacy-sequential"`, and no invented shared commit; `LegacyBatchPartialFailure` retains receipts if that sequential loop stops after an observable prefix.
+171: 
+172: `CustodyCredentialProvider()` and `CustodyCredentialProvider(key_dir=None)` use
+173: the existing custody resolver. A non-`None` `key_dir` now raises
+174: `SdkValueError` during construction because directory overrides were previously
+175: accepted but ignored. This applies before either Arrival or legacy operations
+176: can use the provider. Callers that need another credential source can continue
+177: to supply a custom `CredentialProvider`; that interface does not itself create
+178: an observer mapping or register public keys.
+179: 
+180: For an explicit persisted namespace, use `MappedCredentialProvider` with an
+181: Arrival target. Prepare the binding separately from initializing the store:
+182: 
+183: ```python
+184: from pathlib import Path
+185: from sdk import MappedCredentialProvider, init_vertex, emit_fact
+186: 
+187: credentials = MappedCredentialProvider(
+188:     Path("/absolute/path/to/private-custody"),
+189:     namespace="personal",
+190:     receipt_observer="alice",  # explicit local receipt-signing selection
+191: )
+192: binding = credentials.create_binding("alice", token="bootstrap-alice-1")
+193: init_vertex(
+194:     Path("observations.vertex"), store_type="arrival", observer="alice",
+195:     credentials=credentials,
+196: )
+197: emit_fact(
+198:     Path("observations.vertex"), "item", {"value": 1},
+199:     observer="alice", credentials=credentials,
+200: )
+201: ```
+202: 
+203: Mapped selection uses the exact namespace and observer, independently of the
+204: vertex filename or lineage. The engine checks author keys against verified
+205: history through captured H, for use after H, and verifies each signature in its
+206: own domain. Receipt signing uses the explicitly selected local observer and
+207: the effective declaration's current receipt-key policy; the unsigned outer tick
+208: still names the physical genesis custodian. Omitting `receipt_observer` permits
+209: unsigned ticks before the signed-tick era, and refuses a required signed tick.
+210: A missing author binding may remain unsigned where the existing policy allows;
+211: a contradictory or unauthorized binding refuses before append.
+212: 
+213: Mapped initialization only loads a pre-created binding. For another observer,
+214: prepare its binding and pass `key=binding.public_key` to `grant_observer` with
+215: the existing author's credentials. Mapped `grant_observer(key=None)` refuses
+216: before creating keys. Recovery of an existing Arrival initialization intent
+217: signs nothing and does not require private custody to remain available.
+218: Mapped providers are supported on Arrival targets; legacy writers explicitly
+219: refuse them. The default `CustodyCredentialProvider` remains unchanged.
+220: 
+221: The runnable [two-observer mapped workload](tests/test_arrival_mapped_workload.py)
+222: shows the complete public lifecycle: create Alice and Bob bindings under one
+223: persisted provider root and exact namespace; initialize with Alice; grant Bob
+224: using Bob's pre-created public key; then emit with both authors. For a locator
+225: move that keeps the same physical file-backed store, initialize with an
+226: **absolute** `location` and move only the `.vertex` file while retaining its
+227: store clause, lineage, and role. Recreate `MappedCredentialProvider` with the
+228: same provider root, namespace, and receipt observer before continuing work.
+229: The absolute store location keeps the same store residence, while
+230: mapped key selection comes only from the provider namespace and exact observer
+231: label; neither the vertex filename nor its new directory chooses a key.
+232: 
+233: After relocation, `verify_target(relocated_vertex)` provides a `Full`
+234: verification of the captured prefix's grammar, dense ordinals, lineage, and
+235: record-hash chain. It does not establish projection agreement, signature
+236: authorship, key trust, or the identity of an observer across lineages. The
+237: mapped workload exercises public writes with captured authorization; the
+238: [mapped signing tests](tests/test_arrival_mapped_credentials.py) separately
+239: verify domain-specific signatures and key-history behavior.
+240: 
+241: `import_legacy(vertex_path, observer, token=...)` explicitly copies a verified
+242: legacy key into managed storage without changing the original. It preserves
+243: flat/nested ambiguity and alias refusals. After import, locator moves do not
+244: change mapped selection. No read, preview, or signer load imports or creates a
+245: binding. `bind_existing_ref(observer, key_ref, expected_public_key, token=...)`
+246: permits deliberate reuse of a completed managed key in another namespace;
+247: equal observer labels alone never select another namespace's key.
+248: See [custody binding recovery](../custody/README.md#explicit-mapped-bindings)
+249: for interruption handling and filesystem scope.
+250: 
+251: Supported Arrival execution reserves the vertex name from its loop names.
+252: Every exact name collision refuses, including passive loops, reset/carry loops,
+253: and count- or event-triggered boundaries. The runtime also adds an implicit
+254: `cite` loop, so a vertex named `cite` cannot execute under this restriction.
+255: Runtime capture checks the historized effective declaration and expanded
+256: template loop names before hydration and planning; editing only the local cache
+257: cannot bypass it. New and proposed declarations check their declared loops and
+258: the implicit `cite` loop. The SDK initializer also refuses the name `item`,
+259: because its scaffold declares an `item` loop, before creating custody keys.
+260: External template sources are expanded and checked at runtime; declaration
+261: editing does not load them solely to enforce this rule.
+262: 
+263: This is an Arrival execution compatibility restriction. Existing histories
+264: remain available through evidence reads, declaration inspection and export.
+265: A collision-free declaration can be appended to correct an ambiguous current
+266: declaration; prior facts and ticks retain their original names and bytes.
+267: This does not establish which role an already-recorded ambiguous tick had;
+268: historical boundary continuity remains a separate limitation.
+269: Legacy runtime behavior and the wire format retain their existing rules.
+270: 
+271: ---
+272: 
+273: ### 4. Arrival Source Execution
+274: 
+275: ```python
+276: from sdk import run_sources
+277: 
+278: result = await run_sources("target.vertex", observer="alice", force=False)
+279: for tier in result.tiers:
+280:     print(tier.outcome, tier.commit, tier.fact_ids, tier.tick_ids)
+281: ```
+282: 
+283: - **`await run_sources(target, *, observer, force=False, credentials=None, registry=None, collector_factory=None, dispatcher=None, evaluated_at=None) -> SourceRunResult`**:
+284:   Captures a CURRENT Arrival Authority before collection, fixes cadence and dependency tiers, and commits each collected tier with one exact-head batch append plus explicit projection synchronization. The lifecycle observer is always explicit. Existing custody keys are loaded when present; the operation never creates keys.
+285: 
+286:   A source error after yielding observations returns `status="error"` after its error lifecycle fact becomes durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
+287: 
+288:   Coordinator failures during ID allocation, lifecycle construction, or otherwise successful collector cleanup return an incomplete result with terminal category `collection-failed`. `terminal.details.collection` contains the current tier's basis, `custody="not-attempted"`, completed siblings, and paired partial observations from failed or cancelled siblings. Incomplete attempts have no lifecycle fact; prior tiers keep their commits. These partial observations live in terminal evidence, not `known_uncommitted`, which describes a fully collected tier. Owned iterators and distinct iterable owners receive `aclose()` when available; caller cancellation propagates after sibling cleanup. Closing a collector does not undo its external effects or guarantee subprocess termination.
+289: 
+290: ### 5. Declaration, Scaffolding & Ceremonies
+291: 
+292: ```python
+293: from sdk import (
+294:     init_vertex,
+295:     inspect_declaration,
+296:     add_kind,
+297:     edit_kind,
+298:     remove_kind,
+299:     grant_observer,
+300:     revoke_observer,
+301:     plan_kind_mutation,
+302:     recover_ceremony,
+303: )
+304: from lang.ast import LoopDef, FoldDecl, FoldCollect
+305: 
+306: # Scaffold a new vertex declaration
+307: init_res = init_vertex("target.vertex", name="my_app", store_type="sqlite")
+308: 
+309: # Deep structural inspection & syntax validation
+310: info = inspect_declaration("target.vertex")
+311: 
+312: # Plan declaration update (dry-run diff)
+313: plan = plan_kind_mutation("target.vertex", "add", "todo")
+314: 
+315: # Add new loop kind with default 'items collect 100'
+316: result = add_kind("target.vertex", "todo", observer="admin")
+317: 
+318: # Edit existing kind definition
+319: result = edit_kind(
+320:     "target.vertex",
+321:     "note",
+322:     LoopDef(folds=(FoldDecl("items", FoldCollect(50)),)),
+323:     observer="admin",
+324: )
+325: 
+326: # Remove kind definition
+327: result = remove_kind("target.vertex", "deprecated_kind", observer="admin")
+328: 
+329: # Manage observer admission grants
+330: grant_observer("target.vertex", "alice", grants=["todo", "note"], observer="admin")
+331: revoke_observer("target.vertex", "alice", observer="admin")
+332: 
+333: # Recover interrupted ceremony
+334: recovery = recover_ceremony("target.vertex.intent")
+335: ```
+336: 
+337: ---
+338: 
+339: ## Result Models
+340: 
+341: All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
+342: 
+343: Arrival fact and tick items include receipt-order coordinates. Legacy items
+344: retain their established serialized fields; use `read_path`, `basis`, and
+345: `store` on the enclosing result to identify the source and read boundary.
+346: 
+347: | Model | Schema | Purpose |
+348: | :--- | :--- | :--- |
+349: | **`ArrivalTarget`** | `loops.sdk/arrival-target/v1` | Vertex path plus its serializable explicit store descriptor. |
+350: | **`InitVertexResult`** | `loops.sdk/init-vertex/v1` | Outcome of vertex scaffolding operation. |
+351: | **`DeclarationInspectionResult`** | `loops.sdk/declaration-inspection/v1` | Deep structural inspection of a `.vertex` file. |
+352: | **`DeclarationPlanResult`** | `loops.sdk/declaration-plan/v1` | Dry-run preview of a proposed declaration update. |
+353: | **`ReadSummary`** | `loops.sdk/read-summary/v2` | Basis-bearing inventory of facts, ticks, and kinds. |
+354: | **`FactPageResult`** | `loops.sdk/facts-page/v2` | Basis-bearing bounded page with continuation metadata. |
+355: | **`FactLookupResult`** | `loops.sdk/fact-lookup/v1` | Basis-bearing exact/prefix lookup; a miss retains its basis. |
+356: | **`TickReadResult`** | `loops.sdk/tick-read/v1` | Basis-bearing chronological tick records. |
+357: | **`FoldStateResult`** | `loops.sdk/fold-state/v2` | State folded from facts and declarations in one bounded snapshot. |
+358: | **`SearchResult`** | `loops.sdk/search-result/v1` | Full-text search matches, snippets, and rankings. |
+359: | **`TimelineResult`** | `loops.sdk/timeline-result/v1` | Interleaved chronological stream of facts and tick seals. |
+360: | **`SyncResult`** | `loops.sdk/sync-result/v2` | Legacy index status or Arrival captured/target/before/after projection basis. |
+361: | **`EmitReceipt`** | `loops.sdk/emit-receipt/v2` | Legacy receipt fields plus Arrival store, captured head, commit, witness, and projection outcome. |
+362: | **`SourceRunResult`** | `loops.sdk/source-run/v1` | Captured cadence, collected bodies, tier commits, and interrupted projection/dispatch evidence. |
+363: | **`EmitPreviewResult`** | `loops.sdk/emit-preview/v2` | Preflight admission/fold result with descriptor and captured-head provenance. |
+364: | **`KindMutationResult`** | `loops.sdk/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |
+365: 
+366: ---
+367: 
+368: ## Exception Taxonomy
+369: 
+370: ```mermaid
+371: graph TD
+372:     SdkError --> TargetError
+373:     TargetError --> TargetNotFound
+374:     TargetError --> TargetUnsupported
+375:     TargetError --> TargetNotWritable
+376:     SdkError --> AdmissionFailed
+377:     SdkError --> EmissionFailed
+378:     SdkError --> SdkValueError
+379:     SdkValueError --> InvalidEmissionRequest
+380:     EmissionFailed --> InvalidEmissionRequest
+381:     EmissionFailed --> CommittedEmissionError
+382:     SdkError --> CeremonyFailed
+383: ```
+384: 
+385: - **`SdkError`**: Base class for all high-level SDK exceptions.
+386: - **`SdkValueError`**: Base class for SDK parameter and validation errors (inherits from `ValueError`).
+387: - **`TargetNotFound`**: Target path does not exist on disk.
+388: - **`TargetUnsupported`**: Path exists but is not a recognized Loops artifact.
+389: - **`TargetNotWritable`**: Target or derived index cannot be written to.
+390: - **`AdmissionFailed`**: Declared admission policy (strict kinds or observer grants) refused the operation.
+391: - **`EmissionFailed`**: Fact emission failed prior to committing.
+392: - **`InvalidEmissionRequest`**: Invalid emission parameters (missing required observer or invalid shape).
+393: - **`CommittedEmissionError`**: Fact was written to storage, but a post-commit task failed (carries `.fact_id`).
+394: - **`CeremonyFailed`**: Declaration update AST generation or ceremony apply was refused.
+395: 
+396: Descriptor-first reads also surface engine contract refusals (for example, a
+397: missing or behind projection or an invalid continuation) and declaration
+398: resolution errors. These keep the adapter's evidence-bearing refusal intact.
+399: 
+400: Arrival `sync_target` and `sync_search_index` normalize maintenance failures as
+401: `ProjectionOutcomeUnknown`. Their optional `details.evidence` object uses
+402: `loops.sdk/evidence/v1`: it records the coordinator phase, resource effects,
+403: available head/coverage coordinates, and up to two explicit causal exceptions.
+404: Search failures before the build call report derived state as
+405: `not-entered`/`not-attempted`; failures after entering build or projection
+406: catch-up report `entered`/`unknown`. A nested refusal does not prove that an
+407: adapter left derived state unchanged. Existing error outcomes, source types,
+408: and operation-specific `details.phase` remain intact. Cause messages are capped
+409: at 512 characters; record bodies and implicit exception context are excluded.
+410: Declaration preparation refusals carry preparation evidence without claiming a
+411: custody append. Cancellation and process-control exceptions propagate unchanged.
+412: 
+413: ## Restore an existing exact copy
+414: 
+415: ```python
+416: from sdk import restore_forward
+417: 
+418: restored = restore_forward("source.vertex", "replica.vertex")
+419: print(restored.before, restored.after)
+420: ```
+421: 
+422: Both vertices require explicit Arrival descriptors. The receiver must already
+423: be an exact prefix of the verified source. Restoration appends the complete
+424: missing suffix atomically through at least the witnessed head, preserving its
+425: declared role. `restored.commit` is an actual receipt, or `None` when the exact
+426: selected head is already present. Projection catch-up remains explicit.
+427: 
+428: Ordinary opening still refuses rollback. `CommittedOutcomeUnknown` retains
+429: before/target heads when a replication receipt was lost;
+430: `CommittedIncomplete` retains the commit if later witnessing or comparison
+431: failed. Empty receiver installation is a separate, pending import operation.
+
+===== docs/scratch/arrival-break/sdk-conformance-two-observer-2026-09-06.md =====
+1: # Public SDK conformance: two observers and descriptor relocation
+2: 
+3: Status: implemented and natively validated; Fable-low test coverage finding
+4: corrected, focused follow-up review pending on
+5: `arrival/finish`, based on
+6: `a36487dc`. This is the first workload-conformance slice preceding C9's
+7: SDK/minimal-CLI transition and deliberate legacy retirement.
+8: 
+9: ## Contract under test
+10: 
+11: An application prepares two explicit mapped bindings, initializes Arrival with
+12: one observer, introduces the other's public key, and emits a mixed-author batch.
+13: The write receipts, public fact reads and prefix
+14: verification must describe the same lineage and accepted history. Observer
+15: labels select the corresponding public authorization; the explicit local
+16: namespace selects custody material independently of the descriptor filename.
+17: 
+18: Moving and renaming the descriptor while retaining an absolute store location
+19: must preserve the selected residence, lineage, history and mapped keys. A newly
+20: constructed provider must support a subsequent authorized write from the moved
+21: descriptor. This does not imply that moving a descriptor relocates its store,
+22: rewrites relative locations or adopts another lineage.
+23: 
+24: `verify_target` verifies grammar, dense ordinals, lineage and the hash chain
+25: through its returned prefix. It does not establish signature validity, key
+26: trust or projection agreement. The workflow compares read and write evidence
+27: explicitly; existing mapped-signing tests separately cover domain-separated
+28: signatures and the engine's captured authorization checks.
+29: 
+30: ## Scope and evidence
+31: 
+32: Sol owns the executable SDK workflow, Terra independently audits relocation and
+33: updates public guidance, Luna validates coverage and package behavior, and root
+34: integrates the result and triages the frozen Fable 5.1 LOW review. Every test
+35: process isolates XDG state/config and `LOOPS_HOME`; all stores and keys are
+36: disposable fixtures. No live migration or legacy retirement is part of this
+37: slice.
+38: 
+39: The executable
+40: [workload](../../../libs/sdk/tests/test_arrival_mapped_workload.py)
+41: chains initialization, grant, batch and final-write heads. It checks current
+42: projection evidence against captured custody, exact returned authors/payloads,
+43: and the unchanged history and persisted key references after descriptor
+44: relocation. Batch receipts share the enclosing result's captured head, witness
+45: and projection evidence; the shared commit belongs to the batch result.
+46: 
+47: Three refusal controls exercise the same lifecycle: Bob's binding before his
+48: grant, another namespace's Alice key, and an independently bound `Alice` label
+49: that was never granted. Refusals retain the available typed evidence and leave
+50: the verified head unchanged. A final successful write and exact fact listing
+51: also check that those attempted facts never entered the query result.
+52: The `Alice` control observes declaration admission before credential lookup;
+53: a separate public resolution checks its case-distinct persisted key reference.
+54: 
+55: No production defect has been found by this pass. The changes are executable
+56: conformance coverage and public SDK guidance.
+57: 
+58: ## Validation and review
+59: 
+60: - Final full SDK suite: **579 passed**, 20.88 seconds.
+61: - Architecture suite: **101 passed**, 5.49 seconds.
+62: - Existing mapped-credential tests plus the new workload: **13 passed**.
+63: - Scoped Ruff and maintained-source whitespace checks: passed.
+64: 
+65: The workload uses public SDK operations and the public credential-request
+66: types. It opens no engine ledger or private custody file directly. A descriptor
+67: rename and byte comparison express the caller's relocation, while custody
+68: preparation remains explicit. This bounded flow exercises fact reads and prefix
+69: verification, not every SDK read surface or concurrent/multi-machine relocation.
+70: Existing domain-signature tests supply complementary coverage, rather than a
+71: claim that `Full` cryptographically authenticates authorship.
+72: 
+73: The initial [Fable-low review](reviews/sdk-conformance-two-observer-final-2026-09-06/final-findings.md)
+74: and [primary triage](reviews/sdk-conformance-two-observer-final-2026-09-06/primary-triage.md)
+75: returned **REVISE**: the wrong-namespace assertion could accept a provider-load
+76: failure without reaching captured authorization. Root reproduced the false
+77: positive by replacing that namespace's resolver with an unconditional failure.
+78: The correction asserts the specific authorization reason and request and a
+79: distinct alternative public key. It also makes ordinal advancement explicit.
+80: Focused correction validation: **13 passed** /1.09s and scoped Ruff passed.
+81: The original test accepts the broken-resolver probe; the corrected test rejects
+82: it even when a preflight resolution succeeds before the injected write-time
+83: failure. Only test assertions changed after the full suites. Focused follow-up
+84: review is pending.
+85: 
+86: Final full reruns confirmed SDK **579 passed** /17.53s and architecture
+87: **101 passed** /6.02s before the review correction. The first review packet
+88: contains the earlier full measurements above; supplemental rerun logs are
+89: archived separately. No production files changed. No source or test change is
+90: committed or pushed by this slice.
+91: 
+92: ## Next bounded workflows
+93: 
+94: 1. Interrupt a declaration edit, recover, inspect, and continue writing.
+95: 2. Run sources with partial failure, inspect persisted tiers, and identify what
+96:    can safely resume.
+97: 3. Export a captured prefix, restore forward, verify, explicitly sync, and read.
+98: 
+99: Maintenance/transfer completion, adoption and C9 retirement remain separate
+100: roadmap work; passing this workflow does not close them.
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/final-findings.md =====
+1: # final — Fable review
+2: 
+3: Effort: low. Finished: 2026-09-07T00:38:14.839727+00:00.
+4: Packet SHA-256: `48dd3dfa74f8f5bb2d2aec2ae3590719928aa98200dc62fa1c8fc63037d2d59d`.
+5: 
+6: Static reviewer output; findings still require primary triage.
+7: 
+8: **Verdict: REVISE** (one small blocker; everything else optional).
+9: 
+10: **Blocker**
+11: 
+12: - **Wrong-namespace control can pass without exercising authorization.** `libs/sdk/tests/test_arrival_mapped_workload.py:198-215` asserts only `source_type == "CredentialBindingRefused"` and `details["captured_head"]`. Per `libs/engine/src/engine/credentials.py:165-181`, any resolver exception (unreadable custody root, malformed slot, broken `other-tenant` binding) is also wrapped as `CredentialBindingRefused` with the same captured head, so the test passes even if the other-tenant key was never resolved or compared. Counterexample: make `other_namespace.create_binding` write an unreadable slot so `resolve` raises; the test still passes. Fix: also assert `details["credential_binding"]["reason"] == "resolved public key is not authorized at the captured position"` and `details["credential_binding"]["request"] == {"namespace": "other-tenant", "observer": "alice", ...}`, and that the created other-tenant public key differs from `alice.public_key`. Evidence is already emitted by `errors.py:172-207`; nothing in production needs to change.
+13: 
+14: **Optional improvements**
+15: 
+16: - **Case-alias control is admission-only.** `Alice` is undeclared in the vertex, so `AdmissionFailed` is raised before any binding lookup (lines 217-230). It does not show that the `Alice` binding is selected independently of `alice` during a write. The doc wording is accurate, but "three refusal controls exercise the same lifecycle" overstates what this one touches. Either say so in the doc, or grant `Alice` with the alias key and assert a write succeeds with `signed is True`.
+17: - **Ordinal progression is not asserted.** Heads chain by equality only. Adding `after.ordinal > before.ordinal` per commit (grant, batch, continued) and equal lineage would catch an idempotent no-op commit whose `after == before`.
+18: - **No stray-store check after relocation.** Lineage pinning at `arrival_registry.py:540-554` means a freshly minted store would refuse, so this is covered indirectly, but an explicit `not (tmp_path / "relocated" / ".loops").exists()` makes the "absolute location keeps residence" claim direct.
+19: 
+20: **Existing API limitations, not slice failures**
+21: 
+22: - `emit_fact` Arrival preparation refusals surface as plain `AdmissionFailed` without `details` or captured head (`emit.py:485-492`), unlike the batch path's `AdmissionRefusal`. The doc's "available typed evidence" wording is correct; just note the asymmetry.
+23: - `Full` verification excludes signatures/trust/projection by contract; the workload correctly compensates with exact read listings and the separate domain-signature tests.
+24: 
+25: **Claims checked and consistent**: head chaining across init, grant, batch, read, verify, relocation, and final write; batch receipts sharing captured head with `commit is None`; absolute store location preserved via `initialized.store.location` and `relocated_read.store.location`; fresh provider used for the post-move write; 13-test count matches 12 existing plus 1 new; README link path resolves from `libs/sdk/`.
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/primary-triage.md =====
+1: # Primary triage: two-observer conformance
+2: 
+3: Fable 5.1 LOW: **REVISE**. Primary: **REVISE**, correction in progress.
+4: Packet SHA-256: `48dd3dfa74f8f5bb2d2aec2ae3590719928aa98200dc62fa1c8fc63037d2d59d`.
+5: The reviewer performed static analysis; native test results came from the team.
+6: 
+7: ## Accepted blocker
+8: 
+9: The wrong-namespace assertion accepts any `CredentialBindingRefused` carrying
+10: the captured head. Root independently replaced the other namespace's resolver
+11: with a function that always raises before resolving a key: the frozen workflow
+12: still passed. That is a conformance false positive, not a production failure.
+13: The correction must identify the specific captured-authorization refusal and
+14: the complete public request, and establish that the alternative binding carries
+15: a distinct public key.
+16: 
+17: ## Optional findings
+18: 
+19: - Case-distinct `Alice` is refused by declaration admission before signer
+20:   selection. The workload also resolves its distinct persisted binding directly.
+21:   Clarify those two observations in the report; another granted author workflow
+22:   is unnecessary for this bounded slice.
+23: - Assert each accepted write advances the ordinal without changing lineage.
+24:   This makes the transition claim explicit with little additional test cost.
+25: - Do not add an assertion about a `.loops` directory at the moved descriptor:
+26:   that introduces private file-layout assumptions into a public application
+27:   test. Existing store descriptor identity and exact head/read equality cover
+28:   the specified unchanged absolute residence.
+29: - The individual admission error's smaller evidence surface is existing API
+30:   behavior. The report deliberately says available typed evidence; no new error
+31:   API is needed here.
+32: 
+33: Frozen initial review evidence is retained. Correction validation and focused
+34: follow-up disposition will be linked when complete.
+
+===== libs/engine/src/engine/credentials.py =====
+1: """Operation-fresh signing credentials for engine write coordinators.
+2: 
+3: This module contains values only.  It has no store, projection, or custody
+4: dependency, so supported Arrival coordinators can accept signer injection
+5: without importing the legacy SQLite handle implementation.
+6: """
+7: 
+8: from __future__ import annotations
+9: 
+10: from collections.abc import Callable
+11: from dataclasses import dataclass
+12: from enum import StrEnum
+13: from pathlib import Path
+14: from typing import Protocol
+15: 
+16: from .arrival_contract import Head
+17: 
+18: __all__ = [
+19:     "BindingResolver",
+20:     "CredentialBindingEvidence",
+21:     "CredentialBindingRefused",
+22:     "CapturedSigningContext",
+23:     "CredentialProvider",
+24:     "CredentialPurpose",
+25:     "CredentialRequest",
+26:     "ResolvedCredential",
+27:     "SignatureVerifier",
+28:     "SigningDomain",
+29:     "WriteCredentials",
+30: ]
+31: 
+32: 
+33: class SigningDomain(StrEnum):
+34:     """The protocol domain whose commitment is being signed."""
+35: 
+36:     FACT = "fact"
+37:     ARRIVAL = "arrival"
+38:     TICK = "tick"
+39: 
+40: 
+41: class CredentialPurpose(StrEnum):
+42:     """Why one operation needs a signing credential."""
+43: 
+44:     AUTHORSHIP = "authorship"
+45:     KEY_INTRODUCTION = "key-introduction"
+46:     RECEIPT = "receipt"
+47:     INITIALIZATION = "initialization"
+48: 
+49: 
+50: @dataclass(frozen=True)
+51: class CredentialRequest:
+52:     """An exact local namespace, protocol observer, domain and purpose."""
+53: 
+54:     namespace: str
+55:     observer: str
+56:     domain: SigningDomain
+57:     purpose: CredentialPurpose
+58: 
+59:     def __post_init__(self) -> None:
+60:         if not isinstance(self.namespace, str) or not self.namespace:
+61:             raise ValueError("credential namespace must be an exact nonempty string")
+62:         if not isinstance(self.observer, str) or not self.observer:
+63:             raise ValueError("credential observer must be an exact nonempty string")
+64:         if not isinstance(self.domain, SigningDomain):
+65:             raise ValueError("credential domain must be a SigningDomain")
+66:         if not isinstance(self.purpose, CredentialPurpose):
+67:             raise ValueError("credential purpose must be a CredentialPurpose")
+68: 
+69: 
+70: @dataclass(frozen=True)
+71: class CredentialBindingEvidence:
+72:     """Serializable public evidence for one resolved local binding."""
+73: 
+74:     request: CredentialRequest
+75:     key_ref: str
+76:     algorithm: str
+77:     public_key: str
+78:     provenance: str
+79: 
+80: 
+81: @dataclass(frozen=True)
+82: class ResolvedCredential:
+83:     """Public binding evidence paired with its private signing operation."""
+84: 
+85:     evidence: CredentialBindingEvidence
+86:     sign_digest: Callable[[str], str]
+87: 
+88: 
+89: BindingResolver = Callable[[CredentialRequest], ResolvedCredential | None]
+90: SignatureVerifier = Callable[[SigningDomain, str, str, str], bool]
+91: 
+92: 
+93: class CredentialBindingRefused(ValueError):
+94:     """A mapped binding could not safely authorize one planned signature."""
+95: 
+96:     def __init__(
+97:         self,
+98:         reason: str,
+99:         *,
+100:         request: CredentialRequest | None = None,
+101:         captured_head: Head | None = None,
+102:         use_position: int | None = None,
+103:         evidence: CredentialBindingEvidence | None = None,
+104:     ) -> None:
+105:         super().__init__(reason)
+106:         self.reason = reason
+107:         self.request = request
+108:         self.captured_head = captured_head
+109:         self.use_position = use_position
+110:         self.evidence = evidence
+111: 
+112: 
+113: @dataclass(frozen=True)
+114: class CapturedSigningContext:
+115:     """Immutable authorization evidence derived from one verified prefix."""
+116: 
+117:     captured_head: Head
+118:     author_keys: tuple[tuple[str, tuple[str, ...]], ...]
+119:     receipt_keys: tuple[str, ...]
+120: 
+121:     @property
+122:     def use_position(self) -> int:
+123:         return self.captured_head.ordinal + 1
+124: 
+125:     def keys_for_author(self, observer: str) -> tuple[str, ...]:
+126:         return next(
+127:             (keys for name, keys in self.author_keys if name == observer),
+128:             (),
+129:         )
+130: 
+131: 
+132: class CredentialResolutionSession:
+133:     """Operation-local mapped resolution with cross-domain binding coherence."""
+134: 
+135:     __slots__ = ("_bindings", "_evidence")
+136: 
+137:     def __init__(self) -> None:
+138:         self._bindings: dict[tuple[str, str], tuple[str, str]] = {}
+139:         self._evidence: list[CredentialBindingEvidence] = []
+140: 
+141:     @property
+142:     def evidence(self) -> tuple[CredentialBindingEvidence, ...]:
+143:         return tuple(self._evidence)
+144: 
+145:     def sign(
+146:         self,
+147:         credentials: WriteCredentials,
+148:         request: CredentialRequest,
+149:         digest: str,
+150:         *,
+151:         context: CapturedSigningContext,
+152:         authorized_keys: tuple[str, ...],
+153:         required: bool,
+154:     ) -> str | None:
+155:         """Resolve, authorize and independently verify one mapped signature."""
+156:         resolver = credentials.binding_resolver
+157:         verifier = credentials.signature_verifier
+158:         if not credentials.mapped or resolver is None or verifier is None:
+159:             raise CredentialBindingRefused(
+160:                 "mapped signing requires a complete credential configuration",
+161:                 request=request,
+162:                 captured_head=context.captured_head,
+163:                 use_position=context.use_position,
+164:             )
+165:         try:
+166:             resolved = resolver(request)
+167:         except CredentialBindingRefused as exc:
+168:             raise CredentialBindingRefused(
+169:                 exc.reason,
+170:                 request=request,
+171:                 captured_head=context.captured_head,
+172:                 use_position=context.use_position,
+173:                 evidence=exc.evidence,
+174:             ) from exc
+175:         except Exception as exc:
+176:             raise CredentialBindingRefused(
+177:                 "credential resolver failed",
+178:                 request=request,
+179:                 captured_head=context.captured_head,
+180:                 use_position=context.use_position,
+181:             ) from exc
+182:         if resolved is None:
+183:             if not required:
+184:                 return None
+185:             raise CredentialBindingRefused(
+186:                 "missing-required",
+187:                 request=request,
+188:                 captured_head=context.captured_head,
+189:                 use_position=context.use_position,
+190:             )
+191:         if not isinstance(resolved, ResolvedCredential):
+192:             raise CredentialBindingRefused(
+193:                 "resolver returned an invalid credential value",
+194:                 request=request,
+195:                 captured_head=context.captured_head,
+196:                 use_position=context.use_position,
+197:             )
+198:         evidence = resolved.evidence
+199:         if (
+200:             not isinstance(evidence, CredentialBindingEvidence)
+201:             or evidence.request != request
+202:             or not all(
+203:                 isinstance(value, str) and bool(value)
+204:                 for value in (
+205:                     evidence.key_ref,
+206:                     evidence.algorithm,
+207:                     evidence.public_key,
+208:                     evidence.provenance,
+209:                 )
+210:             )
+211:             or not callable(resolved.sign_digest)
+212:         ):
+213:             raise CredentialBindingRefused(
+214:                 "resolver returned contradictory binding evidence",
+215:                 request=request,
+216:                 captured_head=context.captured_head,
+217:                 use_position=context.use_position,
+218:                 evidence=evidence
+219:                 if isinstance(evidence, CredentialBindingEvidence)
+220:                 else None,
+221:             )
+222:         if evidence.public_key not in authorized_keys:
+223:             raise CredentialBindingRefused(
+224:                 "resolved public key is not authorized at the captured position",
+225:                 request=request,
+226:                 captured_head=context.captured_head,
+227:                 use_position=context.use_position,
+228:                 evidence=evidence,
+229:             )
+230:         binding_key = (request.namespace, request.observer)
+231:         binding_value = (evidence.key_ref, evidence.public_key)
+232:         prior = self._bindings.get(binding_key)
+233:         if prior is not None and prior != binding_value:
+234:             raise CredentialBindingRefused(
+235:                 "one mapped observer resolved to different bindings across domains",
+236:                 request=request,
+237:                 captured_head=context.captured_head,
+238:                 use_position=context.use_position,
+239:                 evidence=evidence,
+240:             )
+241:         try:
+242:             signature = resolved.sign_digest(digest)
+243:         except CredentialBindingRefused as exc:
+244:             raise CredentialBindingRefused(
+245:                 exc.reason,
+246:                 request=request,
+247:                 captured_head=context.captured_head,
+248:                 use_position=context.use_position,
+249:                 evidence=exc.evidence or evidence,
+250:             ) from exc
+251:         except Exception as exc:
+252:             raise CredentialBindingRefused(
+253:                 "credential signer failed",
+254:                 request=request,
+255:                 captured_head=context.captured_head,
+256:                 use_position=context.use_position,
+257:                 evidence=evidence,
+258:             ) from exc
+259:         if not isinstance(signature, str) or not signature:
+260:             raise CredentialBindingRefused(
+261:                 "mapped signer returned no signature",
+262:                 request=request,
+263:                 captured_head=context.captured_head,
+264:                 use_position=context.use_position,
+265:                 evidence=evidence,
+266:             )
+267:         try:
+268:             verified = verifier(
+269:                 request.domain, evidence.public_key, signature, digest
+270:             )
+271:         except CredentialBindingRefused as exc:
+272:             raise CredentialBindingRefused(
+273:                 exc.reason,
+274:                 request=request,
+275:                 captured_head=context.captured_head,
+276:                 use_position=context.use_position,
+277:                 evidence=exc.evidence or evidence,
+278:             ) from exc
+279:         except Exception as exc:
+280:             raise CredentialBindingRefused(
+281:                 "credential signature verifier failed",
+282:                 request=request,
+283:                 captured_head=context.captured_head,
+284:                 use_position=context.use_position,
+285:                 evidence=evidence,
+286:             ) from exc
+287:         if not verified:
+288:             raise CredentialBindingRefused(
+289:                 "mapped signature did not verify under its resolved public key",
+290:                 request=request,
+291:                 captured_head=context.captured_head,
+292:                 use_position=context.use_position,
+293:                 evidence=evidence,
+294:             )
+295:         self._bindings[binding_key] = binding_value
+296:         self._evidence.append(evidence)
+297:         return signature
+298: 
+299: 
+300: @dataclass(frozen=True)
+301: class WriteCredentials:
+302:     """The distinct domain-separated signers supplied for one write.
+303: 
+304:     ``tick_signer`` signs tick commitments, ``fact_signer`` signs inner fact
+305:     commitments, and ``arrival_signer`` signs outer Arrival envelopes.  A
+306:     missing signer means that axis is unsigned; one signer is never used as a
+307:     fallback for another.
+308:     """
+309: 
+310:     tick_signer: Callable[[str], str] | None = None
+311:     fact_signer: Callable[[str, str], str | None] | None = None
+312:     arrival_signer: Callable[[str, str], str | None] | None = None
+313:     binding_namespace: str | None = None
+314:     receipt_observer: str | None = None
+315:     binding_resolver: BindingResolver | None = None
+316:     signature_verifier: SignatureVerifier | None = None
+317: 
+318:     def __post_init__(self) -> None:
+319:         mapped_parts = (
+320:             self.binding_namespace,
+321:             self.binding_resolver,
+322:             self.signature_verifier,
+323:         )
+324:         mapped = all(part is not None for part in mapped_parts)
+325:         if any(part is not None for part in mapped_parts) and not mapped:
+326:             raise ValueError(
+327:                 "mapped credentials require namespace, resolver, and verifier together"
+328:             )
+329:         if self.receipt_observer is not None and not mapped:
+330:             raise ValueError("receipt observer requires mapped credentials")
+331:         if mapped and any(
+332:             signer is not None
+333:             for signer in (self.tick_signer, self.fact_signer, self.arrival_signer)
+334:         ):
+335:             raise ValueError("mapped credentials cannot include legacy signer callbacks")
+336:         if self.binding_resolver is not None and not callable(self.binding_resolver):
+337:             raise ValueError("credential binding resolver must be callable")
+338:         if self.signature_verifier is not None and not callable(self.signature_verifier):
+339:             raise ValueError("credential signature verifier must be callable")
+340:         if self.binding_namespace is not None and (
+341:             not isinstance(self.binding_namespace, str) or not self.binding_namespace
+342:         ):
+343:             raise ValueError("credential namespace must be an exact nonempty string")
+344:         if self.receipt_observer is not None and (
+345:             not isinstance(self.receipt_observer, str) or not self.receipt_observer
+346:         ):
+347:             raise ValueError("receipt observer must be an exact nonempty string")
+348: 
+349:     @property
+350:     def mapped(self) -> bool:
+351:         """Whether signing must use explicit mapped binding resolution."""
+352:         return self.binding_namespace is not None
+353: 
+354: 
+355: class CredentialProvider(Protocol):
+356:     """Supply credentials at the moment of each write operation."""
+357: 
+358:     def for_write(self, vertex: Path) -> WriteCredentials: ...
+
+===== libs/sdk/src/sdk/errors.py =====
+1: """Normalize engine boundary failures for SDK process callers.
+2: 
+3: Engine deliberately keeps backend and witness refusal families separate.  The
+4: SDK is the process boundary, so it translates those families into stable SDK
+5: errors while retaining the identity evidence an operator needs to reconcile a
+6: refusal or an outcome that may already have committed.
+7: """
+8: 
+9: from __future__ import annotations
+10: 
+11: from collections.abc import Mapping
+12: from pathlib import PurePath
+13: from typing import Any
+14: 
+15: from engine.admission import AdmissionError
+16: from engine.arrival import ArrivalError
+17: from engine.arrival_contract import ContractRefusal
+18: from engine.arrival_declarations import (
+19:     DeclarationCommittedIncomplete,
+20:     DeclarationOutcomeUnknown,
+21:     DeclarationStale,
+22:     DeclarationUnwitnessed,
+23: )
+24: from engine.arrival_head_attestation import AttestationRefusal
+25: from engine.arrival_head_seam import NotWitnessed
+26: from engine.arrival_initialization import (
+27:     InitializationCommittedIncomplete,
+28:     InitializationOutcomeUnknown,
+29:     InitializationUnwitnessed,
+30: )
+31: from engine.arrival_maintenance import ProjectionSyncError
+32: from engine.arrival_restore import RestoreForwardIncomplete, RestoreForwardUnknown
+33: from engine.arrival_search import SearchIndexSyncError
+34: from engine.credentials import CredentialBindingRefused
+35: from engine.runtime_write import (
+36:     BatchPostCommitProjectionFailed,
+37:     BatchWriteCommitUnknown,
+38:     BatchWritePreparationRefused,
+39:     PostCommitProjectionFailed,
+40:     RuntimeWriteRefused,
+41:     WriteCommitUnknown,
+42: )
+43: 
+44: from .types import AdmissionFailed, SdkError
+45: 
+46: __all__ = [
+47:     "ArrivalRefusal",
+48:     "AdmissionRefusal",
+49:     "CommittedOutcome",
+50:     "CommittedProjectionFailed",
+51:     "CommittedIncomplete",
+52:     "CommittedUnwitnessed",
+53:     "CommittedOutcomeUnknown",
+54:     "ProjectionOutcomeUnknown",
+55:     "normalize_exception",
+56: ]
+57: 
+58: 
+59: def _json_value(value: Any) -> Any:
+60:     if value is None or isinstance(value, (str, int, float, bool)):
+61:         return value
+62:     if isinstance(value, PurePath):
+63:         return str(value)
+64:     # Identity diagnostics must never stringify arbitrary record/payload objects.
+65:     return None
+66: 
+67: 
+68: def _head_dict(value: Any) -> dict[str, Any] | None:
+69:     fields = ("lineage", "ordinal", "record_hash")
+70:     if not all(hasattr(value, field) for field in fields):
+71:         return None
+72:     return {field: _json_value(getattr(value, field)) for field in fields}
+73: 
+74: 
+75: def _coverage_dict(value: Any) -> dict[str, Any] | None:
+76:     """Serialize explicit search-index coverage without backend row bodies."""
+77:     through = _head_dict(getattr(value, "through", None))
+78:     fields_hash = getattr(value, "fields_hash", None)
+79:     schema_version = getattr(value, "schema_version", None)
+80:     if through is None or not isinstance(fields_hash, str) or not isinstance(schema_version, str):
+81:         return None
+82:     return {
+83:         "through": through,
+84:         "fields_hash": fields_hash,
+85:         "schema_version": schema_version,
+86:     }
+87: 
+88: 
+89: def _identity_details(exc: BaseException) -> dict[str, Any]:
+90:     """Copy stable coordinates without serializing mutable record payloads."""
+91:     details: dict[str, Any] = {}
+92:     for name in (
+93:         "fact_id",
+94:         "tick_id",
+95:         "ordinal",
+96:         "observer",
+97:         "kind",
+98:         "vertex",
+99:         "item_index",
+100:         "source_type",
+101:         "lineage",
+102:         "intent_path",
+103:         "phase",
+104:         "fields_hash",
+105:         "view_generation",
+106:         "tier_index",
+107:     ):
+108:         value = getattr(exc, name, None)
+109:         if value is not None:
+110:             coordinate = _json_value(value)
+111:             if coordinate is not None:
+112:                 details[name] = coordinate
+113:     for name in ("fact_ids", "tick_ids"):
+114:         value = getattr(exc, name, None)
+115:         if value is not None:
+116:             details[name] = [_json_value(item) for item in value]
+117:     items = getattr(exc, "items", None)
+118:     if items is not None:
+119:         details["items"] = [
+120:             {
+121:                 "fact_id": _json_value(item.fact_id),
+122:                 "tick_id": _json_value(item.tick_id),
+123:                 "tick_name": _json_value(item.tick_name),
+124:                 "already_present": bool(item.already_present),
+125:             }
+126:             for item in items
+127:         ]
+128:     for name in (
+129:         "head",
+130:         "captured_head",
+131:         "presented",
+132:         "before",
+133:         "after",
+134:         "target",
+135:         "projected_before",
+136:         "observed_after",
+137:         "projected_head",
+138:     ):
+139:         value = getattr(exc, name, None)
+140:         if value is None:
+141:             continue
+142:         head = _head_dict(value)
+143:         if head is not None:
+144:             details[name] = head
+145:     for name in ("coverage_before", "coverage_after", "observed_after"):
+146:         value = getattr(exc, name, None)
+147:         coverage = _coverage_dict(value)
+148:         if coverage is not None:
+149:             details[name] = coverage
+150:     # Preserve an explicitly unavailable coordinate without claiming a head or
+151:     # coverage. Missing attributes on older wrappers still remain omitted.
+152:     for name in (
+153:         "captured_head", "projected_head", "projected_before", "observed_after",
+154:         "coverage_before", "coverage_after",
+155:     ):
+156:         if hasattr(exc, name) and getattr(exc, name) is None:
+157:             details[name] = None
+158:     commit = getattr(exc, "commit", None)
+159:     if commit is not None:
+160:         before = _head_dict(getattr(commit, "before", None))
+161:         after = _head_dict(getattr(commit, "after", None))
+162:         commit_details: dict[str, Any] = {}
+163:         if before is not None:
+164:             commit_details["before"] = before
+165:         if after is not None:
+166:             commit_details["after"] = after
+167:         if commit_details:
+168:             details["commit"] = commit_details
+169:     return details
+170: 
+171: 
+172: def _credential_binding_details(exc: BaseException) -> dict[str, Any] | None:
+173:     """Extract public mapped-binding evidence from an explicit causal chain."""
+174:     seen: set[int] = set()
+175:     current: BaseException | None = exc
+176:     for _ in range(3):
+177:         if current is None or id(current) in seen:
+178:             return None
+179:         seen.add(id(current))
+180:         if isinstance(current, CredentialBindingRefused):
+181:             result: dict[str, Any] = {"reason": current.reason}
+182:             request = current.request
+183:             if request is not None:
+184:                 result["request"] = {
+185:                     "namespace": request.namespace,
+186:                     "observer": request.observer,
+187:                     "domain": request.domain.value,
+188:                     "purpose": request.purpose.value,
+189:                 }
+190:             if current.captured_head is not None:
+191:                 head = _head_dict(current.captured_head)
+192:                 if head is not None:
+193:                     result["captured_head"] = head
+194:             if current.use_position is not None:
+195:                 result["use_position"] = current.use_position
+196:             binding = current.evidence
+197:             if binding is not None:
+198:                 # A malformed provider response can be the reason for refusal.
+199:                 # Do not serialize arbitrary objects retained as that evidence.
+200:                 result["binding"] = {
+201:                     name: value if isinstance(value, str) else None
+202:                     for name in ("key_ref", "algorithm", "public_key", "provenance")
+203:                     for value in (getattr(binding, name, None),)
+204:                 }
+205:             return result
+206:         current = _causal_exception(current)
+207:     return None
+208: 
+209: 
+210: def _causal_exception(exc: BaseException) -> BaseException | None:
+211:     cause = getattr(exc, "cause", None)
+212:     if isinstance(cause, BaseException):
+213:         return cause
+214:     return exc.__cause__ if isinstance(exc.__cause__, BaseException) else None
+215: 
+216: 
+217: def _cause_details(exc: BaseException) -> dict[str, Any] | None:
+218:     """Two explicit causal nodes, never implicit context or record bodies."""
+219:     seen = {id(exc)}
+220:     result: dict[str, Any] | None = None
+221:     parent: dict[str, Any] | None = None
+222:     for _ in range(2):
+223:         cause = _causal_exception(exc)
+224:         if cause is None or id(cause) in seen:
+225:             break
+226:         seen.add(id(cause))
+227:         try:
+228:             message = str(cause)
+229:         except Exception:
+230:             message = "<message unavailable>"
+231:         node: dict[str, Any] = {
+232:             "type": type(cause).__name__,
+233:             "message": message[:512],
+234:             "details": _identity_details(cause),
+235:         }
+236:         if len(message) > 512:
+237:             node["truncated"] = True
+238:         if parent is None:
+239:             result = node
+240:         else:
+241:             parent["cause"] = node
+242:         parent = node
+243:         exc = cause
+244:     return result
+245: 
+246: 
+247: def _evidence_details(exc: BaseException, details: Mapping[str, Any]) -> dict[str, Any] | None:
+248:     """Expose coordinator proofs without deriving effects from error classes."""
+249:     evidence: dict[str, Any] = {}
+250:     phase = getattr(exc, "coordinator_phase", None)
+251:     if isinstance(phase, str):
+252:         evidence["phase"] = phase
+253:     effects = getattr(exc, "effects", None)
+254:     if isinstance(effects, Mapping):
+255:         safe_effects = {}
+256:         for resource in ("custody", "witness", "derived", "cache", "artifact", "dispatch"):
+257:             effect = effects.get(resource)
+258:             if not isinstance(effect, Mapping):
+259:                 continue
+260:             state = effect.get("state")
+261:             attempt = effect.get("attempt")
+262:             if state not in (
+263:                 "not-attempted", "known-none", "committed", "unknown", "completed", "incomplete"
+264:             ):
+265:                 continue
+266:             if attempt == "not-entered" and state != "not-attempted":
+267:                 continue
+268:             if attempt == "entered" and state == "not-attempted":
+269:                 continue
+270:             safe_effect = {"state": state}
+271:             if attempt in ("not-entered", "entered"):
+272:                 safe_effect["attempt"] = attempt
+273:             safe_effects[resource] = safe_effect
+274:         if safe_effects:
+275:             evidence["effects"] = safe_effects
+276:     cause = _cause_details(exc)
+277:     if cause is not None:
+278:         evidence["cause"] = cause
+279:     if not evidence:
+280:         return None
+281:     evidence["schema"] = "loops.sdk/evidence/v1"
+282:     basis_fields = (
+283:         "head", "captured_head", "presented", "target", "projected_before", "projected_head",
+284:         "observed_after", "coverage_before", "coverage_after", "fields_hash", "view_generation",
+285:     )
+286:     identity_fields = (
+287:         "fact_id", "tick_id", "fact_ids", "tick_ids", "items", "item_index", "tier_index",
+288:         "ordinal", "observer", "kind", "vertex", "lineage", "commit",
+289:     )
+290:     basis = {name: details[name] for name in basis_fields if name in details}
+291:     identities = {name: details[name] for name in identity_fields if name in details}
+292:     if basis:
+293:         evidence["basis"] = basis
+294:     if identities:
+295:         evidence["identities"] = identities
+296:     return evidence
+297: 
+298: 
+299: def _context_detail(name: str, value: Any) -> Any:
+300:     """Serialize only stable identity fields supplied by an SDK operation."""
+301:     if name in {"fact_ids", "tick_ids"}:
+302:         return [_json_value(item) for item in value]
+303:     if name == "items":
+304:         return [
+305:             {
+306:                 "fact_id": _json_value(item.fact_id),
+307:                 "tick_id": _json_value(item.tick_id),
+308:                 "tick_name": _json_value(item.tick_name),
+309:                 "already_present": bool(item.already_present),
+310:             }
+311:             for item in value
+312:         ]
+313:     head = _head_dict(value)
+314:     return head if head is not None else _json_value(value)
+315: 
+316: 
+317: class ArrivalRefusal(SdkError):
+318:     """A typed, non-committing Arrival diagnostic refusal."""
+319: 
+320:     def __init__(self, message: str, *, source_type: str, details: Mapping[str, Any]) -> None:
+321:         super().__init__(message)
+322:         self.source_type = source_type
+323:         self.details = dict(details)
+324: 
+325:     def as_dict(self) -> dict[str, Any]:
+326:         return {
+327:             "schema": "loops.sdk/error/v1",
+328:             "type": type(self).__name__,
+329:             "message": str(self),
+330:             "source_type": self.source_type,
+331:             "outcome": "refused",
+332:             "details": dict(self.details),
+333:         }
+334: 
+335: 
+336: class AdmissionRefusal(AdmissionFailed):
+337:     """An engine admission refusal retaining its source and diagnostics."""
+338: 
+339:     def __init__(
+340:         self,
+341:         message: str,
+342:         *,
+343:         source_type: str,
+344:         details: Mapping[str, Any],
+345:         observer: str | None = None,
+346:         kind: str | None = None,
+347:         vertex: str | None = None,
+348:     ) -> None:
+349:         super().__init__(message, observer=observer, kind=kind, vertex=vertex)
+350:         self.source_type = source_type
+351:         self.details = dict(details)
+352: 
+353:     def as_dict(self) -> dict[str, Any]:
+354:         return {
+355:             "schema": "loops.sdk/error/v1",
+356:             "type": type(self).__name__,
+357:             "message": str(self),
+358:             "source_type": self.source_type,
+359:             "outcome": "admission-refused",
+360:             "details": dict(self.details),
+361:         }
+362: 
+363: 
+364: class CommittedOutcome(SdkError):
+365:     """A durable or possibly durable operation with explicit reconciliation evidence."""
+366: 
+367:     outcome = "committed"
+368: 
+369:     def __init__(self, message: str, *, source_type: str, details: Mapping[str, Any]) -> None:
+370:         super().__init__(message)
+371:         self.source_type = source_type
+372:         self.details = dict(details)
+373: 
+374:     def as_dict(self) -> dict[str, Any]:
+375:         return {
+376:             "schema": "loops.sdk/error/v1",
+377:             "type": type(self).__name__,
+378:             "message": str(self),
+379:             "source_type": self.source_type,
+380:             "outcome": self.outcome,
+381:             "details": dict(self.details),
+382:         }
+383: 
+384: 
+385: class CommittedOutcomeUnknown(CommittedOutcome):
+386:     """The append outcome is unknown; reconcile before retrying."""
+387: 
+388:     outcome = "unknown"
+389: 
+390: 
+391: class CommittedUnwitnessed(CommittedOutcome):
+392:     """Custody committed, but witnessing failed."""
+393: 
+394:     outcome = "committed-unwitnessed"
+395: 
+396: 
+397: class CommittedProjectionFailed(CommittedOutcome):
+398:     """Custody committed, but post-commit projection publication failed."""
+399: 
+400:     outcome = "committed-projection-failed"
+401: 
+402: 
+403: class CommittedIncomplete(CommittedOutcome):
+404:     """A known commit exists while a later initialization phase is incomplete."""
+405: 
+406:     outcome = "committed-incomplete"
+407: 
+408: 
+409: class ProjectionOutcomeUnknown(SdkError):
+410:     """Projection maintenance may have changed derived state; reconcile it."""
+411: 
+412:     outcome = "projection-unknown"
+413: 
+414:     def __init__(self, message: str, *, source_type: str, details: Mapping[str, Any]) -> None:
+415:         super().__init__(message)
+416:         self.source_type = source_type
+417:         self.details = dict(details)
+418: 
+419:     def as_dict(self) -> dict[str, Any]:
+420:         return {
+421:             "schema": "loops.sdk/error/v1",
+422:             "type": type(self).__name__,
+423:             "message": str(self),
+424:             "source_type": self.source_type,
+425:             "outcome": self.outcome,
+426:             "details": dict(self.details),
+427:         }
+428: 
+429: 
+430: def normalize_exception(
+431:     exc: BaseException, *, context: Mapping[str, Any] | None = None
+432: ) -> BaseException:
+433:     """Return a stable SDK exception for engine boundary failures.
+434: 
+435:     Existing SDK errors are returned unchanged.  Classification is by the
+436:     engine's public exception types, never by message text.
+437:     """
+438:     if not isinstance(exc, Exception) or isinstance(exc, SdkError):
+439:         return exc
+440:     details = _identity_details(exc)
+441:     context_fields = {
+442:         "captured_head",
+443:         "fact_id",
+444:         "tick_id",
+445:         "fact_ids",
+446:         "tick_ids",
+447:         "items",
+448:         "item_index",
+449:     }
+450:     for name, value in (context or {}).items():
+451:         if name in details or name not in context_fields:
+452:             continue
+453:         coordinate = _context_detail(name, value)
+454:         if coordinate is not None or value is None:
+455:             details[name] = coordinate
+456:     details["source_type"] = type(exc).__name__
+457:     credential = _credential_binding_details(exc)
+458:     if credential is not None:
+459:         details["credential_binding"] = credential
+460:     evidence = _evidence_details(exc, details)
+461:     if evidence is not None:
+462:         details["evidence"] = evidence
+463:     if isinstance(exc, (BatchWriteCommitUnknown, WriteCommitUnknown)):
+464:         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+465:     if isinstance(exc, InitializationOutcomeUnknown):
+466:         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+467:     if isinstance(exc, (DeclarationOutcomeUnknown, RestoreForwardUnknown)):
+468:         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+469:     if isinstance(exc, InitializationUnwitnessed):
+470:         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
+471:     if isinstance(exc, DeclarationUnwitnessed):
+472:         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
+473:     if isinstance(exc, InitializationCommittedIncomplete):
+474:         return CommittedIncomplete(str(exc), source_type=type(exc).__name__, details=details)
+475:     if isinstance(exc, (DeclarationCommittedIncomplete, RestoreForwardIncomplete)):
+476:         return CommittedIncomplete(str(exc), source_type=type(exc).__name__, details=details)
+477:     if isinstance(exc, NotWitnessed):
+478:         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
+479:     if isinstance(exc, DeclarationStale):
+480:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+481:     if isinstance(exc, BatchPostCommitProjectionFailed):
+482:         return CommittedProjectionFailed(str(exc), source_type=type(exc).__name__, details=details)
+483:     if isinstance(exc, PostCommitProjectionFailed):
+484:         return CommittedProjectionFailed(str(exc), source_type=type(exc).__name__, details=details)
+485:     if isinstance(exc, ProjectionSyncError):
+486:         return ProjectionOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+487:     if isinstance(exc, SearchIndexSyncError):
+488:         return ProjectionOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+489:     if isinstance(exc, BatchWritePreparationRefused):
+490:         fact = exc.item.fact
+491:         if exc.item.fact_id is not None:
+492:             details.setdefault("fact_id", exc.item.fact_id)
+493:         details.setdefault("observer", fact.observer)
+494:         details.setdefault("kind", fact.kind)
+495:         details.setdefault("vertex", exc.effective_declaration.name)
+496:         if exc.admission_refused:
+497:             return AdmissionRefusal(
+498:                 str(exc),
+499:                 source_type=type(exc).__name__,
+500:                 details=details,
+501:                 observer=fact.observer,
+502:                 kind=fact.kind,
+503:                 vertex=exc.effective_declaration.name,
+504:             )
+505:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+506:     if isinstance(exc, AdmissionError):
+507:         return AdmissionRefusal(
+508:             str(exc),
+509:             source_type=type(exc).__name__,
+510:             details=details,
+511:             observer=getattr(exc, "observer", None),
+512:             kind=getattr(exc, "kind", None),
+513:             vertex=getattr(exc, "vertex", None),
+514:         )
+515:     if isinstance(exc, CredentialBindingRefused):
+516:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+517:     if isinstance(
+518:         exc,
+519:         (
+520:             AttestationRefusal,
+521:             ContractRefusal,
+522:             ArrivalError,
+523:             RuntimeWriteRefused,
+524:         ),
+525:     ):
+526:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+527:     return exc
+
+===== libs/sdk/src/sdk/verify.py =====
+1: """Custody-prefix verification for explicit Arrival descriptors."""
+2: 
+3: from __future__ import annotations
+4: 
+5: from contextlib import suppress
+6: from pathlib import Path
+7: 
+8: from engine.arrival_contract import Full, Head, HeadMismatch, NotAuthority, Watermark
+9: from engine.arrival_head_seam import AttestedLedger, Compared, Indeterminate, PreGenesis
+10: from engine.arrival_registry import BackendRegistry
+11: 
+12: from .errors import normalize_exception
+13: from .target import _arrival_descriptor
+14: from .types import StoreDescriptorInfo, VerifyResult
+15: 
+16: __all__ = ["verify_target"]
+17: 
+18: 
+19: def _close_quietly(handle: object) -> None:
+20:     close = getattr(handle, "close", None)
+21:     if callable(close):
+22:         with suppress(Exception):
+23:             close()
+24: 
+25: 
+26: def _verified_prefix(ledger: AttestedLedger, captured: Head, target: Head) -> Head:
+27:     """Verify one target already bounded by the comparison established at open."""
+28:     if target.lineage != captured.lineage:
+29:         raise NotAuthority(
+30:             f"verification target names lineage {target.lineage}, but the "
+31:             f"attested ledger presents {captured.lineage}"
+32:         )
+33:     if target.ordinal > captured.ordinal:
+34:         raise HeadMismatch(
+35:             f"verification target ordinal {target.ordinal} exceeds the attested "
+36:             f"captured ordinal {captured.ordinal}"
+37:         )
+38:     resolved = ledger.head_at(Watermark(target.lineage, target.ordinal))
+39:     if resolved != target:
+40:         raise HeadMismatch("verification target no longer resolves to its recorded hash")
+41:     verified = ledger.verify(Full(through=resolved))
+42:     if verified != resolved:
+43:         raise HeadMismatch("full verification returned a different head")
+44:     return verified
+45: 
+46: 
+47: def verify_target(
+48:     target: Path | str,
+49:     *,
+50:     through: Head | None = None,
+51:     registry: BackendRegistry | None = None,
+52: ) -> VerifyResult:
+53:     """Fully verify one attested Arrival prefix without reading its projection.
+54: 
+55:     ``Full`` establishes grammar, dense ordinals, one lineage, and the record
+56:     hash chain through the returned head. It does not verify record signatures,
+57:     authorship, key trust, or projection agreement.
+58:     """
+59:     ledger: object | None = None
+60:     query: object | None = None
+61:     try:
+62:         resolved = _arrival_descriptor(target)
+63:         if resolved is None:
+64:             from .types import TargetUnsupported
+65: 
+66:             raise TargetUnsupported("verify_target requires an explicit Arrival descriptor")
+67:         _path, _ast, descriptor = resolved
+68:         ledger, query = (registry or BackendRegistry.with_builtin_backends()).open(descriptor)
+69:         if not isinstance(ledger, AttestedLedger):
+70:             raise TypeError("BackendRegistry.open must return an AttestedLedger")
+71:         comparison = ledger.opened.comparison
+72:         if isinstance(comparison, PreGenesis):
+73:             if comparison.ledger_refusal is not None:
+74:                 raise comparison.ledger_refusal
+75:             raise HeadMismatch("a pre-genesis ledger has no full verification head")
+76:         if isinstance(comparison, Indeterminate):
+77:             raise comparison.refusal
+78:         if not isinstance(comparison, Compared):
+79:             raise TypeError(f"unsupported head comparison {comparison!r}")
+80:         captured = comparison.presented
+81:         verified = _verified_prefix(ledger, captured, captured if through is None else through)
+82:         return VerifyResult(
+83:             store=StoreDescriptorInfo.from_descriptor(descriptor),
+84:             captured_head=captured,
+85:             verified_through=verified,
+86:         )
+87:     except BaseException as exc:
+88:         normalized = normalize_exception(exc)
+89:         if normalized is exc:
+90:             raise
+91:         raise normalized from exc
+92:     finally:
+93:         _close_quietly(query)
+94:         _close_quietly(ledger)
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/correction-focused.txt =====
+1: .............                                                            [100%]
+2: 13 passed in 1.09s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/correction-ruff.txt =====
+1: All checks passed!
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-after.txt =====
+1: BROKEN_RESOLUTION_REJECTED_BY_TEST: AssertionError
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-before.txt =====
+1: FALSE_POSITIVE: workflow passes despite other-tenant resolver failure
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/namespace-control-probe.py.txt =====
+1: from pathlib import Path
+2: import os
+3: import runpy
+4: import sys
+5: import tempfile
+6: from sdk import MappedCredentialProvider
+7: 
+8: original = MappedCredentialProvider.resolve
+9: other_calls = 0
+10: def broken_other_namespace(self, request):
+11:     global other_calls
+12:     if request.namespace == "other-tenant":
+13:         other_calls += 1
+14:         if "--allow-preflight" in sys.argv and other_calls == 1:
+15:             return original(self, request)
+16:         raise RuntimeError("probe: provider failed before resolving any key")
+17:     return original(self, request)
+18: 
+19: MappedCredentialProvider.resolve = broken_other_namespace
+20: with tempfile.TemporaryDirectory(prefix="loops-namespace-control-") as temporary:
+21:     root = Path(temporary)
+22:     for variable, name in (("XDG_STATE_HOME", "state"), ("XDG_CONFIG_HOME", "config"), ("LOOPS_HOME", "loops-home")):
+23:         os.environ[variable] = str(root / name)
+24:     workflow = runpy.run_path(sys.argv[1])["test_mapped_two_observer_workload_survives_descriptor_relocation"]
+25:     try:
+26:         workflow(root)
+27:     except (AssertionError, RuntimeError) as exc:
+28:         print("BROKEN_RESOLUTION_REJECTED_BY_TEST:", type(exc).__name__)
+29:     else:
+30:         print("FALSE_POSITIVE: workflow passes despite other-tenant resolver failure")
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-followup-2026-09-06/validation-evidence/pre-review-workload.py.txt =====
+1: """Public mapped-custody workflow conformance for an Arrival vertex."""
+2: 
+3: from __future__ import annotations
+4: 
+5: from pathlib import Path
+6: 
+7: import pytest
+8: from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
+9: 
+10: from sdk import (
+11:     AdmissionFailed,
+12:     ArrivalRefusal,
+13:     MappedCredentialProvider,
+14:     emit_batch,
+15:     emit_fact,
+16:     grant_observer,
+17:     init_vertex,
+18:     read_facts,
+19:     verify_target,
+20: )
+21: 
+22: 
+23: @pytest.fixture(autouse=True)
+24: def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+25:     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+26:     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+27:     monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
+28: 
+29: 
+30: def test_mapped_two_observer_workload_survives_descriptor_relocation(
+31:     tmp_path: Path,
+32: ) -> None:
+33:     custody_root = tmp_path / "custody"
+34:     namespace = "workload-tenant"
+35:     provider = MappedCredentialProvider(
+36:         custody_root,
+37:         namespace=namespace,
+38:         receipt_observer="alice",
+39:     )
+40:     alice = provider.create_binding("alice", token="create-alice")
+41:     bob = provider.create_binding("bob", token="create-bob")
+42:     alice_case_alias = provider.create_binding("Alice", token="create-uppercase-alice")
+43:     assert alice_case_alias.key_ref != alice.key_ref
+44: 
+45:     vertex = tmp_path / "original" / "workload.vertex"
+46:     store = (tmp_path / "data" / "workload.arrival").resolve()
+47:     initialized = init_vertex(
+48:         vertex,
+49:         name="workload",
+50:         store_type="arrival",
+51:         location=store,
+52:         observer="alice",
+53:         credentials=provider,
+54:     )
+55:     assert initialized.lineage is not None
+56:     assert initialized.store is not None
+57:     assert initialized.store.location == str(store)
+58: 
+59:     before_grant = verify_target(vertex).verified_through
+60:     assert before_grant is not None
+61:     assert initialized.head == {
+62:         "lineage": before_grant.lineage,
+63:         "ordinal": before_grant.ordinal,
+64:         "record_hash": before_grant.record_hash,
+65:     }
+66:     with pytest.raises(AdmissionFailed) as ungranted:
+67:         emit_fact(
+68:             vertex,
+69:             "item",
+70:             {"owner": "bob", "phase": "before-grant"},
+71:             observer="bob",
+72:             origin="workload-test",
+73:             ts=9.0,
+74:             id_override="bob-before-grant",
+75:             credentials=provider,
+76:         )
+77:     assert ungranted.value.observer == "bob"
+78:     assert ungranted.value.kind == "item"
+79:     assert verify_target(vertex).verified_through == before_grant
+80: 
+81:     granted = grant_observer(
+82:         vertex,
+83:         "bob",
+84:         grants=["item"],
+85:         key=bob.public_key,
+86:         observer="alice",
+87:         credentials=provider,
+88:     )
+89:     assert granted.status == "applied"
+90:     assert granted.commit is not None
+91:     assert granted.commit.before == before_grant
+92: 
+93:     batch = emit_batch(
+94:         vertex,
+95:         [
+96:             {
+97:                 "id": "alice-item",
+98:                 "kind": "item",
+99:                 "payload": {"owner": "alice"},
+100:                 "observer": "alice",
+101:                 "origin": "workload-test",
+102:                 "ts": 10.0,
+103:             },
+104:             {
+105:                 "id": "bob-item",
+106:                 "kind": "item",
+107:                 "payload": {"owner": "bob"},
+108:                 "observer": "bob",
+109:                 "origin": "workload-test",
+110:                 "ts": 11.0,
+111:             },
+112:         ],
+113:         credentials=provider,
+114:     )
+115:     assert batch.atomic is True
+116:     assert batch.atomicity == "single-append"
+117:     assert batch.commit is not None
+118:     assert batch.commit.before == granted.commit.after
+119:     assert batch.captured_head == batch.commit.before
+120:     assert batch.witnessed is True
+121:     assert batch.projection == "synced"
+122:     assert [(item.id, item.observer, item.stored, item.signed) for item in batch.items] == [
+123:         ("alice-item", "alice", True, True),
+124:         ("bob-item", "bob", True, True),
+125:     ]
+126:     assert all(item.captured_head == batch.captured_head for item in batch.items)
+127:     assert all(item.commit is None for item in batch.items)
+128:     assert all(item.witnessed is True for item in batch.items)
+129:     assert all(item.projection == "synced" for item in batch.items)
+130: 
+131:     first_read = read_facts(vertex, limit=20, order="oldest")
+132:     assert first_read.basis is not None
+133:     assert first_read.basis.lineage == initialized.lineage
+134:     assert first_read.basis.captured_head == batch.commit.after
+135:     assert first_read.basis.projected_through == first_read.basis.captured_head
+136:     assert [
+137:         (item["id"], item["observer"], item["payload"])
+138:         for item in first_read.items
+139:     ] == [
+140:         ("alice-item", "alice", {"owner": "alice"}),
+141:         ("bob-item", "bob", {"owner": "bob"}),
+142:     ]
+143:     first_verified = verify_target(vertex)
+144:     assert first_verified.captured_head == batch.commit.after
+145:     assert first_verified.verified_through == first_read.basis.captured_head
+146:     assert first_verified.claims == ("grammar", "density", "lineage", "hash-chain")
+147:     assert "signature-authorship" in first_verified.excludes
+148: 
+149:     relocated = tmp_path / "relocated" / "renamed.vertex"
+150:     relocated.parent.mkdir()
+151:     original_declaration = vertex.read_bytes()
+152:     vertex.rename(relocated)
+153:     assert relocated.read_bytes() == original_declaration
+154: 
+155:     reopened = MappedCredentialProvider(
+156:         custody_root,
+157:         namespace=namespace,
+158:         receipt_observer="alice",
+159:     )
+160:     for observer, created in (("alice", alice), ("bob", bob)):
+161:         resolved = reopened.resolve(
+162:             CredentialRequest(
+163:                 namespace,
+164:                 observer,
+165:                 SigningDomain.FACT,
+166:                 CredentialPurpose.AUTHORSHIP,
+167:             )
+168:         )
+169:         assert resolved is not None
+170:         assert resolved.evidence.key_ref == created.key_ref
+171:         assert resolved.evidence.public_key == created.public_key
+172:     resolved_case_alias = reopened.resolve(
+173:         CredentialRequest(
+174:             namespace,
+175:             "Alice",
+176:             SigningDomain.FACT,
+177:             CredentialPurpose.AUTHORSHIP,
+178:         )
+179:     )
+180:     assert resolved_case_alias is not None
+181:     assert resolved_case_alias.evidence.key_ref == alice_case_alias.key_ref
+182:     assert resolved_case_alias.evidence.key_ref != alice.key_ref
+183: 
+184:     relocated_verified = verify_target(relocated)
+185:     assert relocated_verified.verified_through == first_verified.verified_through
+186:     relocated_read = read_facts(relocated, limit=20, order="oldest")
+187:     assert relocated_read.basis == first_read.basis
+188:     assert relocated_read.items == first_read.items
+189:     assert relocated_read.store is not None
+190:     assert relocated_read.store.location == str(store)
+191: 
+192:     other_namespace = MappedCredentialProvider(
+193:         custody_root,
+194:         namespace="other-tenant",
+195:         receipt_observer="alice",
+196:     )
+197:     other_namespace.create_binding("alice", token="create-other-tenant-alice")
+198:     with pytest.raises(ArrivalRefusal) as wrong_namespace:
+199:         emit_fact(
+200:             relocated,
+201:             "item",
+202:             {"owner": "alice", "phase": "wrong-namespace"},
+203:             observer="alice",
+204:             origin="workload-test",
+205:             ts=11.5,
+206:             id_override="alice-wrong-namespace",
+207:             credentials=other_namespace,
+208:         )
+209:     assert wrong_namespace.value.source_type == "CredentialBindingRefused"
+210:     assert wrong_namespace.value.details["captured_head"] == {
+211:         "lineage": first_verified.verified_through.lineage,
+212:         "ordinal": first_verified.verified_through.ordinal,
+213:         "record_hash": first_verified.verified_through.record_hash,
+214:     }
+215:     assert verify_target(relocated).verified_through == first_verified.verified_through
+216: 
+217:     with pytest.raises(AdmissionFailed) as wrong_case:
+218:         emit_fact(
+219:             relocated,
+220:             "item",
+221:             {"owner": "Alice", "phase": "case-alias"},
+222:             observer="Alice",
+223:             origin="workload-test",
+224:             ts=11.75,
+225:             id_override="uppercase-alice",
+226:             credentials=reopened,
+227:         )
+228:     assert wrong_case.value.observer == "Alice"
+229:     assert wrong_case.value.kind == "item"
+230:     assert verify_target(relocated).verified_through == first_verified.verified_through
+231: 
+232:     continued = emit_fact(
+233:         relocated,
+234:         "item",
+235:         {"owner": "bob", "phase": "relocated"},
+236:         observer="bob",
+237:         origin="workload-test",
+238:         ts=12.0,
+239:         id_override="bob-after-relocation",
+240:         credentials=reopened,
+241:     )
+242:     assert continued.stored is True
+243:     assert continued.signed is True
+244:     assert continued.commit is not None
+245:     assert continued.commit.before == first_verified.verified_through
+246:     assert continued.witnessed is True
+247:     assert continued.projection == "synced"
+248: 
+249:     final_read = read_facts(relocated, limit=20, order="oldest")
+250:     assert final_read.basis is not None
+251:     assert final_read.basis.lineage == initialized.lineage
+252:     assert final_read.basis.captured_head == continued.commit.after
+253:     assert final_read.basis.projected_through == final_read.basis.captured_head
+254:     assert [
+255:         (item["id"], item["observer"], item["payload"])
+256:         for item in final_read.items
+257:     ] == [
+258:         ("alice-item", "alice", {"owner": "alice"}),
+259:         ("bob-item", "bob", {"owner": "bob"}),
+260:         (
+261:             "bob-after-relocation",
+262:             "bob",
+263:             {"owner": "bob", "phase": "relocated"},
+264:         ),
+265:     ]
+266:     final_verified = verify_target(relocated)
+267:     assert final_verified.captured_head == continued.commit.after
+268:     assert final_verified.verified_through == final_read.basis.captured_head
+
+===== FULL PRODUCTION / TEST PATCH =====
+diff --git a/libs/sdk/README.md b/libs/sdk/README.md
+index 8b8fa2e3..9d364848 100644
+--- a/libs/sdk/README.md
++++ b/libs/sdk/README.md
+@@ -218,6 +218,26 @@ signs nothing and does not require private custody to remain available.
+ Mapped providers are supported on Arrival targets; legacy writers explicitly
+ refuse them. The default `CustodyCredentialProvider` remains unchanged.
+ 
++The runnable [two-observer mapped workload](tests/test_arrival_mapped_workload.py)
++shows the complete public lifecycle: create Alice and Bob bindings under one
++persisted provider root and exact namespace; initialize with Alice; grant Bob
++using Bob's pre-created public key; then emit with both authors. For a locator
++move that keeps the same physical file-backed store, initialize with an
++**absolute** `location` and move only the `.vertex` file while retaining its
++store clause, lineage, and role. Recreate `MappedCredentialProvider` with the
++same provider root, namespace, and receipt observer before continuing work.
++The absolute store location keeps the same store residence, while
++mapped key selection comes only from the provider namespace and exact observer
++label; neither the vertex filename nor its new directory chooses a key.
++
++After relocation, `verify_target(relocated_vertex)` provides a `Full`
++verification of the captured prefix's grammar, dense ordinals, lineage, and
++record-hash chain. It does not establish projection agreement, signature
++authorship, key trust, or the identity of an observer across lineages. The
++mapped workload exercises public writes with captured authorization; the
++[mapped signing tests](tests/test_arrival_mapped_credentials.py) separately
++verify domain-specific signatures and key-history behavior.
++
+ `import_legacy(vertex_path, observer, token=...)` explicitly copies a verified
+ legacy key into managed storage without changing the original. It preserves
+ flat/nested ambiguity and alias refusals. After import, locator moves do not
+diff --git a/libs/sdk/tests/test_arrival_mapped_workload.py b/libs/sdk/tests/test_arrival_mapped_workload.py
+new file mode 100644
+index 00000000..0ec676e9
+--- /dev/null
++++ b/libs/sdk/tests/test_arrival_mapped_workload.py
+@@ -0,0 +1,305 @@
++"""Public mapped-custody workflow conformance for an Arrival vertex."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
++
++from sdk import (
++    AdmissionFailed,
++    ArrivalRefusal,
++    MappedCredentialProvider,
++    emit_batch,
++    emit_fact,
++    grant_observer,
++    init_vertex,
++    read_facts,
++    verify_target,
++)
++
++
++@pytest.fixture(autouse=True)
++def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
++
++
++def test_mapped_two_observer_workload_survives_descriptor_relocation(
++    tmp_path: Path,
++) -> None:
++    custody_root = tmp_path / "custody"
++    namespace = "workload-tenant"
++    provider = MappedCredentialProvider(
++        custody_root,
++        namespace=namespace,
++        receipt_observer="alice",
++    )
++    alice = provider.create_binding("alice", token="create-alice")
++    bob = provider.create_binding("bob", token="create-bob")
++    alice_case_alias = provider.create_binding("Alice", token="create-uppercase-alice")
++    assert alice_case_alias.key_ref != alice.key_ref
++    assert alice_case_alias.public_key != alice.public_key
++
++    vertex = tmp_path / "original" / "workload.vertex"
++    store = (tmp_path / "data" / "workload.arrival").resolve()
++    initialized = init_vertex(
++        vertex,
++        name="workload",
++        store_type="arrival",
++        location=store,
++        observer="alice",
++        credentials=provider,
++    )
++    assert initialized.lineage is not None
++    assert initialized.store is not None
++    assert initialized.store.location == str(store)
++
++    before_grant = verify_target(vertex).verified_through
++    assert before_grant is not None
++    assert initialized.head == {
++        "lineage": before_grant.lineage,
++        "ordinal": before_grant.ordinal,
++        "record_hash": before_grant.record_hash,
++    }
++    with pytest.raises(AdmissionFailed) as ungranted:
++        emit_fact(
++            vertex,
++            "item",
++            {"owner": "bob", "phase": "before-grant"},
++            observer="bob",
++            origin="workload-test",
++            ts=9.0,
++            id_override="bob-before-grant",
++            credentials=provider,
++        )
++    assert ungranted.value.observer == "bob"
++    assert ungranted.value.kind == "item"
++    assert verify_target(vertex).verified_through == before_grant
++
++    granted = grant_observer(
++        vertex,
++        "bob",
++        grants=["item"],
++        key=bob.public_key,
++        observer="alice",
++        credentials=provider,
++    )
++    assert granted.status == "applied"
++    assert granted.commit is not None
++    assert granted.commit.before == before_grant
++    assert granted.commit.after.lineage == granted.commit.before.lineage
++    assert granted.commit.after.ordinal > granted.commit.before.ordinal
++
++    batch = emit_batch(
++        vertex,
++        [
++            {
++                "id": "alice-item",
++                "kind": "item",
++                "payload": {"owner": "alice"},
++                "observer": "alice",
++                "origin": "workload-test",
++                "ts": 10.0,
++            },
++            {
++                "id": "bob-item",
++                "kind": "item",
++                "payload": {"owner": "bob"},
++                "observer": "bob",
++                "origin": "workload-test",
++                "ts": 11.0,
++            },
++        ],
++        credentials=provider,
++    )
++    assert batch.atomic is True
++    assert batch.atomicity == "single-append"
++    assert batch.commit is not None
++    assert batch.commit.before == granted.commit.after
++    assert batch.commit.after.lineage == batch.commit.before.lineage
++    assert batch.commit.after.ordinal > batch.commit.before.ordinal
++    assert batch.captured_head == batch.commit.before
++    assert batch.witnessed is True
++    assert batch.projection == "synced"
++    assert [(item.id, item.observer, item.stored, item.signed) for item in batch.items] == [
++        ("alice-item", "alice", True, True),
++        ("bob-item", "bob", True, True),
++    ]
++    assert all(item.captured_head == batch.captured_head for item in batch.items)
++    assert all(item.commit is None for item in batch.items)
++    assert all(item.witnessed is True for item in batch.items)
++    assert all(item.projection == "synced" for item in batch.items)
++
++    first_read = read_facts(vertex, limit=20, order="oldest")
++    assert first_read.basis is not None
++    assert first_read.basis.lineage == initialized.lineage
++    assert first_read.basis.captured_head == batch.commit.after
++    assert first_read.basis.projected_through == first_read.basis.captured_head
++    assert [
++        (item["id"], item["observer"], item["payload"])
++        for item in first_read.items
++    ] == [
++        ("alice-item", "alice", {"owner": "alice"}),
++        ("bob-item", "bob", {"owner": "bob"}),
++    ]
++    first_verified = verify_target(vertex)
++    assert first_verified.captured_head == batch.commit.after
++    assert first_verified.verified_through == first_read.basis.captured_head
++    assert first_verified.claims == ("grammar", "density", "lineage", "hash-chain")
++    assert "signature-authorship" in first_verified.excludes
++
++    relocated = tmp_path / "relocated" / "renamed.vertex"
++    relocated.parent.mkdir()
++    original_declaration = vertex.read_bytes()
++    vertex.rename(relocated)
++    assert relocated.read_bytes() == original_declaration
++
++    reopened = MappedCredentialProvider(
++        custody_root,
++        namespace=namespace,
++        receipt_observer="alice",
++    )
++    for observer, created in (("alice", alice), ("bob", bob)):
++        resolved = reopened.resolve(
++            CredentialRequest(
++                namespace,
++                observer,
++                SigningDomain.FACT,
++                CredentialPurpose.AUTHORSHIP,
++            )
++        )
++        assert resolved is not None
++        assert resolved.evidence.key_ref == created.key_ref
++        assert resolved.evidence.public_key == created.public_key
++    resolved_case_alias = reopened.resolve(
++        CredentialRequest(
++            namespace,
++            "Alice",
++            SigningDomain.FACT,
++            CredentialPurpose.AUTHORSHIP,
++        )
++    )
++    assert resolved_case_alias is not None
++    assert resolved_case_alias.evidence.key_ref == alice_case_alias.key_ref
++    assert resolved_case_alias.evidence.public_key == alice_case_alias.public_key
++    assert resolved_case_alias.evidence.key_ref != alice.key_ref
++
++    relocated_verified = verify_target(relocated)
++    assert relocated_verified.verified_through == first_verified.verified_through
++    relocated_read = read_facts(relocated, limit=20, order="oldest")
++    assert relocated_read.basis == first_read.basis
++    assert relocated_read.items == first_read.items
++    assert relocated_read.store is not None
++    assert relocated_read.store.location == str(store)
++
++    other_namespace = MappedCredentialProvider(
++        custody_root,
++        namespace="other-tenant",
++        receipt_observer="alice",
++    )
++    other_alice = other_namespace.create_binding(
++        "alice", token="create-other-tenant-alice"
++    )
++    assert other_alice.public_key != alice.public_key
++    other_resolved = other_namespace.resolve(
++        CredentialRequest(
++            "other-tenant",
++            "alice",
++            SigningDomain.FACT,
++            CredentialPurpose.AUTHORSHIP,
++        )
++    )
++    assert other_resolved is not None
++    assert other_resolved.evidence.key_ref == other_alice.key_ref
++    assert other_resolved.evidence.public_key == other_alice.public_key
++    with pytest.raises(ArrivalRefusal) as wrong_namespace:
++        emit_fact(
++            relocated,
++            "item",
++            {"owner": "alice", "phase": "wrong-namespace"},
++            observer="alice",
++            origin="workload-test",
++            ts=11.5,
++            id_override="alice-wrong-namespace",
++            credentials=other_namespace,
++        )
++    assert wrong_namespace.value.source_type == "CredentialBindingRefused"
++    credential_refusal = wrong_namespace.value.details["credential_binding"]
++    assert credential_refusal["reason"] == (
++        "resolved public key is not authorized at the captured position"
++    )
++    assert credential_refusal["request"] == {
++        "namespace": "other-tenant",
++        "observer": "alice",
++        "domain": "fact",
++        "purpose": "authorship",
++    }
++    assert credential_refusal["use_position"] == (
++        first_verified.verified_through.ordinal + 1
++    )
++    assert credential_refusal["binding"]["key_ref"] == other_alice.key_ref
++    assert credential_refusal["binding"]["public_key"] == other_alice.public_key
++    assert wrong_namespace.value.details["captured_head"] == {
++        "lineage": first_verified.verified_through.lineage,
++        "ordinal": first_verified.verified_through.ordinal,
++        "record_hash": first_verified.verified_through.record_hash,
++    }
++    assert verify_target(relocated).verified_through == first_verified.verified_through
++
++    with pytest.raises(AdmissionFailed) as wrong_case:
++        emit_fact(
++            relocated,
++            "item",
++            {"owner": "Alice", "phase": "case-alias"},
++            observer="Alice",
++            origin="workload-test",
++            ts=11.75,
++            id_override="uppercase-alice",
++            credentials=reopened,
++        )
++    assert wrong_case.value.observer == "Alice"
++    assert wrong_case.value.kind == "item"
++    assert verify_target(relocated).verified_through == first_verified.verified_through
++
++    continued = emit_fact(
++        relocated,
++        "item",
++        {"owner": "bob", "phase": "relocated"},
++        observer="bob",
++        origin="workload-test",
++        ts=12.0,
++        id_override="bob-after-relocation",
++        credentials=reopened,
++    )
++    assert continued.stored is True
++    assert continued.signed is True
++    assert continued.commit is not None
++    assert continued.commit.before == first_verified.verified_through
++    assert continued.commit.after.lineage == continued.commit.before.lineage
++    assert continued.commit.after.ordinal > continued.commit.before.ordinal
++    assert continued.witnessed is True
++    assert continued.projection == "synced"
++
++    final_read = read_facts(relocated, limit=20, order="oldest")
++    assert final_read.basis is not None
++    assert final_read.basis.lineage == initialized.lineage
++    assert final_read.basis.captured_head == continued.commit.after
++    assert final_read.basis.projected_through == final_read.basis.captured_head
++    assert [
++        (item["id"], item["observer"], item["payload"])
++        for item in final_read.items
++    ] == [
++        ("alice-item", "alice", {"owner": "alice"}),
++        ("bob-item", "bob", {"owner": "bob"}),
++        (
++            "bob-after-relocation",
++            "bob",
++            {"owner": "bob", "phase": "relocated"},
++        ),
++    ]
++    final_verified = verify_target(relocated)
++    assert final_verified.captured_head == continued.commit.after
++    assert final_verified.verified_through == final_read.basis.captured_head
+

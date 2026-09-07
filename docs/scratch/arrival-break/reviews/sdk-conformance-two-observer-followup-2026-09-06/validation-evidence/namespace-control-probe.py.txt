@@ -1,0 +1,30 @@
+from pathlib import Path
+import os
+import runpy
+import sys
+import tempfile
+from sdk import MappedCredentialProvider
+
+original = MappedCredentialProvider.resolve
+other_calls = 0
+def broken_other_namespace(self, request):
+    global other_calls
+    if request.namespace == "other-tenant":
+        other_calls += 1
+        if "--allow-preflight" in sys.argv and other_calls == 1:
+            return original(self, request)
+        raise RuntimeError("probe: provider failed before resolving any key")
+    return original(self, request)
+
+MappedCredentialProvider.resolve = broken_other_namespace
+with tempfile.TemporaryDirectory(prefix="loops-namespace-control-") as temporary:
+    root = Path(temporary)
+    for variable, name in (("XDG_STATE_HOME", "state"), ("XDG_CONFIG_HOME", "config"), ("LOOPS_HOME", "loops-home")):
+        os.environ[variable] = str(root / name)
+    workflow = runpy.run_path(sys.argv[1])["test_mapped_two_observer_workload_survives_descriptor_relocation"]
+    try:
+        workflow(root)
+    except (AssertionError, RuntimeError) as exc:
+        print("BROKEN_RESOLUTION_REJECTED_BY_TEST:", type(exc).__name__)
+    else:
+        print("FALSE_POSITIVE: workflow passes despite other-tenant resolver failure")

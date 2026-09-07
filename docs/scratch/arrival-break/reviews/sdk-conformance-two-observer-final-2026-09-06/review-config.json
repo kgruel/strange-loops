@@ -1,0 +1,22 @@
+{
+  "instruction": "You are the independent adversarial Fable reviewer for a bounded public SDK workload-conformance slice on loops arrival/finish, baseline a36487dc. Effort LOW. Review the recommendations, executable workflow, documentation, and validation evidence. This is a prerequisite to C9 transition/retirement, NOT the implementation of C9 or other listed workflows. No production behavior was changed. Your job is to find concrete gaps or false claims in the new end-to-end conformance test, especially observer identity vs local namespace selection vs captured authorization, grant/write/read/verify head chaining, moved descriptor with absolute unchanged store location, fresh provider after move, refused writes leaving history unchanged, and whether public result assertions could pass despite wrong behavior. verify_target Full explicitly excludes signatures/trust/projection; domain crypto regressions already exist separately and are supplied as context. Do not require recreating all existing unit tests or deferred features, or broaden this into relative-path relocation/adoption/multi-machine custody/CLI migration. All tests use disposable isolated XDG_STATE_HOME, XDG_CONFIG_HOME and LOOPS_HOME. You receive a frozen static packet; no tools or execution, and do not claim independent test execution. Return ACCEPT or REVISE, concrete blockers with source references and an observable counterexample, separately any optional improvements. Distinguish existing API limitations from failures introduced or untested within the stated workload. Root independently triages your review.",
+  "sources": [
+    "docs/scratch/arrival-break/sdk-conformance-two-observer-2026-09-06.md",
+    "libs/sdk/README.md",
+    "libs/sdk/tests/test_arrival_mapped_workload.py",
+    "libs/sdk/tests/test_arrival_mapped_credentials.py",
+    "libs/sdk/src/sdk/verify.py",
+    "libs/sdk/src/sdk/types.py",
+    "libs/sdk/src/sdk/emit.py",
+    "libs/sdk/src/sdk/declare.py",
+    "libs/sdk/src/sdk/kind.py",
+    "libs/sdk/src/sdk/target.py",
+    "libs/engine/src/engine/credentials.py",
+    "libs/sdk/src/sdk/read.py",
+    "libs/sdk/src/sdk/errors.py",
+    "libs/engine/src/engine/arrival_registry.py",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/validation-evidence/sdk-full.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/validation-evidence/architecture-full.txt"
+  ],
+  "patch": true
+}

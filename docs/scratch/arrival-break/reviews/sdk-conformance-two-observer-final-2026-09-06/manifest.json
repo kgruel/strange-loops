@@ -1,0 +1,35 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06",
+  "due_at": "2026-09-07T00:36:56.352794+00:00",
+  "baseline": "a36487dc",
+  "scope": "Public SDK two-observer conformance final",
+  "jobs": [
+    {
+      "name": "final",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/final-prompt.txt",
+      "sha256": "48dd3dfa74f8f5bb2d2aec2ae3590719928aa98200dc62fa1c8fc63037d2d59d",
+      "sources": {
+        "docs/scratch/arrival-break/sdk-conformance-two-observer-2026-09-06.md": "d8ddd51ad79768079f2f55c0c2d35319e68f85a1c1c1e86179f55ce52a413a06",
+        "libs/sdk/README.md": "e3717a232a90d69950145e36b7d8092eeea0363604e37bedcd09abc1604dc768",
+        "libs/sdk/tests/test_arrival_mapped_workload.py": "8c8fe02bede187484e73f093ad88cc67bb7d21190d062733888d1ca6925e6e3b",
+        "libs/sdk/tests/test_arrival_mapped_credentials.py": "0694aac70d68daabfcf07fe5fdedc18cccfcf4e22e3f18a4eea170a6553f87bc",
+        "libs/sdk/src/sdk/verify.py": "301162d7ec3ca18c7e60b0b0fd3702a4900b121a5225baf0dbf271777e94f525",
+        "libs/sdk/src/sdk/types.py": "c1ff576595d20953fe5a328a2c528beec9c085c307b1ef0a3b019e7e1775108e",
+        "libs/sdk/src/sdk/emit.py": "145f6e9d27fd83a29e3be5b65ee722cd8f0960acd167bcc5c46a16e9a4d40128",
+        "libs/sdk/src/sdk/declare.py": "7a2106bd2ab50aafb93623212eabff09ef4e92a73748f2c4501d4df1e5d64533",
+        "libs/sdk/src/sdk/kind.py": "f36fa1050442f61c237bf21e6fd6872a2b503c24955cacac89ed3f51378ec5ca",
+        "libs/sdk/src/sdk/target.py": "5e7dbeb993dc0788d242749b7730419e349af8418d4b659134d7180c72841dc8",
+        "libs/engine/src/engine/credentials.py": "6773a4aa60db1767a0c26ad7d344e294b65bd9c99bdaa0b82c4aefff40121882",
+        "libs/sdk/src/sdk/read.py": "cf5d37367cd20b20560f051fd307ac521e3c3651c970b75069473096936b37de",
+        "libs/sdk/src/sdk/errors.py": "a96a5a23ad8c9e1fa8e12d53b7c5a92f9a084181182c1981a8ce989ec1611266",
+        "libs/engine/src/engine/arrival_registry.py": "33e80522d0919a05ced14360c6bf28a3bb049a7f7fda7d12eb11b49f302a2113",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/validation-evidence/sdk-full.txt": "25767340884b03374a4de6185b3df87faf19ecd7b996793b4e733e7483b58f58",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-two-observer-final-2026-09-06/validation-evidence/architecture-full.txt": "46c66a94375fa8474b61235bc6b341c2b0fdef728b6e855d5f3162ebacf30104"
+      },
+      "status": "pending"
+    }
+  ]
+}

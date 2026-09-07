@@ -1,0 +1,8 @@
+{
+  "status": "complete",
+  "raw_verdict": "ACCEPT",
+  "primary_disposition": "ACCEPT",
+  "blockers": 0,
+  "followup_review_required": false,
+  "scope": "D0/D2 final imported-key durability correction and slice closure"
+}

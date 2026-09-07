@@ -1,0 +1,9 @@
+{
+  "status": "complete",
+  "raw_verdict": "ACCEPT",
+  "primary_disposition": "ACCEPT",
+  "blockers": 0,
+  "followup_review_required": false,
+  "scope": "completed-slot recovery correction",
+  "subsequent_finding": "parent-directory durability, separately tracked in consistency-d0-d2-durability-2026-09-06.md"
+}

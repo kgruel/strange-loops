@@ -1,0 +1,4 @@
+interrupted between pending slot and token index
+alice recovery succeeded
+bob refused BindingConflict
+binding count before/after conflicting token: 1 1

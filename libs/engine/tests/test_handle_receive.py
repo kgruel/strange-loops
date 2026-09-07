@@ -66,6 +66,26 @@ class _Creds:
         return self.current
 
 
+def test_legacy_handle_refuses_mapped_credentials_before_write(tmp_path):
+    vpath, store = _scaffold(tmp_path)
+    credentials = _Creds(
+        WriteCredentials(
+            binding_namespace="space",
+            binding_resolver=lambda _request: None,
+            signature_verifier=lambda *_args: True,
+        )
+    )
+
+    with (
+        open_vertex(vpath, credentials=credentials) as handle,
+        pytest.raises(HandleError, match="Arrival registry writer"),
+    ):
+        handle.receive(Fact.of("decision", "kyle", topic="a"))
+
+    with sqlite3.connect(store) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 0
+
+
 def _scaffold(tmp_path: Path, kdl: str = _VERTEX_KDL) -> tuple[Path, Path]:
     store = tmp_path / "t.db"
     vpath = tmp_path / "t.vertex"
@@ -81,7 +101,8 @@ def _append(store: Path, kind: str, ts: float, *, fid: str | None = None, **payl
     fid = fid or gen_id()
     ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
     conn.execute(
-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, "
+        "arrival_ordinal, arrival_seq) "
         "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
         (fid, kind, ts, "kyle", "", json.dumps(payload), ord_val),
     )

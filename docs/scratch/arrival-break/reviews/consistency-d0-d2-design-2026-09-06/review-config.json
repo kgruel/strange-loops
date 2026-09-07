@@ -1,0 +1,18 @@
+{
+  "instruction": "You are Fable 5.1 at LOW effort conducting an adversarial static DESIGN review for D0\u2192D2 in the Arrival SDK. Return ACCEPT or REVISE, concrete blockers with counterexamples and source support, then optional notes. No tools; do not claim to run tests. Keep response under 1400 words. User authorized D0 explicit credential contract then D2 persisted exact-identity bindings, preserving legacy flat/nested compatibility and ambiguity refusal. This is not global identity, key revocation, implicit migration, or a wire schema rewrite. Review the proposed design against supplied current source and audit. Focus exact namespace/observer/domain selection distinct from captured-H authority; successor coordinate vs H; tick receipt policy vs authorship; initialization/recovery; coherent ordinary/batch/source/declaration/grant call sites; no key creation in reads/preview/loading; atomic concurrent creation and interruption reconciliation; mismatch refusal preserving bytes. The default legacy provider remains a compatibility adapter, mapped provider is explicitly configured. Call out under-specified contracts before implementation, but distinguish scoped limitations from unjustified new guarantees. Full source is current baseline, not implemented design.",
+  "sources": [
+    "docs/scratch/arrival-break/consistency-d0-d2-design-2026-09-06.md",
+    "docs/scratch/arrival-break/identity-decisions-2026-09-06.md",
+    "docs/scratch/arrival-break/consistency-d0-d2-code-audit-2026-09-06.md",
+    "docs/scratch/arrival-break/consistency-d0-d2-validation-2026-09-06.md",
+    "libs/engine/src/engine/credentials.py",
+    "libs/custody/src/custody/signing.py",
+    "libs/sign/src/sign/ed25519.py",
+    "libs/engine/src/engine/runtime_write.py",
+    "libs/engine/src/engine/arrival_initialization.py",
+    "libs/engine/src/engine/arrival_declarations.py",
+    "libs/sdk/src/sdk/emit.py",
+    "libs/sdk/src/sdk/declare.py",
+    "libs/sdk/src/sdk/kind.py"
+  ]
+}

@@ -1,0 +1,4115 @@
+diff --git a/libs/custody/README.md b/libs/custody/README.md
+index 36d46c70..f59b86dc 100644
+--- a/libs/custody/README.md
++++ b/libs/custody/README.md
+@@ -24,3 +24,46 @@ Any client that emits signed facts or ticks must compose identically or
+ Depends on `sign` (loops-agnostic Ed25519 primitives) and `engine`
+ (store-canonical declaration resolution). The engine itself never imports
+ this — it takes signer callables by injection.
++
++
++## Explicit mapped bindings
++
++`MappedCredentialProvider(root, namespace=..., receipt_observer=...)` provides
++an opt-in alternative to locator-based custody. Exact namespace/observer
++strings select an opaque managed key reference recorded with its public key.
++All three signing domains use that binding with separate domain prefixes.
++Hashed filesystem slots are storage details; labels retain their exact case,
++Unicode spelling, and non-path characters. A binding does not authorize an
++Arrival claim by itself: the engine separately checks captured history.
++
++`for_write` returns lazy configuration. `resolve` loads and validates the
++binding, private-derived public material, and any existing public convenience
++file without creating or repairing anything. Missing unbound identities can
++remain unsigned; malformed mappings, conflicting public material, missing
++referenced private keys, and filesystem aliases refuse.
++
++Explicit mutations are `create_binding(observer, token=...)`,
++`import_legacy(vertex_path, observer, token=...)`, and
++`bind_existing_ref(observer, key_ref, expected_public_key, token=...)`.
++Import copies private material into managed custody and preserves the original
++files. Reusing a managed reference is deliberate and does not introduce its
++public key into an Arrival lineage. Existing bindings are not silently
++replaced; local rotation is a separate future operation.
++
++Mutations use a provider-wide POSIX advisory lock, durable intents, and
++complete-file publication with no-clobber links. The supported filesystem must
++provide those lock, link, and fsync semantics. Concurrent creators converge
++on one binding; resolution remains read-only. There is no automatic orphan
++cleanup or key deletion.
++
++Keep the operation token when a mutation is interrupted.
++`BindingMutationIncomplete` retains namespace, observer, token, candidate key
++reference, and phase; the binding may already have been published.
++`recover_binding(observer, token=...)` reconciles the retained intent and
++candidate. It never replaces a missing key referenced by a published binding.
++An import interrupted before copying private material needs the original
++source re-presented with the same import token and expected public material;
++recovery cannot invent that key. A completed imported candidate can recover
++without the old source directory. Retrying with a different token does not
++bypass an unfinished operation. Creation results report the returned binding
++and effects of that invocation; they contain no private key material.
+diff --git a/libs/custody/src/custody/__init__.py b/libs/custody/src/custody/__init__.py
+index b61893aa..4558d8c5 100644
+--- a/libs/custody/src/custody/__init__.py
++++ b/libs/custody/src/custody/__init__.py
+@@ -6,6 +6,13 @@ architecture/custody-lib-extraction) when tasked became the second
+ consumer — a format definition sits below every writer.
+ """
+ 
++from custody.binding import (
++    BindingConflict,
++    BindingCreationResult,
++    BindingMutationIncomplete,
++    BindingRecoveryRequired,
++    MappedCredentialProvider,
++)
+ from custody.signing import (
+     ARRIVAL_DOMAIN,
+     FACT_DOMAIN,
+@@ -26,6 +33,11 @@ __all__ = [
+     "ARRIVAL_DOMAIN",
+     "FACT_DOMAIN",
+     "TICK_DOMAIN",
++    "BindingConflict",
++    "BindingCreationResult",
++    "BindingMutationIncomplete",
++    "BindingRecoveryRequired",
++    "MappedCredentialProvider",
+     "arrival_signer_for",
+     "arrival_verifier_for",
+     "declared_observer_keys",
+diff --git a/libs/custody/src/custody/binding.py b/libs/custody/src/custody/binding.py
+new file mode 100644
+index 00000000..585475b0
+--- /dev/null
++++ b/libs/custody/src/custody/binding.py
+@@ -0,0 +1,861 @@
++"""Explicit, namespace-scoped local signing-key bindings.
++
++This module deliberately does not inspect a vertex locator while resolving a
++credential.  Locator-derived custody remains in :mod:`custody.signing`; a
++mapped binding is an explicit local record keyed by exact namespace and
++observer strings.
++"""
++
++from __future__ import annotations
++
++import fcntl
++import hashlib
++import json
++import os
++import re
++import tempfile
++import uuid
++from collections.abc import Callable, Iterator
++from contextlib import contextmanager, nullcontext
++from dataclasses import dataclass
++from pathlib import Path
++from stat import S_ISDIR, S_ISREG
++
++from engine.credentials import (
++    CredentialBindingEvidence,
++    CredentialBindingRefused,
++    CredentialRequest,
++    ResolvedCredential,
++    SigningDomain,
++    WriteCredentials,
++)
++from sign import ed25519
++
++from .signing import (
++    ARRIVAL_DOMAIN,
++    FACT_DOMAIN,
++    TICK_DOMAIN,
++    _observer_key_dir,
++    _self_key_dir,
++    _self_observer,
++    keys_dir_for,
++)
++
++__all__ = [
++    "BindingConflict",
++    "BindingCreationResult",
++    "BindingMutationIncomplete",
++    "BindingRecoveryRequired",
++    "MappedCredentialProvider",
++]
++
++_SCHEMA = "loops.custody/binding/v1"
++_INTENT_SCHEMA = "loops.custody/binding-intent/v1"
++_KEY_REF = re.compile(r"^[0-9a-f]{32}$")
++
++
++class BindingConflict(ValueError):
++    """An explicit mutation conflicts with an already published binding."""
++
++
++class BindingRecoveryRequired(ValueError):
++    """A different durable mutation token owns this namespace/observer slot."""
++
++
++class BindingMutationIncomplete(ValueError):
++    """A durable binding mutation needs reconciliation rather than blind retry."""
++
++    def __init__(
++        self,
++        *,
++        namespace: str,
++        observer: str,
++        token: str,
++        key_ref: str,
++        phase: str,
++    ) -> None:
++        super().__init__("mapped binding mutation outcome is incomplete or unknown")
++        self.namespace = namespace
++        self.observer = observer
++        self.token = token
++        self.key_ref = key_ref
++        self.phase = phase
++
++
++@dataclass(frozen=True)
++class BindingCreationResult:
++    """The durable result of an explicit local binding mutation."""
++
++    namespace: str
++    observer: str
++    key_ref: str
++    public_key: str
++    provenance: str
++    token: str
++    binding_created: bool
++    key_created: bool
++
++
++def _exact(value: str, field: str) -> str:
++    if not isinstance(value, str) or not value:
++        raise ValueError(f"{field} must be a non-empty string")
++    return value
++
++
++def _frame(*values: str) -> bytes:
++    encoded = [value.encode("utf-8") for value in values]
++    return b"".join(len(value).to_bytes(8, "big") + value for value in encoded)
++
++
++def _digest(*values: str) -> str:
++    return hashlib.sha256(_frame(*values)).hexdigest()
++
++
++def _domain_prefix(domain: SigningDomain) -> str:
++    prefixes = {
++        SigningDomain.FACT: FACT_DOMAIN,
++        SigningDomain.ARRIVAL: ARRIVAL_DOMAIN,
++        SigningDomain.TICK: TICK_DOMAIN,
++    }
++    try:
++        return prefixes[domain]
++    except KeyError as exc:  # defensive for a future neutral enum member
++        raise ValueError(f"unsupported signing domain {domain!r}") from exc
++
++
++def _lstat_kind(path: Path) -> int | None:
++    try:
++        return path.lstat().st_mode
++    except FileNotFoundError:
++        return None
++
++
++def _regular(path: Path, *, required: bool = True) -> bool:
++    mode = _lstat_kind(path)
++    if mode is None:
++        if required:
++            raise FileNotFoundError(path)
++        return False
++    if not S_ISREG(mode):
++        raise ValueError(f"mapped custody path is not a regular file: {path}")
++    return True
++
++
++def _directory(path: Path, *, create: bool = False) -> None:
++    mode = _lstat_kind(path)
++    if mode is None:
++        if not create:
++            raise FileNotFoundError(path)
++        try:
++            path.mkdir(parents=True, exist_ok=False)
++        except FileExistsError:
++            # Another process may have created it between lstat and mkdir.
++            # Recheck its real type below; never treat a symlink as convergence.
++            pass
++        mode = _lstat_kind(path)
++    if mode is None or not S_ISDIR(mode):
++        raise ValueError(f"mapped custody path is not a directory: {path}")
++
++
++def _fsync_directory(path: Path) -> None:
++    fd = os.open(path, os.O_RDONLY)
++    try:
++        os.fsync(fd)
++    finally:
++        os.close(fd)
++
++
++def _publish_no_clobber(path: Path, payload: bytes, *, mode: int = 0o600) -> bool:
++    """Atomically publish bytes, returning false if another complete file won."""
++    _directory(path.parent, create=True)
++    fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
++    temporary = Path(raw)
++    try:
++        with os.fdopen(fd, "wb") as stream:
++            stream.write(payload)
++            stream.flush()
++            os.fsync(stream.fileno())
++        temporary.chmod(mode)
++        try:
++            os.link(temporary, path)
++        except FileExistsError:
++            return False
++        _fsync_directory(path.parent)
++        return True
++    finally:
++        temporary.unlink(missing_ok=True)
++
++
++def _json_bytes(value: dict[str, object]) -> bytes:
++    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
++
++
++class MappedCredentialProvider:
++    """Resolve explicit namespace/observer bindings without locator inference.
++
++    ``resolve`` and ``verify`` are read-only.  Binding creation, import, and
++    existing-reference publication are separate durable mutations serialized by
++    one provider-root advisory lock.
++    """
++
++    def __init__(
++        self,
++        root: Path | str,
++        *,
++        namespace: str,
++        receipt_observer: str | None = None,
++        _creation_hook: Callable[[str, dict[str, object]], None] | None = None,
++    ) -> None:
++        self.root = Path(root)
++        self.namespace = _exact(namespace, "namespace")
++        self.receipt_observer = (
++            _exact(receipt_observer, "receipt_observer")
++            if receipt_observer is not None
++            else None
++        )
++        # Test-only fault injection. It is intentionally absent from public
++        # results and never called by read resolution.
++        self._creation_hook = _creation_hook
++
++    @property
++    def mapped(self) -> bool:
++        """Allow SDK compatibility arms to refuse mapped-to-legacy downgrade."""
++        return True
++
++    def for_write(self, vertex: Path) -> WriteCredentials:
++        """Return lazy mapped credentials; ``vertex`` selects no local key."""
++        del vertex
++        return WriteCredentials(
++            binding_namespace=self.namespace,
++            receipt_observer=self.receipt_observer,
++            binding_resolver=self.resolve,
++            signature_verifier=self.verify,
++        )
++
++    def _slot(self, namespace: str, observer: str) -> str:
++        return _digest(namespace, observer)
++
++    def _binding_path(self, namespace: str, observer: str) -> Path:
++        return self.root / "bindings-v1" / f"{self._slot(namespace, observer)}.json"
++
++    def _pending_path(self, namespace: str, observer: str) -> Path:
++        return self.root / "pending-v1" / f"{self._slot(namespace, observer)}.json"
++
++    def _intent_path(self, token: str) -> Path:
++        return self.root / "intents-v1" / f"{_digest(token)}.json"
++
++    def _key_dir(self, key_ref: str) -> Path:
++        if not _KEY_REF.fullmatch(key_ref):
++            raise ValueError("mapped custody key reference is malformed")
++        return self.root / "keys-v1" / key_ref
++
++    def _root_dir(self, *, create: bool) -> bool:
++        """Validate the configured root without making reads persistent."""
++        mode = _lstat_kind(self.root)
++        if mode is None:
++            if not create:
++                return False
++            _directory(self.root, create=True)
++        elif not S_ISDIR(mode):
++            raise ValueError("mapped custody root is not a directory")
++        return True
++
++    def _subdir(self, name: str, *, create: bool) -> Path | None:
++        if not self._root_dir(create=create):
++            return None
++        path = self.root / name
++        mode = _lstat_kind(path)
++        if mode is None:
++            if not create:
++                return None
++            _directory(path, create=True)
++        elif not S_ISDIR(mode):
++            raise ValueError(f"mapped custody path is not a directory: {path}")
++        return path
++
++    @contextmanager
++    def _mutation_lock(self) -> Iterator[None]:
++        self._root_dir(create=True)
++        lock_path = self.root / ".bindings-v1.lock"
++        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
++        fd = os.open(lock_path, flags, 0o600)
++        try:
++            if not S_ISREG(os.fstat(fd).st_mode):
++                raise ValueError("mapped custody lock is not a regular file")
++            fcntl.flock(fd, fcntl.LOCK_EX)
++            yield
++        finally:
++            fcntl.flock(fd, fcntl.LOCK_UN)
++            os.close(fd)
++
++    def _read_json(self, path: Path) -> dict[str, object] | None:
++        if not _regular(path, required=False):
++            return None
++        try:
++            def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
++                result: dict[str, object] = {}
++                for key, value in pairs:
++                    if key in result:
++                        raise ValueError(f"duplicate field {key!r}")
++                    result[key] = value
++                return result
++
++            loaded = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
++        except (OSError, json.JSONDecodeError) as exc:
++            raise ValueError(f"malformed mapped custody record: {path}") from exc
++        if not isinstance(loaded, dict):
++            raise TypeError(f"mapped custody record is not an object: {path}")
++        return loaded
++
++    def _binding_record(self, namespace: str, observer: str) -> dict[str, object] | None:
++        parent = self._subdir("bindings-v1", create=False)
++        if parent is None:
++            return None
++        record = self._read_json(parent / f"{self._slot(namespace, observer)}.json")
++        if record is None:
++            return None
++        expected = {
++            "schema": _SCHEMA,
++            "namespace": namespace,
++            "observer": observer,
++        }
++        if any(record.get(key) != value for key, value in expected.items()):
++            raise ValueError("mapped custody binding does not match its slot")
++        for key in ("key_ref", "algorithm", "public_key", "provenance"):
++            if not isinstance(record.get(key), str) or not record[key]:
++                raise ValueError(f"mapped custody binding lacks {key}")
++        if record["algorithm"] != "ed25519":
++            raise ValueError("mapped custody binding has unsupported algorithm")
++        self._key_dir(str(record["key_ref"]))
++        return record
++
++    def _load_keypair(self, key_ref: str, *, require_public_file: bool = False):
++        keys = self._subdir("keys-v1", create=False)
++        if keys is None:
++            raise FileNotFoundError(self.root / "keys-v1")
++        key_dir = keys / key_ref
++        mode = _lstat_kind(key_dir)
++        if mode is None or not S_ISDIR(mode):
++            raise FileNotFoundError(key_dir)
++        private_path = key_dir / "ed25519.key"
++        _regular(private_path)
++        pair = ed25519.load(key_dir)
++        public_path = key_dir / "ed25519.pub"
++        exists = _regular(public_path, required=False)
++        if require_public_file and not exists:
++            raise ValueError("mapped custody key is missing its public evidence")
++        if exists and public_path.read_text(encoding="utf-8") != pair.public_b64 + "\n":
++            raise ValueError("mapped custody public evidence disagrees with private key")
++        return pair
++
++    def _validated_binding(self, namespace: str, observer: str) -> dict[str, object] | None:
++        record = self._binding_record(namespace, observer)
++        if record is None:
++            return None
++        pair = self._load_keypair(str(record["key_ref"]))
++        if pair.public_b64 != record["public_key"]:
++            raise ValueError("mapped custody binding public key disagrees with private key")
++        return record
++
++    def _completed_key_reference(self, key_ref: str, expected_public_key: str) -> None:
++        """Require explicit reuse to name a published, validated binding."""
++        bindings = self._subdir("bindings-v1", create=False)
++        if bindings is None:
++            raise FileNotFoundError("no completed mapped binding names this key reference")
++        found = False
++        for path in bindings.iterdir():
++            if path.suffix != ".json":
++                continue
++            record = self._read_json(path)
++            if record is None or record.get("key_ref") != key_ref:
++                continue
++            if (
++                record.get("schema") != _SCHEMA
++                or not isinstance(record.get("namespace"), str)
++                or not isinstance(record.get("observer"), str)
++                or record.get("public_key") != expected_public_key
++            ):
++                raise ValueError("published mapped binding is malformed")
++            slot = f"{self._slot(str(record['namespace']), str(record['observer']))}.json"
++            if path.name != slot:
++                raise ValueError("published mapped binding is stored in the wrong slot")
++            pair = self._load_keypair(key_ref, require_public_file=True)
++            if pair.public_b64 != expected_public_key:
++                raise ValueError("published mapped binding disagrees with its key object")
++            found = True
++        if not found:
++            raise FileNotFoundError("no completed mapped binding names this key reference")
++
++    def _evidence(
++        self, request: CredentialRequest, record: dict[str, object]
++    ) -> CredentialBindingEvidence:
++        return CredentialBindingEvidence(
++            request=request,
++            key_ref=str(record["key_ref"]),
++            algorithm="ed25519",
++            public_key=str(record["public_key"]),
++            provenance=str(record["provenance"]),
++        )
++
++    def resolve(self, request: CredentialRequest) -> ResolvedCredential | None:
++        """Resolve one credential without locks, mkdirs, repair, or fallback."""
++        if request.namespace != self.namespace:
++            raise CredentialBindingRefused("request-mismatch", request=request)
++        try:
++            record = self._validated_binding(request.namespace, request.observer)
++            if record is None:
++                pending_dir = self._subdir("pending-v1", create=False)
++                pending = (
++                    None
++                    if pending_dir is None
++                    else self._read_json(pending_dir / f"{self._slot(request.namespace, request.observer)}.json")
++                )
++                if pending is not None:
++                    raise CredentialBindingRefused("recovery-required", request=request)
++                return None
++            pair = self._load_keypair(str(record["key_ref"]))
++            evidence = self._evidence(request, record)
++        except CredentialBindingRefused:
++            raise
++        except (OSError, ValueError) as exc:
++            raise CredentialBindingRefused("corrupt-binding", request=request) from exc
++        return ResolvedCredential(
++            evidence=evidence,
++            sign_digest=lambda digest: ed25519.sign(
++                pair, digest.encode(), domain=_domain_prefix(request.domain)
++            ),
++        )
++
++    def verify(
++        self, domain: SigningDomain, public_key: str, signature: str, digest: str
++    ) -> bool:
++        """Verify under the custody-owned domain prefix without persistence."""
++        try:
++            public = ed25519.public_key_from_b64(public_key)
++        except ValueError:
++            return False
++        return ed25519.verify(public, signature, digest.encode(), domain=_domain_prefix(domain))
++
++    def _new_intent(
++        self,
++        observer: str,
++        *,
++        token: str,
++        provenance: str,
++        key_ref: str | None = None,
++        expected_public_key: str | None = None,
++    ) -> dict[str, object]:
++        _exact(observer, "observer")
++        _exact(token, "token")
++        key_ref = key_ref or uuid.uuid4().hex
++        self._key_dir(key_ref)
++        return {
++            "schema": _INTENT_SCHEMA,
++            "namespace": self.namespace,
++            "observer": observer,
++            "token": token,
++            "key_ref": key_ref,
++            "provenance": provenance,
++            "expected_public_key": expected_public_key,
++            "stage": "pending",
++        }
++
++    def _intent_for(
++        self, observer: str, *, token: str, provenance: str, key_ref: str | None = None,
++        expected_public_key: str | None = None,
++    ) -> dict[str, object]:
++        intents = self._subdir("intents-v1", create=False)
++        token_record = (
++            None if intents is None else self._read_json(intents / f"{_digest(token)}.json")
++        )
++        if token_record is not None and (
++            token_record.get("namespace") != self.namespace
++            or token_record.get("observer") != observer
++        ):
++            raise BindingConflict("mapped binding token already names another intent")
++        completed = self._validated_binding(self.namespace, observer)
++        if completed is not None:
++            if (
++                (expected_public_key is not None and completed["public_key"] != expected_public_key)
++                or (key_ref is not None and completed["key_ref"] != key_ref)
++                or (
++                    token_record is not None
++                    and (
++                        token_record.get("provenance") != provenance
++                        or token_record.get("key_ref") != completed["key_ref"]
++                    )
++                )
++            ):
++                raise BindingConflict("existing mapped binding has a different public key")
++            return {
++                "completed": True,
++                "key_ref": completed["key_ref"],
++                "public_key": completed["public_key"],
++                "provenance": completed["provenance"],
++                "token": token,
++            }
++        pending_dir = self._subdir("pending-v1", create=False)
++        pending = (
++            None
++            if pending_dir is None
++            else self._read_json(pending_dir / f"{self._slot(self.namespace, observer)}.json")
++        )
++        if pending is not None:
++            if pending.get("token") != token:
++                raise BindingRecoveryRequired(
++                    "a different durable token owns this mapped binding slot"
++                )
++            if (
++                pending.get("namespace") != self.namespace
++                or pending.get("observer") != observer
++                or pending.get("provenance") != provenance
++                or (key_ref is not None and pending.get("key_ref") != key_ref)
++                or (
++                    expected_public_key is not None
++                    and pending.get("expected_public_key") != expected_public_key
++                )
++            ):
++                raise BindingConflict("mapped binding token was reused with different intent")
++            return pending
++        intent = self._new_intent(
++            observer,
++            token=token,
++            provenance=provenance,
++            key_ref=key_ref,
++            expected_public_key=expected_public_key,
++        )
++        pending_dir = self._subdir("pending-v1", create=True)
++        intents = self._subdir("intents-v1", create=True)
++        assert pending_dir is not None and intents is not None
++        # The slot marker contains the complete intent. If a process dies before
++        # the token index is linked, callers which know observer/token can still
++        # recover coherently; no directory scan or candidate deletion occurs.
++        if not _publish_no_clobber(
++            pending_dir / f"{self._slot(self.namespace, observer)}.json", _json_bytes(intent)
++        ):
++            return self._intent_for(
++                observer,
++                token=token,
++                provenance=provenance,
++                key_ref=key_ref,
++                expected_public_key=expected_public_key,
++            )
++        if not _publish_no_clobber(intents / f"{_digest(token)}.json", _json_bytes(intent)):
++            existing = self._read_json(intents / f"{_digest(token)}.json")
++            if existing != intent:
++                raise BindingConflict("mapped binding token already names another intent")
++        return intent
++
++    def _pending_for_recovery(self, observer: str, token: str) -> dict[str, object]:
++        pending_dir = self._subdir("pending-v1", create=False)
++        if pending_dir is None:
++            raise BindingRecoveryRequired("no durable mapped binding intent exists")
++        pending = self._read_json(
++            pending_dir / f"{self._slot(self.namespace, observer)}.json"
++        )
++        if pending is None:
++            raise BindingRecoveryRequired("no durable mapped binding intent exists")
++        if (
++            pending.get("schema") != _INTENT_SCHEMA
++            or pending.get("namespace") != self.namespace
++            or pending.get("observer") != observer
++            or pending.get("token") != token
++            or pending.get("stage") != "pending"
++            or pending.get("provenance") not in {"created", "legacy-import", "existing-ref"}
++            or not isinstance(pending.get("key_ref"), str)
++        ):
++            raise BindingRecoveryRequired("mapped binding recovery token does not match a pending intent")
++        self._key_dir(str(pending["key_ref"]))
++        return pending
++
++    def _hook(self, phase: str, intent: dict[str, object]) -> None:
++        if self._creation_hook is not None:
++            self._creation_hook(phase, dict(intent))
++
++    def _ensure_created_key(self, intent: dict[str, object]):
++        key_ref = str(intent["key_ref"])
++        keys = self._subdir("keys-v1", create=True)
++        assert keys is not None
++        key_dir = keys / key_ref
++        mode = _lstat_kind(key_dir)
++        created = False
++        if mode is None:
++            _directory(key_dir, create=True)
++            # A newly private directory is the only place convenience creation
++            # is permitted. Existing managed objects are always loaded/checked.
++            pair = ed25519.load_or_generate(key_dir)
++            created = True
++        else:
++            if not S_ISDIR(mode):
++                raise ValueError("mapped custody candidate key path is not a directory")
++            private = key_dir / "ed25519.key"
++            public = key_dir / "ed25519.pub"
++            if _lstat_kind(private) is None:
++                # This intent exclusively reserved the candidate ref. It is
++                # safe to resume a crash before the private object existed.
++                if _lstat_kind(public) is not None:
++                    raise ValueError("incomplete candidate has public evidence without private key")
++                pair = ed25519.load_or_generate(key_dir)
++                created = True
++            else:
++                pair = self._load_keypair(key_ref)
++                if _lstat_kind(public) is None:
++                    # A crash between durable private and public publication is
++                    # resumable only for this retained, provider-owned intent.
++                    _publish_no_clobber(public, (pair.public_b64 + "\n").encode(), mode=0o644)
++                    _fsync_directory(key_dir)
++                pair = self._load_keypair(key_ref, require_public_file=True)
++        self._hook("key-published", intent)
++        return pair, created
++
++    def _copy_key(self, source: Path, intent: dict[str, object]):
++        source_pair = self._load_external_key(source)
++        keys = self._subdir("keys-v1", create=True)
++        assert keys is not None
++        key_dir = keys / str(intent["key_ref"])
++        if _lstat_kind(key_dir) is None:
++            _directory(key_dir, create=True)
++            _publish_no_clobber(
++                key_dir / "ed25519.key", (source / "ed25519.key").read_bytes()
++            )
++            _publish_no_clobber(
++                key_dir / "ed25519.pub", (source_pair.public_b64 + "\n").encode(), mode=0o644
++            )
++            _fsync_directory(key_dir)
++            created = True
++        else:
++            source_pair = self._load_keypair(
++                str(intent["key_ref"]), require_public_file=True
++            )
++            created = False
++        candidate = self._load_keypair(str(intent["key_ref"]), require_public_file=True)
++        if candidate.public_b64 != source_pair.public_b64:
++            raise BindingConflict("copied candidate disagrees with the validated source key")
++        self._hook("key-published", intent)
++        return candidate, created
++
++    def _load_external_key(self, key_dir: Path):
++        mode = _lstat_kind(key_dir)
++        if mode is None or not S_ISDIR(mode):
++            raise FileNotFoundError(key_dir)
++        private = key_dir / "ed25519.key"
++        _regular(private)
++        pair = ed25519.load(key_dir)
++        public = key_dir / "ed25519.pub"
++        if _regular(public, required=False) and public.read_text(encoding="utf-8") != pair.public_b64 + "\n":
++            raise ValueError("source custody public evidence disagrees with private key")
++        return pair
++
++    def _publish_binding(self, intent: dict[str, object], pair) -> tuple[dict[str, object], bool]:
++        expected = intent.get("expected_public_key")
++        if expected is not None and pair.public_b64 != expected:
++            raise BindingConflict("candidate key does not match expected public key")
++        record: dict[str, object] = {
++            "schema": _SCHEMA,
++            "namespace": self.namespace,
++            "observer": intent["observer"],
++            "key_ref": intent["key_ref"],
++            "algorithm": "ed25519",
++            "public_key": pair.public_b64,
++            "provenance": intent["provenance"],
++        }
++        bindings = self._subdir("bindings-v1", create=True)
++        assert bindings is not None
++        published = _publish_no_clobber(
++            bindings / f"{self._slot(self.namespace, str(intent['observer']))}.json", _json_bytes(record)
++        )
++        if not published:
++            existing = self._binding_record(self.namespace, str(intent["observer"]))
++            assert existing is not None
++            if existing["public_key"] != pair.public_b64:
++                raise BindingConflict("another binding won with a different public key")
++            return existing, False
++        self._hook("binding-published", intent)
++        complete = dict(intent)
++        complete["stage"] = "complete"
++        # Intent files are retained as durable recovery evidence. The marker is
++        # deliberately not removed automatically, avoiding unsafe cleanup races.
++        intents = self._subdir("intents-v1", create=True)
++        assert intents is not None
++        completion = intents / f"{_digest(str(intent['token']))}.complete.json"
++        if not _publish_no_clobber(completion, _json_bytes(complete)):
++            existing = self._read_json(completion)
++            if existing != complete:
++                raise BindingConflict("mapped binding completion receipt conflicts with its intent")
++        return record, True
++
++    def _mutate(
++        self,
++        observer: str,
++        *,
++        token: str,
++        provenance: str,
++        key_ref: str | None = None,
++        expected_public_key: str | None = None,
++        source_key_dir: Path | None = None,
++        _locked: bool = False,
++    ) -> BindingCreationResult:
++        with (nullcontext() if _locked else self._mutation_lock()):
++            intent = self._intent_for(
++                observer,
++                token=token,
++                provenance=provenance,
++                key_ref=key_ref,
++                expected_public_key=expected_public_key,
++            )
++            if intent.get("completed"):
++                return BindingCreationResult(
++                    namespace=self.namespace,
++                    observer=observer,
++                    key_ref=str(intent["key_ref"]),
++                    public_key=str(intent["public_key"]),
++                    provenance=str(intent["provenance"]),
++                    token=token,
++                    binding_created=False,
++                    key_created=False,
++                )
++            phase = "intent-published"
++            try:
++                self._hook(phase, intent)
++                if source_key_dir is None:
++                    phase = "key-published"
++                    pair, key_created = self._ensure_created_key(intent)
++                else:
++                    phase = "key-published"
++                    pair, key_created = self._copy_key(source_key_dir, intent)
++                phase = "binding-published"
++                record, binding_created = self._publish_binding(intent, pair)
++            except BaseException as exc:
++                if not isinstance(exc, Exception):
++                    raise
++                raise BindingMutationIncomplete(
++                    namespace=self.namespace,
++                    observer=observer,
++                    token=token,
++                    key_ref=str(intent["key_ref"]),
++                    phase=phase,
++                ) from exc
++            return BindingCreationResult(
++                namespace=self.namespace,
++                observer=observer,
++                key_ref=str(record["key_ref"]),
++                public_key=str(record["public_key"]),
++                provenance=str(record["provenance"]),
++                token=token,
++                binding_created=binding_created,
++                key_created=key_created,
++            )
++
++    def create_binding(self, observer: str, *, token: str) -> BindingCreationResult:
++        """Create or recover one explicit mapped key binding."""
++        return self._mutate(observer, token=token, provenance="created")
++
++    def recover_binding(self, observer: str, *, token: str) -> BindingCreationResult:
++        """Resume the exact token's durable binding intent without a new key."""
++        _exact(observer, "observer")
++        _exact(token, "token")
++        with self._mutation_lock():
++            # A published slot is authority over its candidate. Validate it
++            # before looking at a retained pending marker so a missing/moved key
++            # can never be regenerated under an already-named reference.
++            published = self._binding_record(self.namespace, observer)
++            if published is not None:
++                self._validated_binding(self.namespace, observer)
++                intent = self._pending_for_recovery(observer, token)
++                return BindingCreationResult(
++                    namespace=self.namespace,
++                    observer=observer,
++                    key_ref=str(published["key_ref"]),
++                    public_key=str(published["public_key"]),
++                    provenance=str(published["provenance"]),
++                    token=str(intent["token"]),
++                    binding_created=False,
++                    key_created=False,
++                )
++            intent = self._pending_for_recovery(observer, token)
++            provenance = str(intent["provenance"])
++            if provenance == "created":
++                pair, key_created = self._ensure_created_key(intent)
++            else:
++                # Import and existing-reference intents have already selected a
++                # durable candidate. Recovery never reopens the legacy source
++                # or creates a replacement key under the reserved reference.
++                key_ref = str(intent["key_ref"])
++                try:
++                    pair = self._load_keypair(key_ref)
++                except FileNotFoundError as exc:
++                    if provenance == "legacy-import":
++                        raise BindingRecoveryRequired(
++                            "legacy import candidate is absent; repeat the explicit import with this token"
++                        ) from exc
++                    raise
++                expected = intent.get("expected_public_key")
++                if expected is not None and pair.public_b64 != expected:
++                    raise BindingConflict("recovery candidate disagrees with its intent")
++                key_dir = self._key_dir(key_ref)
++                public = key_dir / "ed25519.pub"
++                if _lstat_kind(public) is None:
++                    if provenance != "legacy-import":
++                        raise BindingRecoveryRequired(
++                            "existing-reference candidate lacks durable public evidence"
++                        )
++                    _publish_no_clobber(public, (pair.public_b64 + "\n").encode(), mode=0o644)
++                    _fsync_directory(key_dir)
++                pair = self._load_keypair(key_ref, require_public_file=True)
++                key_created = False
++            record, binding_created = self._publish_binding(intent, pair)
++            return BindingCreationResult(
++                namespace=self.namespace,
++                observer=observer,
++                key_ref=str(record["key_ref"]),
++                public_key=str(record["public_key"]),
++                provenance=str(record["provenance"]),
++                token=token,
++                binding_created=binding_created,
++                key_created=key_created,
++            )
++
++    def bind_existing_ref(
++        self,
++        observer: str,
++        key_ref: str,
++        expected_public_key: str,
++        *,
++        token: str,
++    ) -> BindingCreationResult:
++        """Deliberately reuse an already managed key in this namespace slot."""
++        _exact(expected_public_key, "expected_public_key")
++        with self._mutation_lock():
++            self._completed_key_reference(key_ref, expected_public_key)
++            return self._mutate(
++                observer,
++                token=token,
++                provenance="existing-ref",
++                key_ref=key_ref,
++                expected_public_key=expected_public_key,
++                source_key_dir=self._key_dir(key_ref),
++                _locked=True,
++            )
++
++    def import_legacy(
++        self, vertex_path: Path | str, observer: str, *, token: str
++    ) -> BindingCreationResult:
++        """Copy one explicitly selected legacy key after load-only validation."""
++        vertex = Path(vertex_path)
++        self_observer = _self_observer(vertex)
++        if observer == self_observer:
++            source = _self_key_dir(vertex)
++        else:
++            source = _observer_key_dir(keys_dir_for(vertex), observer)
++        if source is None:
++            raise FileNotFoundError("legacy custody key is absent")
++        # Validate before publishing any intent/candidate. A bad legacy .pub is
++        # evidence conflict, never something a mapped import repairs.
++        pair = self._load_external_key(source)
++        return self._mutate(
++            observer,
++            token=token,
++            provenance="legacy-import",
++            expected_public_key=pair.public_b64,
++            source_key_dir=source,
++        )
+diff --git a/libs/custody/tests/test_binding.py b/libs/custody/tests/test_binding.py
+new file mode 100644
+index 00000000..338b9d09
+--- /dev/null
++++ b/libs/custody/tests/test_binding.py
+@@ -0,0 +1,174 @@
++from __future__ import annotations
++
++import threading
++from multiprocessing import get_context
++from pathlib import Path
++
++import pytest
++from custody.binding import (
++    BindingMutationIncomplete,
++    BindingRecoveryRequired,
++    MappedCredentialProvider,
++)
++from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
++
++
++@pytest.fixture(autouse=True)
++def isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
++    root = tmp_path / "xdg"
++    monkeypatch.setenv("XDG_STATE_HOME", str(root / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(root / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(root / "loops"))
++
++
++def _request(observer: str, domain: SigningDomain = SigningDomain.FACT) -> CredentialRequest:
++    return CredentialRequest("example/team", observer, domain, CredentialPurpose.AUTHORSHIP)
++
++
++def _create_in_process(root: str, token: str, queue) -> None:
++    """Top-level target so macOS spawn exercises the POSIX file lock."""
++    try:
++        result = MappedCredentialProvider(Path(root), namespace="example/team").create_binding(
++            "alice", token=token
++        )
++        queue.put(("ok", result.key_ref, result.public_key))
++    except (BindingRecoveryRequired, ValueError) as exc:  # returned to the parent
++        queue.put(("error", type(exc).__name__, str(exc)))
++
++
++def test_create_resolve_is_exact_and_domain_separated(tmp_path: Path) -> None:
++    provider = MappedCredentialProvider(tmp_path / "bindings", namespace="example/team")
++    created = provider.create_binding("Alice", token="create-alice")
++
++    fact = provider.resolve(_request("Alice", SigningDomain.FACT))
++    arrival = provider.resolve(_request("Alice", SigningDomain.ARRIVAL))
++    other_case = provider.resolve(_request("alice"))
++
++    assert fact is not None and arrival is not None
++    assert fact.evidence.key_ref == arrival.evidence.key_ref == created.key_ref
++    assert fact.evidence.public_key == arrival.evidence.public_key == created.public_key
++    signature = fact.sign_digest("digest")
++    assert provider.verify(SigningDomain.FACT, created.public_key, signature, "digest")
++    assert not provider.verify(SigningDomain.ARRIVAL, created.public_key, signature, "digest")
++    assert other_case is None
++
++
++@pytest.mark.parametrize("observer", [".", "/", "ed25519.key", "a\0b"])
++def test_binding_labels_are_hashed_identity_not_path_components(
++    tmp_path: Path, observer: str
++) -> None:
++    provider = MappedCredentialProvider(tmp_path / "bindings", namespace="space\0/")
++    created = provider.create_binding(observer, token=f"token:{observer}")
++    resolved = provider.resolve(
++        CredentialRequest(
++            "space\0/", observer, SigningDomain.FACT, CredentialPurpose.AUTHORSHIP
++        )
++    )
++
++    assert resolved is not None
++    assert resolved.evidence.key_ref == created.key_ref
++
++
++def test_resolution_of_missing_or_bad_public_evidence_never_repairs(tmp_path: Path) -> None:
++    provider = MappedCredentialProvider(tmp_path / "bindings", namespace="example/team")
++    assert provider.resolve(_request("missing")) is None
++    assert not (tmp_path / "bindings").exists()
++
++    created = provider.create_binding("alice", token="create-alice")
++    public = tmp_path / "bindings" / "keys-v1" / created.key_ref / "ed25519.pub"
++    public.write_text("not-the-private-key\n", encoding="utf-8")
++
++    with pytest.raises(ValueError, match="corrupt-binding"):
++        provider.resolve(_request("alice"))
++    assert public.read_text(encoding="utf-8") == "not-the-private-key\n"
++
++
++def test_pending_slot_recovers_only_its_named_token(tmp_path: Path) -> None:
++    fired = False
++
++    def interrupt(phase: str, _intent: dict[str, object]) -> None:
++        nonlocal fired
++        if phase == "intent-published" and not fired:
++            fired = True
++            raise RuntimeError("simulated process interruption")
++
++    provider = MappedCredentialProvider(
++        tmp_path / "bindings", namespace="example/team", _creation_hook=interrupt
++    )
++    with pytest.raises(BindingMutationIncomplete) as raised:
++        provider.create_binding("alice", token="token-one")
++    assert raised.value.token == "token-one"
++    assert raised.value.phase == "intent-published"
++
++    with pytest.raises(BindingRecoveryRequired):
++        provider.create_binding("alice", token="token-two")
++    recovered = provider.recover_binding("alice", token="token-one")
++    assert recovered.binding_created
++    assert provider.resolve(_request("alice")) is not None
++
++
++def test_mutation_lock_leaves_one_winner_and_no_competing_key(tmp_path: Path) -> None:
++    provider = MappedCredentialProvider(tmp_path / "bindings", namespace="example/team")
++    started = threading.Barrier(2)
++    outcomes: list[object] = []
++
++    def create(token: str) -> None:
++        started.wait()
++        try:
++            outcomes.append(provider.create_binding("alice", token=token))
++        except BindingRecoveryRequired as exc:  # asserted below
++            outcomes.append(exc)
++
++    first = threading.Thread(target=create, args=("one",))
++    second = threading.Thread(target=create, args=("two",))
++    first.start()
++    second.start()
++    first.join()
++    second.join()
++
++    successes = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
++    failures = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
++    assert len(successes) == 2
++    assert not failures
++    assert len({outcome.key_ref for outcome in successes}) == 1
++    assert sum(outcome.binding_created for outcome in successes) == 1
++    assert len(list((tmp_path / "bindings" / "keys-v1").iterdir())) == 1
++
++
++def test_process_lock_converges_absent_provider_root(tmp_path: Path) -> None:
++    root = tmp_path / "bindings"
++    context = get_context("spawn")
++    queue = context.Queue()
++    processes = [
++        context.Process(target=_create_in_process, args=(str(root), token, queue))
++        for token in ("process-one", "process-two")
++    ]
++    for process in processes:
++        process.start()
++    outcomes = [queue.get(timeout=15) for _ in processes]
++    for process in processes:
++        process.join(timeout=15)
++        assert process.exitcode == 0
++
++    assert [outcome[0] for outcome in outcomes] == ["ok", "ok"]
++    assert len({outcome[1] for outcome in outcomes}) == 1
++    assert len({outcome[2] for outcome in outcomes}) == 1
++    assert len(tuple((root / "keys-v1").iterdir())) == 1
++
++
++def test_existing_reference_can_be_bound_in_a_second_namespace(tmp_path: Path) -> None:
++    root = tmp_path / "bindings"
++    first = MappedCredentialProvider(root, namespace="one")
++    created = first.create_binding("alice", token="one")
++    second = MappedCredentialProvider(root, namespace="two")
++
++    copied = second.bind_existing_ref(
++        "alice", created.key_ref, created.public_key, token="two"
++    )
++    resolved = second.resolve(
++        CredentialRequest("two", "alice", SigningDomain.TICK, CredentialPurpose.RECEIPT)
++    )
++
++    assert copied.key_ref == created.key_ref
++    assert resolved is not None
++    assert resolved.evidence.public_key == created.public_key
+diff --git a/libs/custody/tests/test_binding_recovery_contract.py b/libs/custody/tests/test_binding_recovery_contract.py
+new file mode 100644
+index 00000000..cf179b68
+--- /dev/null
++++ b/libs/custody/tests/test_binding_recovery_contract.py
+@@ -0,0 +1,139 @@
++"""Independent persisted-binding interruption and refusal contracts."""
++
++from hashlib import sha256
++from pathlib import Path
++
++import pytest
++from custody import ensure_signing_key
++from custody.binding import MappedCredentialProvider
++from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
++from sign import ed25519
++
++
++class Interrupted(BaseException):
++    pass
++
++
++@pytest.fixture(autouse=True)
++def _isolated_state(tmp_path, monkeypatch):
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops"))
++
++
++def _fingerprints(root: Path) -> dict[str, str]:
++    return {
++        str(path.relative_to(root)): sha256(path.read_bytes()).hexdigest()
++        for path in root.rglob("*")
++        if path.is_file() and not path.is_symlink()
++    }
++
++
++def _request(observer="alice"):
++    return CredentialRequest("work", observer, SigningDomain.FACT, CredentialPurpose.AUTHORSHIP)
++
++
++def test_recovery_without_an_intent_never_creates_a_binding(tmp_path):
++    root = tmp_path / "mapped"
++    provider = MappedCredentialProvider(root, namespace="work")
++    with pytest.raises((ValueError, FileNotFoundError)):
++        provider.recover_binding("alice", token="unknown")
++    assert not list(root.glob("keys-v1/*/ed25519.key"))
++    assert not list(root.glob("bindings-v1/*.json"))
++
++
++def test_completed_binding_is_revalidated_by_creation_retry(tmp_path):
++    root = tmp_path / "mapped"
++    provider = MappedCredentialProvider(root, namespace="work")
++    created = provider.create_binding("alice", token="first")
++    public_file = root / "keys-v1" / created.key_ref / "ed25519.pub"
++    public_file.write_text("contradictory public evidence\n")
++    before = _fingerprints(root)
++    with pytest.raises(ValueError):
++        provider.create_binding("alice", token="retry")
++    assert _fingerprints(root) == before
++
++
++def test_token_reuse_does_not_poison_a_second_observer_slot(tmp_path):
++    root = tmp_path / "mapped"
++    provider = MappedCredentialProvider(root, namespace="work")
++    provider.create_binding("alice", token="one-operation")
++    before = _fingerprints(root)
++    with pytest.raises(ValueError):
++        provider.create_binding("bob", token="one-operation")
++    assert _fingerprints(root) == before
++    assert provider.resolve(_request("bob")) is None
++
++
++def test_import_recovery_uses_published_candidate_after_source_is_gone(tmp_path):
++    target = tmp_path / "legacy" / "alice.vertex"
++    target.parent.mkdir()
++    original = ensure_signing_key(target, observer="alice")
++    root = tmp_path / "mapped"
++
++    def interrupt(phase, _intent):
++        if phase == "key-published":
++            raise Interrupted()
++
++    provider = MappedCredentialProvider(root, namespace="work", _creation_hook=interrupt)
++    with pytest.raises(Interrupted):
++        provider.import_legacy(target, "alice", token="import-alice")
++    candidate_paths = tuple(root.glob("keys-v1/*/ed25519.key"))
++    assert len(candidate_paths) == 1
++    candidate_hash = sha256(candidate_paths[0].read_bytes()).hexdigest()
++    (target.parent / "keys").rename(target.parent / "keys-moved-away")
++    recovered = MappedCredentialProvider(root, namespace="work").recover_binding(
++        "alice", token="import-alice"
++    )
++    assert recovered.public_key == original.public_b64
++    assert sha256(candidate_paths[0].read_bytes()).hexdigest() == candidate_hash
++    assert len(tuple(root.glob("keys-v1/*/ed25519.key"))) == 1
++
++
++def test_recovery_retains_private_key_when_public_publication_was_interrupted(
++    tmp_path, monkeypatch
++):
++    root = tmp_path / "mapped"
++    provider = MappedCredentialProvider(root, namespace="work")
++    publish_public = ed25519._publish_public
++
++    def interrupt(_key_dir, _keypair):
++        raise Interrupted()
++
++    monkeypatch.setattr(ed25519, "_publish_public", interrupt)
++    with pytest.raises(Interrupted):
++        provider.create_binding("alice", token="private-first")
++    private_files = tuple(root.glob("keys-v1/*/ed25519.key"))
++    assert len(private_files) == 1
++    private_hash = sha256(private_files[0].read_bytes()).hexdigest()
++    original_public = ed25519.load(private_files[0].parent).public_b64
++    monkeypatch.setattr(ed25519, "_publish_public", publish_public)
++    recovered = provider.recover_binding("alice", token="private-first")
++    assert recovered.public_key == original_public
++    assert sha256(private_files[0].read_bytes()).hexdigest() == private_hash
++    assert len(tuple(root.glob("keys-v1/*/ed25519.key"))) == 1
++
++
++def test_resolution_refuses_symlinked_intermediate_key_directory(tmp_path):
++    root = tmp_path / "mapped"
++    provider = MappedCredentialProvider(root, namespace="work")
++    provider.create_binding("alice", token="create")
++    real_keys = tmp_path / "relocated-keys"
++    (root / "keys-v1").rename(real_keys)
++    (root / "keys-v1").symlink_to(real_keys, target_is_directory=True)
++    before = _fingerprints(real_keys)
++    with pytest.raises(ValueError):
++        provider.resolve(_request())
++    assert _fingerprints(real_keys) == before
++
++
++def test_recovery_never_replaces_a_missing_key_named_by_a_published_binding(tmp_path):
++    root = tmp_path / "mapped"
++    provider = MappedCredentialProvider(root, namespace="work")
++    created = provider.create_binding("alice", token="published")
++    (root / "keys-v1" / created.key_ref).rename(tmp_path / "unavailable-original-key")
++    before = _fingerprints(root)
++    with pytest.raises((ValueError, FileNotFoundError)):
++        provider.recover_binding("alice", token="published")
++    assert _fingerprints(root) == before
++    assert not (root / "keys-v1" / created.key_ref).exists()
+diff --git a/libs/engine/src/engine/arrival_declarations.py b/libs/engine/src/engine/arrival_declarations.py
+index 4fb36a58..13f5d073 100644
+--- a/libs/engine/src/engine/arrival_declarations.py
++++ b/libs/engine/src/engine/arrival_declarations.py
+@@ -58,7 +58,16 @@ from .arrival_head_seam import (
+     complete_projection_custody,
+ )
+ from .arrival_registry import BackendRegistry
+-from .credentials import WriteCredentials
++from .credentials import (
++    CapturedSigningContext,
++    CredentialBindingEvidence,
++    CredentialBindingRefused,
++    CredentialPurpose,
++    CredentialRequest,
++    CredentialResolutionSession,
++    SigningDomain,
++    WriteCredentials,
++)
+ from .declaration import (
+     Unhistorized,
+     resolve_declaration_documents_from_snapshot,
+@@ -200,6 +209,7 @@ class DeclarationEditPlan:
+     proposed_text: str
+     atomic_limit: int | None
+     exact_drafts: str
++    credential_bindings: tuple[CredentialBindingEvidence, ...] = ()
+ 
+ 
+ @dataclass(frozen=True)
+@@ -700,6 +710,7 @@ def _valid_author_keys(registry: Any, observer: str, head: Head) -> tuple[str, .
+ 
+ def _signed_with_existing_key(
+     *,
++    credentials: WriteCredentials,
+     signer: Callable[[str, str], str | None] | None,
+     verifier: Callable[[str, str, str], bool],
+     registry: Any,
+@@ -707,7 +718,35 @@ def _signed_with_existing_key(
+     head: Head,
+     digest: str,
+     label: str,
++    domain: SigningDomain,
++    purpose: CredentialPurpose,
++    context: CapturedSigningContext,
++    session: CredentialResolutionSession,
+ ) -> str:
++    if credentials.mapped:
++        request = CredentialRequest(
++            namespace=credentials.binding_namespace,
++            observer=author,
++            domain=domain,
++            purpose=purpose,
++        )
++        try:
++            signature = session.sign(
++                credentials,
++                request,
++                digest,
++                context=context,
++                authorized_keys=context.keys_for_author(author),
++                required=True,
++            )
++        except CredentialBindingRefused as exc:
++            raise _preparation_refused(
++                f"{label} mapped credential refused: {exc}",
++                captured_head=head,
++            ) from exc
++        if signature is None:  # required=True makes this unreachable
++            raise _preparation_refused(f"missing {label} signature")
++        return signature
+     if not callable(signer):
+         raise _preparation_refused(f"missing {label} signer")
+     keys = _valid_author_keys(registry, author, head)
+@@ -736,6 +775,8 @@ def _declaration_row(
+     registry: Any,
+     captured_head: Head,
+     fact_verify: Callable[[str, str, str], bool],
++    context: CapturedSigningContext,
++    session: CredentialResolutionSession,
+ ) -> tuple[str, tuple[Any, ...]]:
+     row_payload: dict[str, Any] = {
+         "lineage": lineage,
+@@ -750,6 +791,7 @@ def _declaration_row(
+         change.kind, authored_at, observer, "", payload_text
+     )
+     inner_signature = _signed_with_existing_key(
++        credentials=credentials,
+         signer=credentials.fact_signer,
+         verifier=fact_verify,
+         registry=registry,
+@@ -757,6 +799,10 @@ def _declaration_row(
+         head=captured_head,
+         digest=fact_digest,
+         label="FACT",
++        domain=SigningDomain.FACT,
++        purpose=CredentialPurpose.AUTHORSHIP,
++        context=context,
++        session=session,
+     )
+     row = (
+         fact_id,
+@@ -780,10 +826,13 @@ def _key_draft(
+     registry: Any,
+     captured_head: Head,
+     arrival_verify: Callable[[str, str, str], bool],
++    context: CapturedSigningContext,
++    session: CredentialResolutionSession,
+ ) -> RecordDraft:
+     body = {"observer": observer, "key": key}
+     digest = content_commitment("key", authored_at, author, "", body)
+     signature = _signed_with_existing_key(
++        credentials=credentials,
+         signer=credentials.arrival_signer,
+         verifier=arrival_verify,
+         registry=registry,
+@@ -791,6 +840,10 @@ def _key_draft(
+         head=captured_head,
+         digest=digest,
+         label="Arrival key-introduction",
++        domain=SigningDomain.ARRIVAL,
++        purpose=CredentialPurpose.KEY_INTRODUCTION,
++        context=context,
++        session=session,
+     )
+     return RecordDraft(
+         kind="key",
+@@ -962,8 +1015,20 @@ def prepare_declaration_edit(
+             target_documents=proposed_documents,
+             verified_params=verified_params,
+         )
++        registry_verifier = arrival_verify
++        if credentials is not None and credentials.mapped:
++            mapped_verifier = credentials.signature_verifier
++            if mapped_verifier is None:  # guarded by WriteCredentials construction
++                raise _preparation_refused(
++                    "mapped declaration credentials have no signature verifier",
++                    captured_head=captured_head,
++                )
++            def registry_verifier(key: str, signature: str, digest: str) -> bool:
++                return mapped_verifier(
++                    SigningDomain.ARRIVAL, key, signature, digest
++                )
+         key_registry, _key_evidence = key_registry_from_records(
+-            ledger.scan(through=captured_head), arrival_verify
++            ledger.scan(through=captured_head), registry_verifier
+         )
+         atomic_limit = ledger.capabilities().max_atomic_records
+     except DeclarationPreparationError:
+@@ -1011,6 +1076,23 @@ def prepare_declaration_edit(
+         raise _preparation_refused(
+             "declaration edits require fact and Arrival signers"
+         )
++    signing_context = CapturedSigningContext(
++        captured_head=captured_head,
++        author_keys=tuple(
++            (
++                named_observer,
++                tuple(
++                    key
++                    for key, _introduced in key_registry.keys_valid_at(
++                        named_observer, captured_head.ordinal + 1
++                    )
++                ),
++            )
++            for named_observer in sorted(key_registry.introductions)
++        ),
++        receipt_keys=(),
++    )
++    credential_session = CredentialResolutionSession()
+     authored_at = time.time()
+     rows: list[tuple[Any, ...]] = []
+     fact_ids: list[str] = []
+@@ -1024,6 +1106,8 @@ def prepare_declaration_edit(
+             registry=key_registry,
+             captured_head=captured_head,
+             fact_verify=fact_verify,
++            context=signing_context,
++            session=credential_session,
+         )
+         fact_ids.append(fact_id)
+         rows.append(row)
+@@ -1033,6 +1117,7 @@ def prepare_declaration_edit(
+         envelope_kind, authored_at, observer, "", body
+     )
+     outer_signature = _signed_with_existing_key(
++        credentials=credentials,
+         signer=credentials.arrival_signer,
+         verifier=arrival_verify,
+         registry=key_registry,
+@@ -1040,6 +1125,10 @@ def prepare_declaration_edit(
+         head=captured_head,
+         digest=envelope_digest,
+         label="Arrival declaration envelope",
++        domain=SigningDomain.ARRIVAL,
++        purpose=CredentialPurpose.AUTHORSHIP,
++        context=signing_context,
++        session=credential_session,
+     )
+     declaration_draft = RecordDraft(
+         kind=envelope_kind,
+@@ -1080,6 +1169,8 @@ def prepare_declaration_edit(
+                 registry=key_registry,
+                 captured_head=captured_head,
+                 arrival_verify=arrival_verify,
++                context=signing_context,
++                session=credential_session,
+             )
+         )
+ 
+@@ -1109,6 +1200,7 @@ def prepare_declaration_edit(
+         proposed_text=proposed_text,
+         atomic_limit=atomic_limit,
+         exact_drafts=_exact_drafts(drafts),
++        credential_bindings=credential_session.evidence,
+     )
+ 
+ 
+diff --git a/libs/engine/src/engine/arrival_sources.py b/libs/engine/src/engine/arrival_sources.py
+index 920a22a4..d8675090 100644
+--- a/libs/engine/src/engine/arrival_sources.py
++++ b/libs/engine/src/engine/arrival_sources.py
+@@ -496,6 +496,7 @@ def prepare_source_invocation(
+         locator,
+         source_mode=True,
+         evaluated_at=evaluated_at,
++        credentials=credentials,
+     )
+     sources = capture.sources
+     evidence = tuple(
+@@ -959,7 +960,12 @@ async def execute_source_invocation(
+     for tier_index, _indices in enumerate(tiers):
+         if tier_index:
+             try:
+-                current_capture = capture_runtime(registry, descriptor, frozen_locator)
++                current_capture = capture_runtime(
++                    registry,
++                    descriptor,
++                    frozen_locator,
++                    credentials=credentials,
++                )
+             except Exception as exc:
+                 return _result(
+                     invocation,
+diff --git a/libs/engine/src/engine/ceremony.py b/libs/engine/src/engine/ceremony.py
+index c3458638..9cb86591 100644
+--- a/libs/engine/src/engine/ceremony.py
++++ b/libs/engine/src/engine/ceremony.py
+@@ -559,7 +559,16 @@ def apply_declaration_update(
+ 
+     fact_signer = None
+     if credentials is not None:
+-        fact_signer = credentials.for_write(vertex_path).fact_signer
++        write_credentials = credentials.for_write(vertex_path)
++        if write_credentials.mapped:
++            return DeclarationUpdateResult(
++                status="refused",
++                reason=(
++                    "mapped credentials require the Arrival declaration writer; "
++                    "the legacy ceremony cannot establish captured binding authority"
++                ),
++            )
++        fact_signer = write_credentials.fact_signer
+ 
+     # ONE store open, BEFORE the intent lands (SOL-R2-04 two-scope floor):
+     # a failure at the open provably mutated nothing — no log byte written,
+diff --git a/libs/engine/src/engine/credentials.py b/libs/engine/src/engine/credentials.py
+index 07bd6816..1da666af 100644
+--- a/libs/engine/src/engine/credentials.py
++++ b/libs/engine/src/engine/credentials.py
+@@ -9,10 +9,292 @@ from __future__ import annotations
+ 
+ from collections.abc import Callable
+ from dataclasses import dataclass
++from enum import StrEnum
+ from pathlib import Path
+ from typing import Protocol
+ 
+-__all__ = ["CredentialProvider", "WriteCredentials"]
++from .arrival_contract import Head
++
++__all__ = [
++    "BindingResolver",
++    "CredentialBindingEvidence",
++    "CredentialBindingRefused",
++    "CapturedSigningContext",
++    "CredentialProvider",
++    "CredentialPurpose",
++    "CredentialRequest",
++    "ResolvedCredential",
++    "SignatureVerifier",
++    "SigningDomain",
++    "WriteCredentials",
++]
++
++
++class SigningDomain(StrEnum):
++    """The protocol domain whose commitment is being signed."""
++
++    FACT = "fact"
++    ARRIVAL = "arrival"
++    TICK = "tick"
++
++
++class CredentialPurpose(StrEnum):
++    """Why one operation needs a signing credential."""
++
++    AUTHORSHIP = "authorship"
++    KEY_INTRODUCTION = "key-introduction"
++    RECEIPT = "receipt"
++    INITIALIZATION = "initialization"
++
++
++@dataclass(frozen=True)
++class CredentialRequest:
++    """An exact local namespace, protocol observer, domain and purpose."""
++
++    namespace: str
++    observer: str
++    domain: SigningDomain
++    purpose: CredentialPurpose
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.namespace, str) or not self.namespace:
++            raise ValueError("credential namespace must be an exact nonempty string")
++        if not isinstance(self.observer, str) or not self.observer:
++            raise ValueError("credential observer must be an exact nonempty string")
++        if not isinstance(self.domain, SigningDomain):
++            raise ValueError("credential domain must be a SigningDomain")
++        if not isinstance(self.purpose, CredentialPurpose):
++            raise ValueError("credential purpose must be a CredentialPurpose")
++
++
++@dataclass(frozen=True)
++class CredentialBindingEvidence:
++    """Serializable public evidence for one resolved local binding."""
++
++    request: CredentialRequest
++    key_ref: str
++    algorithm: str
++    public_key: str
++    provenance: str
++
++
++@dataclass(frozen=True)
++class ResolvedCredential:
++    """Public binding evidence paired with its private signing operation."""
++
++    evidence: CredentialBindingEvidence
++    sign_digest: Callable[[str], str]
++
++
++BindingResolver = Callable[[CredentialRequest], ResolvedCredential | None]
++SignatureVerifier = Callable[[SigningDomain, str, str, str], bool]
++
++
++class CredentialBindingRefused(ValueError):
++    """A mapped binding could not safely authorize one planned signature."""
++
++    def __init__(
++        self,
++        reason: str,
++        *,
++        request: CredentialRequest | None = None,
++        captured_head: Head | None = None,
++        use_position: int | None = None,
++        evidence: CredentialBindingEvidence | None = None,
++    ) -> None:
++        super().__init__(reason)
++        self.reason = reason
++        self.request = request
++        self.captured_head = captured_head
++        self.use_position = use_position
++        self.evidence = evidence
++
++
++@dataclass(frozen=True)
++class CapturedSigningContext:
++    """Immutable authorization evidence derived from one verified prefix."""
++
++    captured_head: Head
++    author_keys: tuple[tuple[str, tuple[str, ...]], ...]
++    receipt_keys: tuple[str, ...]
++
++    @property
++    def use_position(self) -> int:
++        return self.captured_head.ordinal + 1
++
++    def keys_for_author(self, observer: str) -> tuple[str, ...]:
++        return next(
++            (keys for name, keys in self.author_keys if name == observer),
++            (),
++        )
++
++
++class CredentialResolutionSession:
++    """Operation-local mapped resolution with cross-domain binding coherence."""
++
++    __slots__ = ("_bindings", "_evidence")
++
++    def __init__(self) -> None:
++        self._bindings: dict[tuple[str, str], tuple[str, str]] = {}
++        self._evidence: list[CredentialBindingEvidence] = []
++
++    @property
++    def evidence(self) -> tuple[CredentialBindingEvidence, ...]:
++        return tuple(self._evidence)
++
++    def sign(
++        self,
++        credentials: WriteCredentials,
++        request: CredentialRequest,
++        digest: str,
++        *,
++        context: CapturedSigningContext,
++        authorized_keys: tuple[str, ...],
++        required: bool,
++    ) -> str | None:
++        """Resolve, authorize and independently verify one mapped signature."""
++        resolver = credentials.binding_resolver
++        verifier = credentials.signature_verifier
++        if not credentials.mapped or resolver is None or verifier is None:
++            raise CredentialBindingRefused(
++                "mapped signing requires a complete credential configuration",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++            )
++        try:
++            resolved = resolver(request)
++        except CredentialBindingRefused as exc:
++            raise CredentialBindingRefused(
++                exc.reason,
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=exc.evidence,
++            ) from exc
++        except Exception as exc:
++            raise CredentialBindingRefused(
++                "credential resolver failed",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++            ) from exc
++        if resolved is None:
++            if not required:
++                return None
++            raise CredentialBindingRefused(
++                "missing-required",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++            )
++        if not isinstance(resolved, ResolvedCredential):
++            raise CredentialBindingRefused(
++                "resolver returned an invalid credential value",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++            )
++        evidence = resolved.evidence
++        if (
++            not isinstance(evidence, CredentialBindingEvidence)
++            or evidence.request != request
++            or not all(
++                isinstance(value, str) and bool(value)
++                for value in (
++                    evidence.key_ref,
++                    evidence.algorithm,
++                    evidence.public_key,
++                    evidence.provenance,
++                )
++            )
++            or not callable(resolved.sign_digest)
++        ):
++            raise CredentialBindingRefused(
++                "resolver returned contradictory binding evidence",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=evidence
++                if isinstance(evidence, CredentialBindingEvidence)
++                else None,
++            )
++        if evidence.public_key not in authorized_keys:
++            raise CredentialBindingRefused(
++                "resolved public key is not authorized at the captured position",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=evidence,
++            )
++        binding_key = (request.namespace, request.observer)
++        binding_value = (evidence.key_ref, evidence.public_key)
++        prior = self._bindings.get(binding_key)
++        if prior is not None and prior != binding_value:
++            raise CredentialBindingRefused(
++                "one mapped observer resolved to different bindings across domains",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=evidence,
++            )
++        try:
++            signature = resolved.sign_digest(digest)
++        except CredentialBindingRefused as exc:
++            raise CredentialBindingRefused(
++                exc.reason,
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=exc.evidence or evidence,
++            ) from exc
++        except Exception as exc:
++            raise CredentialBindingRefused(
++                "credential signer failed",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=evidence,
++            ) from exc
++        if not isinstance(signature, str) or not signature:
++            raise CredentialBindingRefused(
++                "mapped signer returned no signature",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=evidence,
++            )
++        try:
++            verified = verifier(
++                request.domain, evidence.public_key, signature, digest
++            )
++        except CredentialBindingRefused as exc:
++            raise CredentialBindingRefused(
++                exc.reason,
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=exc.evidence or evidence,
++            ) from exc
++        except Exception as exc:
++            raise CredentialBindingRefused(
++                "credential signature verifier failed",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=evidence,
++            ) from exc
++        if not verified:
++            raise CredentialBindingRefused(
++                "mapped signature did not verify under its resolved public key",
++                request=request,
++                captured_head=context.captured_head,
++                use_position=context.use_position,
++                evidence=evidence,
++            )
++        self._bindings[binding_key] = binding_value
++        self._evidence.append(evidence)
++        return signature
+ 
+ 
+ @dataclass(frozen=True)
+@@ -28,6 +310,46 @@ class WriteCredentials:
+     tick_signer: Callable[[str], str] | None = None
+     fact_signer: Callable[[str, str], str | None] | None = None
+     arrival_signer: Callable[[str, str], str | None] | None = None
++    binding_namespace: str | None = None
++    receipt_observer: str | None = None
++    binding_resolver: BindingResolver | None = None
++    signature_verifier: SignatureVerifier | None = None
++
++    def __post_init__(self) -> None:
++        mapped_parts = (
++            self.binding_namespace,
++            self.binding_resolver,
++            self.signature_verifier,
++        )
++        mapped = all(part is not None for part in mapped_parts)
++        if any(part is not None for part in mapped_parts) and not mapped:
++            raise ValueError(
++                "mapped credentials require namespace, resolver, and verifier together"
++            )
++        if self.receipt_observer is not None and not mapped:
++            raise ValueError("receipt observer requires mapped credentials")
++        if mapped and any(
++            signer is not None
++            for signer in (self.tick_signer, self.fact_signer, self.arrival_signer)
++        ):
++            raise ValueError("mapped credentials cannot include legacy signer callbacks")
++        if self.binding_resolver is not None and not callable(self.binding_resolver):
++            raise ValueError("credential binding resolver must be callable")
++        if self.signature_verifier is not None and not callable(self.signature_verifier):
++            raise ValueError("credential signature verifier must be callable")
++        if self.binding_namespace is not None and (
++            not isinstance(self.binding_namespace, str) or not self.binding_namespace
++        ):
++            raise ValueError("credential namespace must be an exact nonempty string")
++        if self.receipt_observer is not None and (
++            not isinstance(self.receipt_observer, str) or not self.receipt_observer
++        ):
++            raise ValueError("receipt observer must be an exact nonempty string")
++
++    @property
++    def mapped(self) -> bool:
++        """Whether signing must use explicit mapped binding resolution."""
++        return self.binding_namespace is not None
+ 
+ 
+ class CredentialProvider(Protocol):
+diff --git a/libs/engine/src/engine/handle.py b/libs/engine/src/engine/handle.py
+index f83a0184..49514ccb 100644
+--- a/libs/engine/src/engine/handle.py
++++ b/libs/engine/src/engine/handle.py
+@@ -1489,6 +1489,12 @@ class VertexHandle:
+                     f"handle for {self._vertex_path} is read-only — open with "
+                     "credentials= to write through it"
+                 )
++            creds = self._credentials.for_write(self._vertex_path)
++            if creds.mapped:
++                raise HandleError(
++                    "mapped credentials require the Arrival registry writer; "
++                    "the legacy handle cannot establish captured binding authority"
++                )
+ 
+             # 1. Catch up so the write sees external commits (does not make the
+             #    boundary decision serializable — that is the deferred CAS).
+@@ -1497,7 +1503,6 @@ class VertexHandle:
+             # 2. Operation-fresh signers on the held writer (which creates the
+             #    store on first write — open a probe now if it did).
+             writer = self._ensure_writer()
+-            creds = self._credentials.for_write(self._vertex_path)
+             self._apply_credentials(creds)
+             if (self._probe is None and self._store_path is not None
+                     and self._store_path.exists()):
+diff --git a/libs/engine/src/engine/runtime_write.py b/libs/engine/src/engine/runtime_write.py
+index 407af212..a4e4713e 100644
+--- a/libs/engine/src/engine/runtime_write.py
++++ b/libs/engine/src/engine/runtime_write.py
+@@ -48,7 +48,16 @@ from .arrival_head_seam import (
+     PreGenesis,
+     complete_projection_custody,
+ )
+-from .credentials import WriteCredentials
++from .credentials import (
++    CapturedSigningContext,
++    CredentialBindingEvidence,
++    CredentialBindingRefused,
++    CredentialPurpose,
++    CredentialRequest,
++    CredentialResolutionSession,
++    SigningDomain,
++    WriteCredentials,
++)
+ from .row_commitment import fact_row_hash, tick_commitment_hash, tick_row_hash
+ 
+ if TYPE_CHECKING:  # pragma: no cover - typing only
+@@ -258,6 +267,9 @@ class OrdinaryWritePlan:
+     custodian: str | None = None
+     admit_undeclared: bool = False
+     tick_run: str | None = field(default=None, repr=False, compare=False)
++    credential_bindings: tuple[CredentialBindingEvidence, ...] = field(
++        default=(), repr=False, compare=False
++    )
+ 
+ 
+ class PostCommitProjectionFailed(Exception):
+@@ -346,6 +358,9 @@ class BatchWritePlan:
+     pending_tick_runs: tuple[str | None, ...] = field(
+         default=(), repr=False, compare=False
+     )
++    credential_bindings: tuple[CredentialBindingEvidence, ...] = field(
++        default=(), repr=False, compare=False
++    )
+ 
+ 
+ @dataclass(frozen=True)
+@@ -387,6 +402,9 @@ class RuntimeCapture:
+     )
+     _sources: tuple[Any, ...] = field(default=(), repr=False, compare=False)
+     _pending_boundaries: tuple[Any, ...] = field(default=(), repr=False, compare=False)
++    _signing_context: CapturedSigningContext | None = field(
++        default=None, repr=False, compare=False
++    )
+ 
+     @property
+     def effective_declaration(self) -> VertexFile:
+@@ -659,20 +677,14 @@ def _existing_fact_plan(
+     fact: Fact,
+     credentials: WriteCredentials,
+     fact_id: str | None,
++    *,
++    signing_context: CapturedSigningContext | None = None,
++    credential_session: CredentialResolutionSession | None = None,
+ ) -> OrdinaryWritePlan | None:
+     """Recognize an exact retry before any new-fact admission decision."""
+     if fact_id is None:
+         return None
+     chosen_id = fact_id
+-    payload_text = _payload_text(fact.payload)
+-    inner_signature = (
+-        credentials.fact_signer(
+-            fact.observer,
+-            fact_commitment_hash(fact.kind, fact.ts, fact.observer, fact.origin, payload_text),
+-        )
+-        if credentials.fact_signer is not None
+-        else None
+-    )
+     existing = next(
+         (
+             row
+@@ -685,6 +697,21 @@ def _existing_fact_plan(
+     )
+     if existing is None:
+         return None
++    payload_text = _payload_text(fact.payload)
++    session = credential_session or CredentialResolutionSession()
++    inner_signature = _author_signature(
++        credentials,
++        session,
++        signing_context,
++        captured_head=basis.captured_head,
++        observer=fact.observer,
++        domain=SigningDomain.FACT,
++        purpose=CredentialPurpose.AUTHORSHIP,
++        digest=fact_commitment_hash(
++            fact.kind, fact.ts, fact.observer, fact.origin, payload_text
++        ),
++        legacy_signer=credentials.fact_signer,
++    )
+     if existing.payload_text is None:
+         raise RuntimeWriteRefused("snapshot omitted exact fact payload text")
+     if (
+@@ -702,6 +729,7 @@ def _existing_fact_plan(
+         tick_id=None,
+         drafts=(),
+         already_present=True,
++        credential_bindings=session.evidence,
+     )
+ 
+ 
+@@ -740,6 +768,107 @@ def _current_write_basis(
+     )
+ 
+ 
++def _require_signing_context(
++    credentials: WriteCredentials,
++    context: CapturedSigningContext | None,
++    *,
++    captured_head: Head,
++) -> CapturedSigningContext:
++    if context is None or context.captured_head != captured_head:
++        raise CredentialBindingRefused(
++            "mapped signing requires authorization evidence from the captured head",
++            captured_head=captured_head,
++            use_position=captured_head.ordinal + 1,
++        )
++    return context
++
++
++def _author_signature(
++    credentials: WriteCredentials,
++    session: CredentialResolutionSession,
++    context: CapturedSigningContext | None,
++    *,
++    captured_head: Head,
++    observer: str,
++    domain: SigningDomain,
++    purpose: CredentialPurpose,
++    digest: str,
++    legacy_signer: Callable[[str, str], str | None] | None,
++    required: bool = False,
++) -> str | None:
++    if not credentials.mapped:
++        if legacy_signer is None:
++            if required:
++                raise RuntimeWriteRefused(f"missing {domain.value} signer")
++            return None
++        signature = legacy_signer(observer, digest)
++        if required and not signature:
++            raise RuntimeWriteRefused(f"missing {domain.value} signature")
++        return signature
++    resolved_context = _require_signing_context(
++        credentials, context, captured_head=captured_head
++    )
++    request = CredentialRequest(
++        namespace=credentials.binding_namespace,
++        observer=observer,
++        domain=domain,
++        purpose=purpose,
++    )
++    return session.sign(
++        credentials,
++        request,
++        digest,
++        context=resolved_context,
++        authorized_keys=resolved_context.keys_for_author(observer),
++        required=required,
++    )
++
++
++def _tick_signature(
++    credentials: WriteCredentials,
++    session: CredentialResolutionSession,
++    context: CapturedSigningContext | None,
++    *,
++    captured_head: Head,
++    digest: str,
++    signed_era: bool,
++) -> str | None:
++    if not credentials.mapped:
++        signature = (
++            credentials.tick_signer(digest)
++            if credentials.tick_signer is not None
++            else None
++        )
++        if signature is None and signed_era:
++            raise RuntimeWriteRefused("refusing an unsigned tick in the signed tick era")
++        return signature
++    resolved_context = _require_signing_context(
++        credentials, context, captured_head=captured_head
++    )
++    if credentials.receipt_observer is None:
++        if signed_era:
++            raise CredentialBindingRefused(
++                "missing-required",
++                captured_head=captured_head,
++                use_position=resolved_context.use_position,
++            )
++        return None
++    request = CredentialRequest(
++        namespace=credentials.binding_namespace,
++        observer=credentials.receipt_observer,
++        domain=SigningDomain.TICK,
++        purpose=CredentialPurpose.RECEIPT,
++    )
++    return session.sign(
++        credentials,
++        request,
++        digest,
++        context=resolved_context,
++        authorized_keys=resolved_context.receipt_keys,
++        required=signed_era,
++    )
++
++
+ def _build_effective_arrival_candidate(
+     snapshot: QuerySnapshot,
+     basis: ReadBasis,
+@@ -903,6 +1032,8 @@ def plan_ordinary_write(
+     fact_id: str | None = None,
+     admit_undeclared: bool = False,
+     _mutate_candidate: bool = False,
++    _signing_context: CapturedSigningContext | None = None,
++    _credential_session: CredentialResolutionSession | None = None,
+ ) -> OrdinaryWritePlan:
+     """Internal, caller-responsible planner for one local fact and tick.
+ 
+@@ -931,7 +1062,16 @@ def plan_ordinary_write(
+ 
+     validate_arrival_declaration_anchor(anchor, basis.captured_head)
+ 
+-    existing_plan = _existing_fact_plan(snapshot, basis, fact, credentials, fact_id)
++    credential_session = _credential_session or CredentialResolutionSession()
++    existing_plan = _existing_fact_plan(
++        snapshot,
++        basis,
++        fact,
++        credentials,
++        fact_id,
++        signing_context=_signing_context,
++        credential_session=credential_session,
++    )
+     if existing_plan is not None:
+         return existing_plan
+     facts = snapshot.facts(FactRequest(limit=None, include_internal=True, order="oldest")).items
+@@ -942,13 +1082,18 @@ def plan_ordinary_write(
+     ticks = snapshot.ticks(TickRequest())
+     chosen_id = fact_id if fact_id is not None else str(ULID())
+     payload_text = _payload_text(fact.payload)
+-    inner_signature = (
+-        credentials.fact_signer(
+-            fact.observer,
+-            fact_commitment_hash(fact.kind, fact.ts, fact.observer, fact.origin, payload_text),
+-        )
+-        if credentials.fact_signer is not None
+-        else None
++    inner_signature = _author_signature(
++        credentials,
++        credential_session,
++        _signing_context,
++        captured_head=basis.captured_head,
++        observer=fact.observer,
++        domain=SigningDomain.FACT,
++        purpose=CredentialPurpose.AUTHORSHIP,
++        digest=fact_commitment_hash(
++            fact.kind, fact.ts, fact.observer, fact.origin, payload_text
++        ),
++        legacy_signer=credentials.fact_signer,
+     )
+     fact_row = (
+         chosen_id,
+@@ -969,13 +1114,18 @@ def plan_ordinary_write(
+     if not receipt.stored:
+         raise _AdmissionPlanRefused("admission rejected the fact before append")
+     fact_body = body_of_fact_row(fact_row)
+-    outer_signature = (
+-        credentials.arrival_signer(
+-            fact.observer,
+-            content_commitment("fact", fact.ts, fact.observer, fact.origin, fact_body),
+-        )
+-        if credentials.arrival_signer is not None
+-        else None
++    outer_signature = _author_signature(
++        credentials,
++        credential_session,
++        _signing_context,
++        captured_head=basis.captured_head,
++        observer=fact.observer,
++        domain=SigningDomain.ARRIVAL,
++        purpose=CredentialPurpose.AUTHORSHIP,
++        digest=content_commitment(
++            "fact", fact.ts, fact.observer, fact.origin, fact_body
++        ),
++        legacy_signer=credentials.arrival_signer,
+     )
+     drafts = [
+         RecordDraft(
+@@ -1007,16 +1157,18 @@ def plan_ordinary_write(
+             chosen_id,
+             _window_hash(facts, start=window_start, appended=fact_row),
+         )
+-        tick_signature = (
+-            credentials.tick_signer(tick_commitment_hash(tick_row))
+-            if credentials.tick_signer is not None
+-            else None
+-        )
+-        if tick_signature is None and any(
++        signed_era = any(
+             existing.signature is not None and existing.window_hash is not None
+             for existing in ticks
+-        ):
+-            raise RuntimeWriteRefused("refusing an unsigned tick in the signed tick era")
++        )
++        tick_signature = _tick_signature(
++            credentials,
++            credential_session,
++            _signing_context,
++            captured_head=basis.captured_head,
++            digest=tick_commitment_hash(tick_row),
++            signed_era=signed_era,
++        )
+         tick_body = body_of_tick_row((*tick_row, tick_signature))
+         drafts.append(
+             RecordDraft(
+@@ -1034,6 +1186,7 @@ def plan_ordinary_write(
+         tick_id=tick_id,
+         drafts=tuple(drafts),
+         tick_run=None if receipt.tick is None else receipt.tick.run,
++        credential_bindings=credential_session.evidence,
+     )
+ 
+ 
+@@ -1056,6 +1209,7 @@ def capture_runtime(
+     fold_overrides: dict[str, FoldOverride] | None = None,
+     source_mode: bool = False,
+     evaluated_at: float | None = None,
++    credentials: WriteCredentials | None = None,
+ ) -> RuntimeCapture:
+     """Capture one immutable, closed-handle Authority/CURRENT runtime view."""
+     from .arrival_contract import Profile, ProjectionRequirement
+@@ -1092,6 +1246,60 @@ def capture_runtime(
+             else ()
+         )
+         captured_locator = _capture_locator_ingress(locator)
++        signing_context = None
++        if credentials is not None and credentials.mapped:
++            from .arrival import key_registry_from_records
++
++            verifier = credentials.signature_verifier
++            if verifier is None:  # guarded by WriteCredentials construction
++                raise CredentialBindingRefused(
++                    "mapped signing requires a signature verifier",
++                    captured_head=captured,
++                    use_position=captured.ordinal + 1,
++                )
++            try:
++                key_registry, _key_rows = key_registry_from_records(
++                    ledger.scan(through=captured),
++                    lambda key, signature, digest: verifier(
++                        SigningDomain.ARRIVAL, key, signature, digest
++                    ),
++                )
++            except CredentialBindingRefused as exc:
++                raise CredentialBindingRefused(
++                    exc.reason,
++                    request=exc.request,
++                    captured_head=captured,
++                    use_position=captured.ordinal + 1,
++                    evidence=exc.evidence,
++                ) from exc
++            except Exception as exc:
++                raise CredentialBindingRefused(
++                    "key-history-unverified",
++                    captured_head=captured,
++                    use_position=captured.ordinal + 1,
++                ) from exc
++            author_keys = tuple(
++                (
++                    observer,
++                    tuple(
++                        key
++                        for key, _introduced in key_registry.keys_valid_at(
++                            observer, captured.ordinal + 1
++                        )
++                    ),
++                )
++                for observer in sorted(key_registry.introductions)
++            )
++            receipt_keys = tuple(
++                observer.key
++                for observer in (effective.observers or ())
++                if isinstance(observer.key, str) and observer.key
++            )
++            signing_context = CapturedSigningContext(
++                captured_head=captured,
++                author_keys=author_keys,
++                receipt_keys=receipt_keys,
++            )
+         return RuntimeCapture(
+             basis=basis,
+             custodian=_custodian_from_verified_genesis(ledger),
+@@ -1111,6 +1319,7 @@ def capture_runtime(
+             ),
+             _sources=copy.deepcopy(sources),
+             _pending_boundaries=copy.deepcopy(tuple(pending)),
++            _signing_context=signing_context,
+         )
+     finally:
+         if snapshot is not None:
+@@ -1137,12 +1346,27 @@ def prepare_ordinary_write(
+     detached plan; execution later compares the same complete head under the
+     ledger fence and refuses any intervening append.
+     """
+-    capture = capture_runtime(registry, descriptor, locator, fold_overrides=fold_overrides)
++    capture = capture_runtime(
++        registry,
++        descriptor,
++        locator,
++        fold_overrides=fold_overrides,
++        credentials=credentials,
++    )
+     basis = capture.basis
+     effective = capture.effective_declaration
+     candidate = capture._candidate_copy()
+     snapshot = _BatchSnapshot(capture, capture._facts, capture._ticks)
+-    duplicate = _existing_fact_plan(snapshot, basis, fact, credentials, fact_id)
++    credential_session = CredentialResolutionSession()
++    duplicate = _existing_fact_plan(
++        snapshot,
++        basis,
++        fact,
++        credentials,
++        fact_id,
++        signing_context=capture._signing_context,
++        credential_session=credential_session,
++    )
+     if duplicate is not None:
+         return replace(
+             duplicate,
+@@ -1165,6 +1389,8 @@ def prepare_ordinary_write(
+             custodian=capture.custodian,
+             fact_id=fact_id,
+             admit_undeclared=admit_undeclared,
++            _signing_context=capture._signing_context,
++            _credential_session=credential_session,
+         )
+     except (AdmissionError, _AdmissionPlanRefused) as exc:
+         raise OrdinaryWritePreparationRefused(
+@@ -1254,11 +1480,17 @@ def execute_ordinary_write(
+ 
+ 
+ def _pack_batch_drafts(
+-    drafts: Sequence[RecordDraft], credentials: WriteCredentials
++    drafts: Sequence[RecordDraft],
++    credentials: WriteCredentials,
++    *,
++    captured_head: Head | None = None,
++    signing_context: CapturedSigningContext | None = None,
++    credential_session: CredentialResolutionSession | None = None,
+ ) -> tuple[RecordDraft, ...]:
+     """Turn adjacent ordinary fact drafts into wire-valid same-author batches."""
+     packed: list[RecordDraft] = []
+     held: list[RecordDraft] = []
++    session = credential_session or CredentialResolutionSession()
+ 
+     def flush() -> None:
+         if not held:
+@@ -1280,16 +1512,31 @@ def _pack_batch_drafts(
+                 for row in held
+             ]
+             body = body_of_batch(rows)
+-            signature = (
+-                credentials.arrival_signer(
+-                    first.observer,
+-                    content_commitment(
+-                        "batch", first.authored_at, first.observer, first.origin, body
+-                    ),
+-                )
+-                if credentials.arrival_signer is not None
+-                else None
++            digest = content_commitment(
++                "batch", first.authored_at, first.observer, first.origin, body
+             )
++            if credentials.mapped:
++                if captured_head is None:
++                    raise CredentialBindingRefused(
++                        "mapped batch signing requires a captured head"
++                    )
++                signature = _author_signature(
++                    credentials,
++                    session,
++                    signing_context,
++                    captured_head=captured_head,
++                    observer=first.observer,
++                    domain=SigningDomain.ARRIVAL,
++                    purpose=CredentialPurpose.AUTHORSHIP,
++                    digest=digest,
++                    legacy_signer=None,
++                )
++            else:
++                signature = (
++                    credentials.arrival_signer(first.observer, digest)
++                    if credentials.arrival_signer is not None
++                    else None
++                )
+             packed.append(
+                 RecordDraft(
+                     kind="batch",
+@@ -1322,6 +1569,9 @@ def _pending_tick_draft(
+     *,
+     credentials: WriteCredentials,
+     custodian: str,
++    captured_head: Head,
++    signing_context: CapturedSigningContext | None,
++    credential_session: CredentialResolutionSession,
+ ) -> RecordDraft:
+     """Encode one captured pending boundary without re-evaluating it."""
+     if not facts:
+@@ -1342,15 +1592,17 @@ def _pending_tick_draft(
+         current_fact.id,
+         _window_hash(facts, start=window_start),
+     )
+-    signature = (
+-        credentials.tick_signer(tick_commitment_hash(row))
+-        if credentials.tick_signer is not None
+-        else None
+-    )
+-    if signature is None and any(
++    signed_era = any(
+         existing.signature is not None and existing.window_hash is not None for existing in ticks
+-    ):
+-        raise RuntimeWriteRefused("refusing an unsigned tick in the signed tick era")
++    )
++    signature = _tick_signature(
++        credentials,
++        credential_session,
++        signing_context,
++        captured_head=captured_head,
++        digest=tick_commitment_hash(row),
++        signed_era=signed_era,
++    )
+     return RecordDraft(
+         kind="tick",
+         authored_at=tick.ts.timestamp(),
+@@ -1390,6 +1642,7 @@ def plan_batch_from_capture(
+     pending_ids: list[str] = []
+     pending_names: list[str] = []
+     pending_runs: list[str | None] = []
++    credential_session = CredentialResolutionSession()
+     for sequence, tick in enumerate(copy.deepcopy(pending)):
+         draft = _pending_tick_draft(
+             tick,
+@@ -1397,6 +1650,9 @@ def plan_batch_from_capture(
+             ticks,
+             credentials=credentials,
+             custodian=capture.custodian,
++            captured_head=basis.captured_head,
++            signing_context=capture._signing_context,
++            credential_session=credential_session,
+         )
+         logical.append(draft)
+         pending_ids.append(str(draft.body["id"]))
+@@ -1411,7 +1667,15 @@ def plan_batch_from_capture(
+     for index, item in enumerate(items):
+         synthetic = _BatchSnapshot(capture, facts, ticks)
+         try:
+-            plan = _existing_fact_plan(synthetic, basis, item.fact, credentials, item.fact_id)
++            plan = _existing_fact_plan(
++                synthetic,
++                basis,
++                item.fact,
++                credentials,
++                item.fact_id,
++                signing_context=capture._signing_context,
++                credential_session=credential_session,
++            )
+             if plan is None:
+                 grant = grant_for_observer(effective, item.fact.observer)
+                 plan = plan_ordinary_write(
+@@ -1425,6 +1689,8 @@ def plan_batch_from_capture(
+                     fact_id=item.fact_id,
+                     admit_undeclared=item.admit_undeclared,
+                     _mutate_candidate=True,
++                    _signing_context=capture._signing_context,
++                    _credential_session=credential_session,
+                 )
+         except (AdmissionError, _AdmissionPlanRefused) as exc:
+             raise BatchWritePreparationRefused(
+@@ -1436,6 +1702,16 @@ def plan_batch_from_capture(
+                 cause=exc,
+                 admission_refused=True,
+             ) from exc
++        except CredentialBindingRefused as exc:
++            raise BatchWritePreparationRefused(
++                input_index=index,
++                item=item,
++                effective_declaration=capture.effective_declaration,
++                custodian=capture.custodian,
++                basis=basis,
++                cause=exc,
++                admission_refused=False,
++            ) from exc
+         except RuntimeWriteRefused as exc:
+             raise BatchWritePreparationRefused(
+                 input_index=index,
+@@ -1466,7 +1742,13 @@ def plan_batch_from_capture(
+                 ticks = (*ticks, _tick_from_draft(draft, ordinal, sequence))
+         logical.extend(plan.drafts)
+ 
+-    packed = _pack_batch_drafts(logical, credentials)
++    packed = _pack_batch_drafts(
++        logical,
++        credentials,
++        captured_head=basis.captured_head,
++        signing_context=capture._signing_context,
++        credential_session=credential_session,
++    )
+     if capture.max_atomic_records is not None and len(packed) > capture.max_atomic_records:
+         raise AtomicLimitExceeded(
+             f"{len(packed)} packed records exceeds this backend's configured "
+@@ -1481,6 +1763,7 @@ def plan_batch_from_capture(
+         pending_tick_ids=tuple(pending_ids),
+         pending_tick_names=tuple(pending_names),
+         pending_tick_runs=tuple(pending_runs),
++        credential_bindings=credential_session.evidence,
+     )
+ 
+ 
+@@ -1496,7 +1779,13 @@ def prepare_batch_write(
+     """Capture once, then prepare every item against that exact evidence."""
+     if not items:
+         raise RuntimeWriteRefused("batch requires at least one fact")
+-    capture = capture_runtime(registry, descriptor, locator, fold_overrides=fold_overrides)
++    capture = capture_runtime(
++        registry,
++        descriptor,
++        locator,
++        fold_overrides=fold_overrides,
++        credentials=credentials,
++    )
+     return plan_batch_from_capture(capture, items, credentials=credentials)
+ 
+ 
+diff --git a/libs/engine/tests/test_arrival_declaration_custody.py b/libs/engine/tests/test_arrival_declaration_custody.py
+index be675080..2ebac249 100644
+--- a/libs/engine/tests/test_arrival_declaration_custody.py
++++ b/libs/engine/tests/test_arrival_declaration_custody.py
+@@ -26,6 +26,14 @@ from engine.arrival_declarations import (
+ )
+ from engine.arrival_head_attestation import Outcome
+ from engine.arrival_head_seam import Compared
++from engine.credentials import (
++    CredentialBindingEvidence,
++    CredentialPurpose,
++    CredentialRequest,
++    ResolvedCredential,
++    SigningDomain,
++    WriteCredentials,
++)
+ 
+ 
+ class _Snapshot:
+@@ -335,6 +343,59 @@ def test_proposed_declaration_can_repair_ambiguous_effective_history(
+     assert "scan" in activity
+ 
+ 
++def test_declaration_preparation_uses_mapped_fact_and_arrival_bindings(
++    tmp_path, monkeypatch
++) -> None:
++    from engine import arrival_declarations
++    from engine.arrival import KeyRegistry
++
++    registry, descriptor, target, proposed, captured, _, activity, _ = (
++        _declaration_fixture(tmp_path, case="advance", changed=True)
++    )
++    monkeypatch.setattr(
++        arrival_declarations,
++        "key_registry_from_records",
++        lambda _records, _verify: (
++            KeyRegistry(captured.lineage, {"alice": (("public-key", 0),)}),
++            (),
++        ),
++    )
++    requests: list[CredentialRequest] = []
++
++    def resolve(request: CredentialRequest) -> ResolvedCredential:
++        requests.append(request)
++        return ResolvedCredential(
++            CredentialBindingEvidence(
++                request, "key", "ed25519", "public-key", "test"
++            ),
++            lambda digest: f"{request.domain.value}:{digest}",
++        )
++
++    plan = prepare_declaration_edit(
++        registry,
++        descriptor,
++        target=target,
++        proposed_text=proposed,
++        observer="alice",
++        credentials=WriteCredentials(
++            binding_namespace="space",
++            binding_resolver=resolve,
++            signature_verifier=lambda domain, _key, signature, digest: signature
++            == f"{domain.value}:{digest}",
++        ),
++        fact_verify=lambda *_args: False,
++        arrival_verify=lambda *_args: False,
++    )
++
++    assert plan.status == "planned"
++    assert {(request.domain, request.purpose) for request in requests} == {
++        (SigningDomain.FACT, CredentialPurpose.AUTHORSHIP),
++        (SigningDomain.ARRIVAL, CredentialPurpose.AUTHORSHIP),
++    }
++    assert len(plan.credential_bindings) == 2
++    assert activity[-2:] == ["query-close", "ledger-close"]
++
++
+ def test_declaration_preparation_refuses_ticked_reincarnation_before_scan(
+     tmp_path,
+ ) -> None:
+diff --git a/libs/engine/tests/test_ceremony_orchestration.py b/libs/engine/tests/test_ceremony_orchestration.py
+index 4ad539c3..a2e3ecf7 100644
+--- a/libs/engine/tests/test_ceremony_orchestration.py
++++ b/libs/engine/tests/test_ceremony_orchestration.py
+@@ -55,6 +55,15 @@ class Creds:
+         return WriteCredentials(fact_signer=_signer)
+ 
+ 
++class MappedCreds:
++    def for_write(self, vertex: Path) -> WriteCredentials:
++        return WriteCredentials(
++            binding_namespace="space",
++            binding_resolver=lambda _request: None,
++            signature_verifier=lambda *_args: True,
++        )
++
++
+ @pytest.fixture(params=["jsonl", "sqlite"])
+ def world(request, tmp_path: Path):
+     locator = "./x.jsonl" if request.param == "jsonl" else "./x.db"
+@@ -107,6 +116,23 @@ def test_plan_exposes_genesis_shape(world):
+     assert preview.pending_intent is None
+ 
+ 
++def test_legacy_ceremony_refuses_mapped_credentials_before_intent_or_store_write(
++    world,
++):
++    preview = plan_declaration_update(world["vertex"])
++
++    result = apply_declaration_update(
++        preview,
++        observer="obs",
++        credentials=MappedCreds(),
++    )
++
++    assert result.status == "refused"
++    assert "Arrival declaration writer" in result.reason
++    assert not intent_path_for(world["vertex"]).exists()
++    assert _resolved_docs(world) is None
++
++
+ def test_genesis_plan_apply_end_to_end(world):
+     _, result = _apply_genesis(world)
+     assert result.receipt["lineage"]
+@@ -588,6 +614,7 @@ def test_apply_over_out_of_band_index_rows_refuses_typed_pre_intent(tmp_path):
+     import dataclasses
+ 
+     from atoms import Fact
++
+     from engine.sqlite_store import SqliteStore
+ 
+     locator = "./store/x.jsonl"
+diff --git a/libs/engine/tests/test_handle_receive.py b/libs/engine/tests/test_handle_receive.py
+index 4a7da33c..f7cbc645 100644
+--- a/libs/engine/tests/test_handle_receive.py
++++ b/libs/engine/tests/test_handle_receive.py
+@@ -66,6 +66,26 @@ class _Creds:
+         return self.current
+ 
+ 
++def test_legacy_handle_refuses_mapped_credentials_before_write(tmp_path):
++    vpath, store = _scaffold(tmp_path)
++    credentials = _Creds(
++        WriteCredentials(
++            binding_namespace="space",
++            binding_resolver=lambda _request: None,
++            signature_verifier=lambda *_args: True,
++        )
++    )
++
++    with (
++        open_vertex(vpath, credentials=credentials) as handle,
++        pytest.raises(HandleError, match="Arrival registry writer"),
++    ):
++        handle.receive(Fact.of("decision", "kyle", topic="a"))
++
++    with sqlite3.connect(store) as conn:
++        assert conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 0
++
++
+ def _scaffold(tmp_path: Path, kdl: str = _VERTEX_KDL) -> tuple[Path, Path]:
+     store = tmp_path / "t.db"
+     vpath = tmp_path / "t.vertex"
+@@ -81,7 +101,8 @@ def _append(store: Path, kind: str, ts: float, *, fid: str | None = None, **payl
+     fid = fid or gen_id()
+     ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
+     conn.execute(
+-        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
++        "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, "
++        "arrival_ordinal, arrival_seq) "
+         "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+         (fid, kind, ts, "kyle", "", json.dumps(payload), ord_val),
+     )
+diff --git a/libs/engine/tests/test_runtime_batch_write.py b/libs/engine/tests/test_runtime_batch_write.py
+index fdc97c04..0eeb55cd 100644
+--- a/libs/engine/tests/test_runtime_batch_write.py
++++ b/libs/engine/tests/test_runtime_batch_write.py
+@@ -33,6 +33,13 @@ from engine.arrival_head_attestation import IndeterminateComparison
+ from engine.arrival_head_seam import AttestedLedger, Indeterminate
+ from engine.arrival_maintenance import sync_projection
+ from engine.arrival_registry import BackendRegistry
++from engine.credentials import (
++    CredentialBindingEvidence,
++    CredentialBindingRefused,
++    CredentialRequest,
++    ResolvedCredential,
++    SigningDomain,
++)
+ from engine.handle import WriteCredentials
+ from engine.residence import index_path_for
+ from engine.row_commitment import fact_row_hash, tick_commitment_hash, tick_row_hash
+@@ -185,6 +192,117 @@ def _registry_with_limit(target: _Target, limit: int) -> BackendRegistry:
+     return registry
+ 
+ 
++def _mapped_credentials(keys, *, public_key: str | None = None, keypair=None):
++    from sign import ed25519
++
++    selected_keypair = keys.keypair if keypair is None else keypair
++    selected_public = keys.public if public_key is None else public_key
++    domain_names = {
++        SigningDomain.FACT: "test-fact-v1",
++        SigningDomain.ARRIVAL: "test-arrival-v1",
++        SigningDomain.TICK: "test-tick-v1",
++    }
++
++    def resolve(request: CredentialRequest) -> ResolvedCredential:
++        return ResolvedCredential(
++            CredentialBindingEvidence(
++                request,
++                key_ref="managed-kyle",
++                algorithm="ed25519",
++                public_key=selected_public,
++                provenance="test",
++            ),
++            lambda digest: ed25519.sign(
++                selected_keypair,
++                digest.encode(),
++                domain=domain_names[request.domain],
++            ),
++        )
++
++    def verify(domain, public, signature, digest):
++        return ed25519.verify(
++            ed25519.public_key_from_b64(public),
++            signature,
++            digest.encode(),
++            domain=domain_names[domain],
++        )
++
++    return WriteCredentials(
++        binding_namespace="test-space",
++        binding_resolver=resolve,
++        signature_verifier=verify,
++    )
++
++
++def test_real_capture_authorizes_mapped_fact_and_batch_domains(
++    tmp_path, monkeypatch, keys, signer
++):
++    from sign import ed25519
++
++    target = _make_target(tmp_path, monkeypatch, keys, signer)
++    plan = _prepare(
++        target,
++        _fact("mapped-one", 3.0),
++        _fact("mapped-two", 4.0),
++        credentials=_mapped_credentials(keys),
++    )
++
++    assert [draft.kind for draft in plan.drafts] == ["batch"]
++    assert {item.request.domain for item in plan.credential_bindings} == {
++        SigningDomain.FACT,
++        SigningDomain.ARRIVAL,
++    }
++    batch = plan.drafts[0]
++    assert ed25519.verify(
++        ed25519.public_key_from_b64(keys.public),
++        batch.signature,
++        content_commitment(
++            "batch", batch.authored_at, batch.observer, batch.origin, batch.body
++        ).encode(),
++        domain="test-arrival-v1",
++    )
++    for row in batch.body["rows"]:
++        digest = fact_commitment_hash(
++            row["kind"],
++            row["ts"],
++            row["observer"],
++            row["origin"],
++            row["payload"],
++        )
++        assert ed25519.verify(
++            ed25519.public_key_from_b64(keys.public),
++            row["signature"],
++            digest.encode(),
++            domain="test-fact-v1",
++        )
++
++
++def test_real_capture_refuses_mapped_author_key_outside_captured_registry(
++    tmp_path, monkeypatch, keys, signer
++):
++    from sign import ed25519
++
++    target = _make_target(tmp_path, monkeypatch, keys, signer)
++    other = ed25519.load_or_generate(tmp_path / "other-key")
++    before = target.log.head()
++
++    with pytest.raises(BatchWritePreparationRefused) as raised:
++        _prepare(
++            target,
++            _fact("unauthorized", 3.0),
++            credentials=_mapped_credentials(
++                keys,
++                public_key=other.public_b64,
++                keypair=other,
++            ),
++        )
++
++    assert raised.value.item_index == 0
++    assert isinstance(raised.value.cause, CredentialBindingRefused)
++    assert raised.value.cause.captured_head.ordinal == before["ord"]
++    assert target.log.head() == before
++
++
+ def test_real_same_observer_batch_is_one_wire_record_and_one_shared_commit(
+     tmp_path, monkeypatch, keys, signer
+ ):
+diff --git a/libs/engine/tests/test_runtime_write.py b/libs/engine/tests/test_runtime_write.py
+index 045edc7c..d800e066 100644
+--- a/libs/engine/tests/test_runtime_write.py
++++ b/libs/engine/tests/test_runtime_write.py
+@@ -33,6 +33,15 @@ from engine.arrival_file_backend import FileLedger
+ from engine.arrival_head_attestation import Outcome
+ from engine.arrival_head_seam import AttestedLedger, Compared
+ from engine.arrival_registry import BackendRegistry
++from engine.credentials import (
++    CapturedSigningContext,
++    CredentialBindingEvidence,
++    CredentialBindingRefused,
++    CredentialPurpose,
++    CredentialRequest,
++    ResolvedCredential,
++    SigningDomain,
++)
+ from engine.handle import WriteCredentials
+ from engine.loop import Loop
+ from engine.peer import Grant
+@@ -167,6 +176,192 @@ def test_fact_signer_never_substitutes_for_missing_arrival_signer():
+     assert plan.drafts[0].signature is None
+ 
+ 
++@pytest.mark.parametrize(
++    "kwargs",
++    (
++        {"binding_namespace": "space"},
++        {"binding_resolver": lambda _request: None},
++        {"signature_verifier": lambda *_args: True},
++        {"receipt_observer": "receipt"},
++        {
++            "binding_namespace": "space",
++            "binding_resolver": lambda _request: None,
++            "signature_verifier": lambda *_args: True,
++            "fact_signer": lambda _observer, _digest: "legacy",
++        },
++    ),
++)
++def test_mapped_write_credentials_refuse_partial_or_legacy_mixed_configuration(
++    kwargs,
++):
++    with pytest.raises(ValueError):
++        WriteCredentials(**kwargs)
++
++
++def test_mapped_plan_resolves_exact_domains_after_captured_authorization():
++    head = _head()
++    requests: list[CredentialRequest] = []
++
++    def resolve(request: CredentialRequest) -> ResolvedCredential:
++        requests.append(request)
++        return ResolvedCredential(
++            CredentialBindingEvidence(
++                request,
++                key_ref="managed-key",
++                algorithm="ed25519",
++                public_key="public-key",
++                provenance="test",
++            ),
++            lambda digest: f"{request.domain.value}:{digest}",
++        )
++
++    credentials = WriteCredentials(
++        binding_namespace="space",
++        receipt_observer="receipt",
++        binding_resolver=resolve,
++        signature_verifier=lambda domain, _key, signature, digest: signature
++        == f"{domain.value}:{digest}",
++    )
++    context = CapturedSigningContext(
++        head,
++        author_keys=(("kyle", ("public-key",)),),
++        receipt_keys=("public-key",),
++    )
++
++    plan = plan_ordinary_write(
++        Snapshot(head),
++        ReadBasis(head.lineage, head, head, "test-view"),
++        _vertex(),
++        AtomFact("note", 42.0, {"value": "one"}, observer="kyle"),
++        grant=None,
++        credentials=credentials,
++        custodian="kyle",
++        fact_id="fact-1",
++        _signing_context=context,
++    )
++
++    assert {(request.observer, request.domain, request.purpose) for request in requests} == {
++        ("kyle", SigningDomain.FACT, CredentialPurpose.AUTHORSHIP),
++        ("kyle", SigningDomain.ARRIVAL, CredentialPurpose.AUTHORSHIP),
++        ("receipt", SigningDomain.TICK, CredentialPurpose.RECEIPT),
++    }
++    assert len(plan.credential_bindings) == 3
++    assert plan.drafts[0].body["signature"].startswith("fact:")
++    assert plan.drafts[0].signature.startswith("arrival:")
++    assert plan.drafts[1].body["signature"].startswith("tick:")
++
++
++def test_mapped_tick_without_receipt_observer_is_unsigned_until_signed_era():
++    head = _head()
++    requests: list[CredentialRequest] = []
++
++    def resolve(request: CredentialRequest) -> ResolvedCredential:
++        requests.append(request)
++        return ResolvedCredential(
++            CredentialBindingEvidence(
++                request, "key", "ed25519", "public-key", "test"
++            ),
++            lambda digest: f"{request.domain.value}:{digest}",
++        )
++
++    credentials = WriteCredentials(
++        binding_namespace="space",
++        binding_resolver=resolve,
++        signature_verifier=lambda domain, _key, signature, digest: signature
++        == f"{domain.value}:{digest}",
++    )
++    context = CapturedSigningContext(
++        head,
++        author_keys=(("kyle", ("public-key",)),),
++        receipt_keys=("public-key",),
++    )
++    unsigned = plan_ordinary_write(
++        Snapshot(head),
++        ReadBasis(head.lineage, head, head, "test-view"),
++        _vertex(),
++        AtomFact("note", 41.0, {"value": "zero"}, observer="kyle"),
++        grant=None,
++        credentials=credentials,
++        custodian="kyle",
++        fact_id="fact-0",
++        _signing_context=context,
++    )
++    assert unsigned.drafts[1].body.get("signature") is None
++    assert SigningDomain.TICK not in {request.domain for request in requests}
++    requests.clear()
++    existing = Tick(
++        id="old-tick",
++        name="note",
++        ts=1.0,
++        since=None,
++        origin="kyle",
++        payload={},
++        arrival_ordinal=3,
++        arrival_seq=0,
++        payload_text="{}",
++        prev_hash=None,
++        window_start="",
++        fact_cursor="",
++        window_hash="hash",
++        signature="signed",
++    )
++
++    with pytest.raises(CredentialBindingRefused, match="missing-required") as raised:
++        plan_ordinary_write(
++            Snapshot(head, ticks=(existing,)),
++            ReadBasis(head.lineage, head, head, "test-view"),
++            _vertex(),
++            AtomFact("note", 42.0, {"value": "one"}, observer="kyle"),
++            grant=None,
++            credentials=credentials,
++            custodian="kyle",
++            fact_id="fact-1",
++            _signing_context=context,
++        )
++
++    assert raised.value.captured_head == head
++    assert raised.value.request is None
++    assert SigningDomain.TICK not in {request.domain for request in requests}
++
++
++def test_mapped_provider_failure_retains_exact_request_and_captured_head():
++    head = _head()
++    failure = RuntimeError("provider unavailable")
++
++    def resolve(_request: CredentialRequest):
++        raise failure
++
++    credentials = WriteCredentials(
++        binding_namespace="space",
++        binding_resolver=resolve,
++        signature_verifier=lambda *_args: True,
++    )
++    context = CapturedSigningContext(
++        head,
++        author_keys=(("kyle", ("public-key",)),),
++        receipt_keys=(),
++    )
++    with pytest.raises(CredentialBindingRefused) as raised:
++        plan_ordinary_write(
++            Snapshot(head),
++            ReadBasis(head.lineage, head, head, "test-view"),
++            _vertex(),
++            AtomFact("note", 42.0, {"value": "one"}, observer="kyle"),
++            grant=None,
++            credentials=credentials,
++            custodian="kyle",
++            fact_id="fact-1",
++            _signing_context=context,
++        )
++
++    assert raised.value.request == CredentialRequest(
++        "space", "kyle", SigningDomain.FACT, CredentialPurpose.AUTHORSHIP
++    )
++    assert raised.value.captured_head == head
++    assert raised.value.use_position == head.ordinal + 1
++    assert raised.value.__cause__ is failure
++
++
+ def test_plan_refuses_unsigned_fresh_tick_after_signed_tick_era():
+     head = _head()
+     existing = Tick(
+diff --git a/libs/sdk/README.md b/libs/sdk/README.md
+index 01b7c56f..8b8fa2e3 100644
+--- a/libs/sdk/README.md
++++ b/libs/sdk/README.md
+@@ -177,6 +177,57 @@ can use the provider. Callers that need another credential source can continue
+ to supply a custom `CredentialProvider`; that interface does not itself create
+ an observer mapping or register public keys.
+ 
++For an explicit persisted namespace, use `MappedCredentialProvider` with an
++Arrival target. Prepare the binding separately from initializing the store:
++
++```python
++from pathlib import Path
++from sdk import MappedCredentialProvider, init_vertex, emit_fact
++
++credentials = MappedCredentialProvider(
++    Path("/absolute/path/to/private-custody"),
++    namespace="personal",
++    receipt_observer="alice",  # explicit local receipt-signing selection
++)
++binding = credentials.create_binding("alice", token="bootstrap-alice-1")
++init_vertex(
++    Path("observations.vertex"), store_type="arrival", observer="alice",
++    credentials=credentials,
++)
++emit_fact(
++    Path("observations.vertex"), "item", {"value": 1},
++    observer="alice", credentials=credentials,
++)
++```
++
++Mapped selection uses the exact namespace and observer, independently of the
++vertex filename or lineage. The engine checks author keys against verified
++history through captured H, for use after H, and verifies each signature in its
++own domain. Receipt signing uses the explicitly selected local observer and
++the effective declaration's current receipt-key policy; the unsigned outer tick
++still names the physical genesis custodian. Omitting `receipt_observer` permits
++unsigned ticks before the signed-tick era, and refuses a required signed tick.
++A missing author binding may remain unsigned where the existing policy allows;
++a contradictory or unauthorized binding refuses before append.
++
++Mapped initialization only loads a pre-created binding. For another observer,
++prepare its binding and pass `key=binding.public_key` to `grant_observer` with
++the existing author's credentials. Mapped `grant_observer(key=None)` refuses
++before creating keys. Recovery of an existing Arrival initialization intent
++signs nothing and does not require private custody to remain available.
++Mapped providers are supported on Arrival targets; legacy writers explicitly
++refuse them. The default `CustodyCredentialProvider` remains unchanged.
++
++`import_legacy(vertex_path, observer, token=...)` explicitly copies a verified
++legacy key into managed storage without changing the original. It preserves
++flat/nested ambiguity and alias refusals. After import, locator moves do not
++change mapped selection. No read, preview, or signer load imports or creates a
++binding. `bind_existing_ref(observer, key_ref, expected_public_key, token=...)`
++permits deliberate reuse of a completed managed key in another namespace;
++equal observer labels alone never select another namespace's key.
++See [custody binding recovery](../custody/README.md#explicit-mapped-bindings)
++for interruption handling and filesystem scope.
++
+ Supported Arrival execution reserves the vertex name from its loop names.
+ Every exact name collision refuses, including passive loops, reset/carry loops,
+ and count- or event-triggered boundaries. The runtime also adds an implicit
+diff --git a/libs/sdk/src/sdk/__init__.py b/libs/sdk/src/sdk/__init__.py
+index 362fe1fb..93fdca04 100644
+--- a/libs/sdk/src/sdk/__init__.py
++++ b/libs/sdk/src/sdk/__init__.py
+@@ -13,7 +13,13 @@ from .declare import (
+     inspect_declaration,
+     recover_declaration,
+ )
+-from .emit import CustodyCredentialProvider, emit_batch, emit_fact, preview_emission
++from .emit import (
++    CustodyCredentialProvider,
++    MappedCredentialProvider,
++    emit_batch,
++    emit_fact,
++    preview_emission,
++)
+ from .errors import (
+     ArrivalRefusal,
+     CommittedIncomplete,
+@@ -134,6 +140,7 @@ __all__ = [
+     "recover_ceremony",
+     # Providers
+     "CustodyCredentialProvider",
++    "MappedCredentialProvider",
+     # Models
+     "TargetInfo",
+     "ExportResult",
+diff --git a/libs/sdk/src/sdk/declare.py b/libs/sdk/src/sdk/declare.py
+index f08171cc..8819b62a 100644
+--- a/libs/sdk/src/sdk/declare.py
++++ b/libs/sdk/src/sdk/declare.py
+@@ -281,6 +281,7 @@ def init_vertex(
+     signer=None,
+     fact_signer=None,
+     public_key: str | None = None,
++    credentials: CredentialProvider | None = None,
+     recover: bool = False,
+     registry: BackendRegistry | None = None,
+ ) -> InitVertexResult:
+@@ -325,10 +326,15 @@ def init_vertex(
+             signer=signer,
+             fact_signer=fact_signer,
+             public_key=public_key,
++            credentials=credentials,
+             recover=recover,
+             overwrite=overwrite,
+             registry=registry,
+         )
++    if credentials is not None:
++        raise TargetUnsupported(
++            "initialization credentials require an explicit Arrival descriptor target"
++        )
+     if vertex_path.exists() and not overwrite:
+         raise TargetError(f"vertex file already exists: {vertex_path}")
+ 
+@@ -400,6 +406,7 @@ def _init_arrival(
+     signer,
+     fact_signer,
+     public_key: str | None,
++    credentials: CredentialProvider | None,
+     recover: bool,
+     overwrite: bool,
+     registry: BackendRegistry | None,
+@@ -508,8 +515,97 @@ def _init_arrival(
+         # to headless deployments; absent one, key creation/loading is the
+         # same explicit custody operation used by the existing init command.
+         from custody import arrival_signer_for, ensure_signing_key, fact_signer_for
++        from engine.credentials import (
++            CredentialBindingEvidence,
++            CredentialPurpose,
++            CredentialRequest,
++            ResolvedCredential,
++            SigningDomain,
++        )
++
++        if credentials is not None:
++            if signer is not None or fact_signer is not None:
++                raise SdkValueError(
++                    "mapped Arrival initialization does not accept separate signer inputs"
++                )
++            write_credentials = _arrival_credentials(vertex_path, credentials)
++            if not write_credentials.mapped or write_credentials.binding_resolver is None:
++                raise SdkValueError(
++                    "Arrival initialization requires a mapped provider or explicit signers"
++                )
++            fact_request = CredentialRequest(
++                write_credentials.binding_namespace or "",
++                observer,
++                SigningDomain.FACT,
++                CredentialPurpose.INITIALIZATION,
++            )
++            arrival_request = CredentialRequest(
++                write_credentials.binding_namespace or "",
++                observer,
++                SigningDomain.ARRIVAL,
++                CredentialPurpose.INITIALIZATION,
++            )
++            try:
++                fact_credential = write_credentials.binding_resolver(fact_request)
++                arrival_credential = write_credentials.binding_resolver(arrival_request)
++            except Exception as exc:
++                normalized = normalize_exception(exc)
++                if normalized is not exc:
++                    raise normalized from exc
++                raise SdkValueError(
++                    "Arrival initialization could not resolve its pre-created mapped binding"
++                ) from exc
++            if fact_credential is None or arrival_credential is None:
++                raise SdkValueError(
++                    "mapped Arrival initialization requires a pre-created founding binding"
++                )
++            def valid_bootstrap_credential(value: object, request: CredentialRequest) -> bool:
++                if not isinstance(value, ResolvedCredential):
++                    return False
++                evidence = value.evidence
++                return (
++                    isinstance(evidence, CredentialBindingEvidence)
++                    and evidence.request == request
++                    and all(
++                        isinstance(item, str) and bool(item)
++                        for item in (
++                            evidence.key_ref,
++                            evidence.algorithm,
++                            evidence.public_key,
++                            evidence.provenance,
++                        )
++                    )
++                    and callable(value.sign_digest)
++                )
++
++            fact_valid = valid_bootstrap_credential(fact_credential, fact_request)
++            arrival_valid = valid_bootstrap_credential(arrival_credential, arrival_request)
++            if not fact_valid or not arrival_valid:
++                raise SdkValueError(
++                    "mapped Arrival initialization resolver returned contradictory binding evidence"
++                )
++            if (
++                fact_credential.evidence.public_key != arrival_credential.evidence.public_key
++                or fact_credential.evidence.key_ref != arrival_credential.evidence.key_ref
++            ):
++                raise SdkValueError(
++                    "mapped Arrival initialization requires FACT and ARRIVAL bindings with one key"
++                )
++            if public_key is not None and public_key != fact_credential.evidence.public_key:
++                raise SdkValueError(
++                    "mapped Arrival initialization public_key disagrees with its binding"
++                )
++            public_key = fact_credential.evidence.public_key
++
++            def mapped_arrival_signer(author: str, digest: str) -> str | None:
++                return arrival_credential.sign_digest(digest) if author == observer else None
++
++            def mapped_fact_signer(author: str, digest: str) -> str | None:
++                return fact_credential.sign_digest(digest) if author == observer else None
+ 
+-        if signer is None and fact_signer is None and public_key is None:
++            signer = mapped_arrival_signer
++            fact_signer = mapped_fact_signer
++        elif signer is None and fact_signer is None and public_key is None:
+             try:
+                 keypair = ensure_signing_key(vertex_path, observer=observer)
+             except ValueError as exc:
+diff --git a/libs/sdk/src/sdk/emit.py b/libs/sdk/src/sdk/emit.py
+index 6632c6f4..ad3d3216 100644
+--- a/libs/sdk/src/sdk/emit.py
++++ b/libs/sdk/src/sdk/emit.py
+@@ -8,6 +8,7 @@ from pathlib import Path
+ from typing import Any
+ 
+ from atoms import Fact
++from custody.binding import MappedCredentialProvider as _MappedCredentialProvider
+ from custody.signing import arrival_signer_for, fact_signer_for, tick_signer_for
+ from engine.admission import AdmissionError, UndeclaredKind, grant_for_observer
+ from engine.arrival_registry import BackendRegistry
+@@ -41,6 +42,7 @@ __all__ = [
+     "emit_batch",
+     "preview_emission",
+     "CustodyCredentialProvider",
++    "MappedCredentialProvider",
+ ]
+ 
+ 
+@@ -107,6 +109,50 @@ class CustodyCredentialProvider:
+         )
+ 
+ 
++class MappedCredentialProvider(_MappedCredentialProvider):
++    """SDK export for explicit namespace-scoped, persistent custody bindings."""
++
++    def __init__(
++        self,
++        root: Path | str,
++        *,
++        namespace: str,
++        receipt_observer: str | None = None,
++    ) -> None:
++        try:
++            super().__init__(root, namespace=namespace, receipt_observer=receipt_observer)
++        except ValueError as exc:
++            raise SdkValueError(str(exc)) from exc
++
++
++def _mapped_credentials(
++    value: CredentialProvider | WriteCredentials | None, *, vertex: Path | None = None
++) -> bool:
++    """Mapped credentials cannot silently route through legacy store writers."""
++    if value is None:
++        return False
++    if bool(getattr(value, "mapped", False)):
++        return True
++    if isinstance(value, WriteCredentials):
++        return value.mapped
++    provider = getattr(value, "for_write", None)
++    if vertex is None or not callable(provider):
++        return False
++    produced = provider(vertex)
++    if not isinstance(produced, WriteCredentials):
++        raise SdkValueError("credential provider did not return WriteCredentials")
++    return produced.mapped
++
++
++def _refuse_legacy_mapped_credentials(
++    value: CredentialProvider | WriteCredentials | None, *, vertex: Path
++) -> None:
++    if _mapped_credentials(value, vertex=vertex):
++        raise TargetUnsupported(
++            "mapped credentials require an explicit Arrival descriptor target"
++        )
++
++
+ def preview_emission(
+     target: Path | str,
+     kind_or_fact: str | Fact,
+@@ -136,6 +182,8 @@ def preview_emission(
+     """
+     target_path = Path(target).resolve()
+     arrival = _arrival_descriptor(target_path)
++    if arrival is None:
++        _refuse_legacy_mapped_credentials(credentials, vertex=target_path)
+ 
+     if isinstance(kind_or_fact, Fact):
+         fact = kind_or_fact
+@@ -345,6 +393,8 @@ def emit_fact(
+     """
+     target_path = Path(target).resolve()
+     arrival = _arrival_descriptor(target_path)
++    if arrival is None:
++        _refuse_legacy_mapped_credentials(credentials, vertex=target_path)
+ 
+     if isinstance(kind_or_fact, Fact):
+         fact = kind_or_fact
+@@ -635,6 +685,8 @@ def emit_batch(
+ 
+     target_path = Path(target).resolve()
+     arrival = _arrival_descriptor(target_path)
++    if arrival is None:
++        _refuse_legacy_mapped_credentials(credentials, vertex=target_path)
+     if arrival is not None:
+         from engine.arrival_contract import NotAuthority, Profile
+         from engine.arrival_maintenance import sync_projection
+diff --git a/libs/sdk/src/sdk/errors.py b/libs/sdk/src/sdk/errors.py
+index 56d4b6c6..39fe350f 100644
+--- a/libs/sdk/src/sdk/errors.py
++++ b/libs/sdk/src/sdk/errors.py
+@@ -31,6 +31,7 @@ from engine.arrival_initialization import (
+ from engine.arrival_maintenance import ProjectionSyncError
+ from engine.arrival_restore import RestoreForwardIncomplete, RestoreForwardUnknown
+ from engine.arrival_search import SearchIndexSyncError
++from engine.credentials import CredentialBindingRefused
+ from engine.runtime_write import (
+     BatchPostCommitProjectionFailed,
+     BatchWriteCommitUnknown,
+@@ -168,6 +169,44 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
+     return details
+ 
+ 
++def _credential_binding_details(exc: BaseException) -> dict[str, Any] | None:
++    """Extract public mapped-binding evidence from an explicit causal chain."""
++    seen: set[int] = set()
++    current: BaseException | None = exc
++    for _ in range(3):
++        if current is None or id(current) in seen:
++            return None
++        seen.add(id(current))
++        if isinstance(current, CredentialBindingRefused):
++            result: dict[str, Any] = {"reason": current.reason}
++            request = current.request
++            if request is not None:
++                result["request"] = {
++                    "namespace": request.namespace,
++                    "observer": request.observer,
++                    "domain": request.domain.value,
++                    "purpose": request.purpose.value,
++                }
++            if current.captured_head is not None:
++                head = _head_dict(current.captured_head)
++                if head is not None:
++                    result["captured_head"] = head
++            if current.use_position is not None:
++                result["use_position"] = current.use_position
++            binding = current.evidence
++            if binding is not None:
++                # A malformed provider response can be the reason for refusal.
++                # Do not serialize arbitrary objects retained as that evidence.
++                result["binding"] = {
++                    name: value if isinstance(value, str) else None
++                    for name in ("key_ref", "algorithm", "public_key", "provenance")
++                    for value in (getattr(binding, name, None),)
++                }
++            return result
++        current = _causal_exception(current)
++    return None
++
++
+ def _causal_exception(exc: BaseException) -> BaseException | None:
+     cause = getattr(exc, "cause", None)
+     if isinstance(cause, BaseException):
+@@ -415,6 +454,9 @@ def normalize_exception(
+         if coordinate is not None or value is None:
+             details[name] = coordinate
+     details["source_type"] = type(exc).__name__
++    credential = _credential_binding_details(exc)
++    if credential is not None:
++        details["credential_binding"] = credential
+     evidence = _evidence_details(exc, details)
+     if evidence is not None:
+         details["evidence"] = evidence
+@@ -470,6 +512,8 @@ def normalize_exception(
+             kind=getattr(exc, "kind", None),
+             vertex=getattr(exc, "vertex", None),
+         )
++    if isinstance(exc, CredentialBindingRefused):
++        return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+     if isinstance(
+         exc,
+         (
+diff --git a/libs/sdk/src/sdk/kind.py b/libs/sdk/src/sdk/kind.py
+index 5fa5e4b7..cdb371a9 100644
+--- a/libs/sdk/src/sdk/kind.py
++++ b/libs/sdk/src/sdk/kind.py
+@@ -23,7 +23,7 @@ from lang.vertex_mutation import (
+     upsert_vertex_observer,
+ )
+ 
+-from .emit import CustodyCredentialProvider
++from .emit import CustodyCredentialProvider, _refuse_legacy_mapped_credentials
+ from .target import resolve_target
+ from .types import (
+     CeremonyFailed,
+@@ -299,6 +299,7 @@ def add_kind(
+     vertex_path = Path(target).resolve()
+     arrival = _arrival_descriptor_for(vertex_path)
+     if arrival is None:
++        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
+         info = resolve_target(target)
+         if info.target_type != "vertex":
+             raise TargetUnsupported(f"add_kind requires a .vertex target, got {info.target_type}")
+@@ -360,6 +361,7 @@ def edit_kind(
+     vertex_path = Path(target).resolve()
+     arrival = _arrival_descriptor_for(vertex_path)
+     if arrival is None:
++        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
+         info = resolve_target(target)
+         if info.target_type != "vertex":
+             raise TargetUnsupported(f"edit_kind requires a .vertex target, got {info.target_type}")
+@@ -419,6 +421,7 @@ def remove_kind(
+     vertex_path = Path(target).resolve()
+     arrival = _arrival_descriptor_for(vertex_path)
+     if arrival is None:
++        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
+         info = resolve_target(target)
+         if info.target_type != "vertex":
+             raise TargetUnsupported(
+@@ -496,6 +499,7 @@ def grant_observer(
+     vertex_path = Path(target).resolve()
+     arrival = _arrival_descriptor_for(vertex_path)
+     if arrival is None:
++        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
+         info = resolve_target(target)
+         if info.target_type != "vertex":
+             raise TargetUnsupported(
+@@ -504,6 +508,18 @@ def grant_observer(
+     cred_provider = credentials or CustodyCredentialProvider()
+ 
+     if key is None:
++        mapped = getattr(cred_provider, "mapped", False)
++        if arrival is not None and not mapped:
++            # A wrapper need not expose a provider-level marker. Classify its
++            # actual write configuration before the legacy custody helper can
++            # mint a key for this requested observer.
++            from .declare import _arrival_credentials
++
++            mapped = _arrival_credentials(vertex_path, cred_provider).mapped
++        if mapped:
++            raise SdkValueError(
++                "mapped observer grants require an explicitly pre-created binding public key"
++            )
+         from custody import ensure_signing_key
+ 
+         try:
+@@ -576,6 +592,7 @@ def revoke_observer(
+     vertex_path = Path(target).resolve()
+     arrival = _arrival_descriptor_for(vertex_path)
+     if arrival is None:
++        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
+         info = resolve_target(target)
+         if info.target_type != "vertex":
+             raise TargetUnsupported(
+diff --git a/libs/sdk/tests/test_arrival_mapped_credentials.py b/libs/sdk/tests/test_arrival_mapped_credentials.py
+new file mode 100644
+index 00000000..5be28a4f
+--- /dev/null
++++ b/libs/sdk/tests/test_arrival_mapped_credentials.py
+@@ -0,0 +1,529 @@
++"""Public SDK checks for explicitly mapped Arrival credentials.
++
++These tests intentionally use the public custody provider and SDK operations.
++They do not inspect the provider's private slot layout; the temporary root is
++only a test-owned custody namespace.
++"""
++
++from __future__ import annotations
++
++import asyncio
++from dataclasses import replace
++from pathlib import Path
++
++import pytest
++from atoms import Fact, SourceError
++from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
++
++from sdk import (
++    MappedCredentialProvider,
++    SdkError,
++    SdkValueError,
++    edit_declaration,
++    emit_batch,
++    emit_fact,
++    grant_observer,
++    init_vertex,
++    preview_emission,
++    run_sources,
++)
++
++
++@pytest.fixture(autouse=True)
++def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    """Keep custody, config, and legacy home state inside this test."""
++
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops"))
++
++
++def _provider(tmp_path: Path, *, namespace: str = "tenant-a") -> MappedCredentialProvider:
++    return MappedCredentialProvider(
++        tmp_path / "mapped-custody", namespace=namespace, receipt_observer="alice"
++    )
++
++
++def _create(provider: MappedCredentialProvider, observer: str, token: str):
++    return provider.create_binding(observer, token=token)
++
++
++def _file_state(root: Path) -> dict[Path, bytes]:
++    return {
++        path.relative_to(root): path.read_bytes()
++        for path in root.rglob("*")
++        if path.is_file()
++    }
++
++
++def _init_mapped(
++    tmp_path: Path, provider: MappedCredentialProvider, *, observer: str = "alice"
++) -> tuple[Path, object]:
++    target = tmp_path / "declared-name.vertex"
++    _create(provider, observer, f"create-{observer}")
++    result = init_vertex(
++        target,
++        name="declared-name",
++        store_type="arrival",
++        observer=observer,
++        location=str(tmp_path / "records.arrival"),
++        credentials=provider,
++    )
++    return target, result
++
++
++def test_mapped_provider_separates_domains_and_keeps_key_ref_stable(tmp_path: Path) -> None:
++    provider = _provider(tmp_path)
++    created = _create(provider, "alice", "create-alice")
++
++    fact = provider.resolve(
++        CredentialRequest(
++            provider.namespace,
++            "alice",
++            SigningDomain.FACT,
++            CredentialPurpose.AUTHORSHIP,
++        )
++    )
++    arrival = provider.resolve(
++        CredentialRequest(
++            provider.namespace,
++            "alice",
++            SigningDomain.ARRIVAL,
++            CredentialPurpose.AUTHORSHIP,
++        )
++    )
++    tick = provider.resolve(
++        CredentialRequest(
++            provider.namespace,
++            "alice",
++            SigningDomain.TICK,
++            CredentialPurpose.RECEIPT,
++        )
++    )
++
++    assert fact is not None and arrival is not None and tick is not None
++    assert fact.evidence.key_ref == created.key_ref
++    assert arrival.evidence.key_ref == created.key_ref
++    assert tick.evidence.key_ref == created.key_ref
++    assert fact.evidence.public_key == created.public_key
++    assert fact.evidence.request.domain is SigningDomain.FACT
++    assert tick.evidence.request.observer == "alice"
++    signature = fact.sign_digest("mapped-digest")
++    assert provider.verify(
++        SigningDomain.FACT, created.public_key, signature, "mapped-digest"
++    )
++    assert not provider.verify(
++        SigningDomain.ARRIVAL, created.public_key, signature, "mapped-digest"
++    )
++    tick_signature = tick.sign_digest("tick-digest")
++    assert provider.verify(
++        SigningDomain.TICK, created.public_key, tick_signature, "tick-digest"
++    )
++    assert not provider.verify(
++        SigningDomain.FACT, created.public_key, tick_signature, "tick-digest"
++    )
++
++
++def test_mapped_init_uses_observer_identity_after_vertex_relocation(tmp_path: Path) -> None:
++    provider = _provider(tmp_path)
++    target, result = _init_mapped(tmp_path, provider)
++    assert result.lineage
++    assert target.exists()
++    binding = provider.resolve(
++        CredentialRequest(
++            provider.namespace,
++            "alice",
++            SigningDomain.FACT,
++            CredentialPurpose.INITIALIZATION,
++        )
++    )
++    assert binding is not None
++    assert f'key "{binding.evidence.public_key}"' in target.read_text(encoding="utf-8")
++
++    relocated = tmp_path / "moved" / "different-stem.vertex"
++    relocated.parent.mkdir()
++    target.rename(relocated)
++
++    receipt = emit_fact(
++        relocated,
++        "item",
++        {"value": 7},
++        observer="alice",
++        credentials=provider,
++    )
++    assert receipt.stored is True
++    assert receipt.observer == "alice"
++
++
++def test_mapped_source_tiers_use_bound_author_for_each_append(tmp_path: Path) -> None:
++    class CountingProvider(MappedCredentialProvider):
++        def __init__(self, *args, **kwargs):
++            super().__init__(*args, **kwargs)
++            self.requests = []
++
++        def resolve(self, request):
++            self.requests.append(request)
++            return super().resolve(request)
++
++    provider = CountingProvider(
++        tmp_path / "mapped-custody", namespace="tenant-a", receipt_observer="alice"
++    )
++    target, _ = _init_mapped(tmp_path, provider)
++    for kind in ("item", "other"):
++        cadence = 'on "_sync.item"\n' if kind == "other" else ""
++        (tmp_path / f"{kind}.loop").write_text(
++            f'kind "{kind}"\nobserver "alice"\nsource "collect-{kind}"\n{cadence}',
++            encoding="utf-8",
++        )
++    original = target.read_text(encoding="utf-8")
++    prefix = original.split("loops {", 1)[0]
++    proposal = prefix + (
++        'sources {\n'
++        '  path "./item.loop"\n'
++        '  path "./other.loop"\n'
++        '}\n\n'
++        'loops {\n'
++        '  item {\n    fold { items "collect" 100 }\n  }\n'
++        '  other {\n    fold { items "collect" 100 }\n  }\n'
++        '}\n'
++    )
++    edited = edit_declaration(target, proposal, observer="alice", credentials=provider)
++    assert edited.commit is not None
++    requests_before_sources = len(provider.requests)
++
++    async def collect(source):
++        yield Fact(source.kind, 5.0, {"source": source.kind}, observer="alice")
++
++    result = asyncio.run(
++        run_sources(
++            target,
++            observer="alice",
++            force=True,
++            credentials=provider,
++            collector_factory=collect,
++            evaluated_at=4.0,
++        )
++    )
++    assert result.status == "ok"
++    assert len(result.tiers) == 2
++    assert all(tier.commit is not None for tier in result.tiers)
++    assert len(provider.requests) - requests_before_sources >= 2
++
++
++def test_mapped_init_rejects_relabelled_binding_evidence_before_intent(
++    tmp_path: Path,
++) -> None:
++    class RelabelledProvider(MappedCredentialProvider):
++        def resolve(self, request):
++            resolved = super().resolve(request)
++            if resolved is None:
++                return None
++            evidence = replace(
++                resolved.evidence,
++                request=replace(resolved.evidence.request, observer="mallory"),
++            )
++            return replace(resolved, evidence=evidence)
++
++    provider = RelabelledProvider(
++        tmp_path / "mapped-custody", namespace="tenant-a", receipt_observer="alice"
++    )
++    _create(provider, "alice", "create-alice")
++    before = _file_state(tmp_path)
++
++    with pytest.raises(SdkError):
++        init_vertex(
++            tmp_path / "relabelled.vertex",
++            name="relabelled",
++            store_type="arrival",
++            observer="alice",
++            location=str(tmp_path / "records.arrival"),
++            credentials=provider,
++        )
++
++    assert _file_state(tmp_path) == before
++    assert not (tmp_path / "relabelled.vertex").exists()
++
++
++def test_mapped_two_author_batch_preserves_inner_and_outer_domains(tmp_path: Path) -> None:
++    provider = _provider(tmp_path)
++    target, initialized = _init_mapped(tmp_path, provider)
++    bob = _create(provider, "bob", "create-bob")
++    grant_observer(
++        target,
++        "bob",
++        observer="alice",
++        credentials=provider,
++        key=bob.public_key,
++    )
++
++    from engine.admission import fact_commitment_hash
++    from engine.arrival import ArrivalLog, content_commitment
++
++    result = emit_batch(
++        target,
++        [
++            {"kind": "item", "payload": {"value": 1}, "observer": "alice", "ts": 3.0},
++            {"kind": "item", "payload": {"value": 2}, "observer": "alice", "ts": 4.0},
++            {"kind": "item", "payload": {"value": 3}, "observer": "bob", "ts": 5.0},
++            {"kind": "item", "payload": {"value": 4}, "observer": "bob", "ts": 6.0},
++        ],
++        credentials=provider,
++    )
++    assert result.commit is not None
++    assert initialized.store is not None
++    records = list(ArrivalLog(initialized.store.location).walk())
++    batches = [record for record in records if record["k"] == "batch"]
++    assert [batch["observer"] for batch in batches[-2:]] == ["alice", "bob"]
++    for batch in batches[-2:]:
++        outer_observer = str(batch["observer"])
++        outer = provider.resolve(
++            CredentialRequest(
++                provider.namespace,
++                outer_observer,
++                SigningDomain.ARRIVAL,
++                CredentialPurpose.AUTHORSHIP,
++            )
++        )
++        assert outer is not None
++        outer_digest = content_commitment(
++            batch["k"], batch["at"], batch["observer"], batch["origin"], batch["body"]
++        )
++        assert provider.verify(
++            SigningDomain.ARRIVAL,
++            outer.evidence.public_key,
++            batch["sig"],
++            outer_digest,
++        )
++
++        for row in batch["body"]["rows"]:
++            inner = provider.resolve(
++                CredentialRequest(
++                    provider.namespace,
++                    row["observer"],
++                    SigningDomain.FACT,
++                    CredentialPurpose.AUTHORSHIP,
++                )
++            )
++            assert inner is not None
++            inner_digest = fact_commitment_hash(
++                row["kind"], row["ts"], row["observer"], row["origin"], row["payload"]
++            )
++            assert provider.verify(
++                SigningDomain.FACT,
++                inner.evidence.public_key,
++                row["signature"],
++                inner_digest,
++            )
++
++
++def test_mapped_tick_uses_receipt_observer_domain_and_unsigned_outer_envelope(
++    tmp_path: Path,
++) -> None:
++    provider = _provider(tmp_path)
++    target, initialized = _init_mapped(tmp_path, provider)
++    proposal = target.read_text(encoding="utf-8").replace(
++        'fold {\n      items "collect" 100\n    }',
++        'fold {\n      items "collect" 100\n    }\n    boundary when="item"',
++    )
++    edited = edit_declaration(target, proposal, observer="alice", credentials=provider)
++    assert edited.commit is not None
++
++    receipt = emit_fact(
++        target,
++        "item",
++        {"value": 11},
++        observer="alice",
++        credentials=provider,
++        ts=3.0,
++    )
++    assert receipt.tick_id is not None
++    assert initialized.store is not None
++
++    from engine.arrival import ArrivalLog
++    from engine.row_commitment import tick_commitment_hash
++
++    tick_record = next(
++        record
++        for record in ArrivalLog(initialized.store.location).walk()
++        if record["k"] == "tick" and record["body"]["id"] == receipt.tick_id
++    )
++    assert tick_record.get("sig") is None
++    binding = provider.resolve(
++        CredentialRequest(
++            provider.namespace,
++            "alice",
++            SigningDomain.TICK,
++            CredentialPurpose.RECEIPT,
++        )
++    )
++    assert binding is not None
++    tick_digest = tick_commitment_hash((
++            tick_record["body"]["id"],
++            tick_record["body"]["name"],
++            tick_record["body"]["ts"],
++            tick_record["body"]["since"],
++            tick_record["body"]["origin"],
++            tick_record["body"]["payload"],
++            tick_record["body"]["prev_hash"],
++            tick_record["body"]["window_start"],
++            tick_record["body"]["fact_cursor"],
++            tick_record["body"]["window_hash"],
++        ))
++    assert provider.verify(
++        SigningDomain.TICK,
++        binding.evidence.public_key,
++        tick_record["body"]["signature"],
++        tick_digest,
++    )
++
++
++def test_mapped_source_failure_after_collection_retains_uncommitted_evidence(
++    tmp_path: Path,
++) -> None:
++    provider = _provider(tmp_path)
++    target, initialized = _init_mapped(tmp_path, provider)
++    (tmp_path / "item.loop").write_text(
++        'kind "item"\nobserver "alice"\nsource "collect-item"\n',
++        encoding="utf-8",
++    )
++    proposal = target.read_text(encoding="utf-8").replace(
++        "loops {",
++        'sources { path "./item.loop" }\n\nloops {',
++        1,
++    )
++    edited = edit_declaration(target, proposal, observer="alice", credentials=provider)
++    assert edited.commit is not None
++    assert initialized.store is not None
++
++    async def collect(source):
++        yield Fact("item", 5.0, {"value": 12}, observer="alice")
++        raise SourceError(source.command, returncode=9, stderr="collector failed")
++
++    result = asyncio.run(
++        run_sources(
++            target,
++            observer="alice",
++            credentials=provider,
++            collector_factory=collect,
++            evaluated_at=4.0,
++        )
++    )
++    assert result.status == "error"
++    assert result.tiers[0].sources[0].facts[0].payload == {"value": 12}
++    assert result.tiers[0].sources[0].stderr == "collector failed"
++    assert result.tiers[0].commit is not None
++    assert result.tiers[0].outcome == "committed"
++
++
++def test_mapped_preview_has_no_persistence_effect(tmp_path: Path) -> None:
++    provider = _provider(tmp_path)
++    target, _ = _init_mapped(tmp_path, provider)
++    before = sorted(path.relative_to(provider.root) for path in provider.root.rglob("*"))
++
++    preview = preview_emission(
++        target,
++        "item",
++        {"value": 8},
++        observer="alice",
++        credentials=provider,
++    )
++    assert preview.admitted is True
++
++    after = sorted(path.relative_to(provider.root) for path in provider.root.rglob("*"))
++    assert after == before
++
++
++def test_wrong_mapped_public_key_refuses_before_append(tmp_path: Path) -> None:
++    provider = _provider(tmp_path, namespace="tenant-a")
++    target, initialized = _init_mapped(tmp_path, provider)
++    other = _provider(tmp_path / "other", namespace="tenant-b")
++    _create(other, "alice", "other-alice")
++    assert initialized.store is not None
++    store = Path(initialized.store.location)
++    before = store.read_bytes()
++
++    with pytest.raises(SdkError):
++        emit_fact(
++            target,
++            "item",
++            {"value": 10},
++            observer="alice",
++            credentials=other,
++        )
++
++    assert store.read_bytes() == before
++
++
++def test_mapped_grant_requires_precreated_binding_and_explicit_public_key(
++    tmp_path: Path,
++) -> None:
++    provider = _provider(tmp_path)
++    target, _ = _init_mapped(tmp_path, provider)
++    bob = _create(provider, "bob", "create-bob")
++    before = sorted(path.relative_to(provider.root) for path in provider.root.rglob("*"))
++
++    with pytest.raises(SdkError):
++        grant_observer(
++            target,
++            "carol",
++            observer="alice",
++            credentials=provider,
++            key=None,
++        )
++    assert sorted(path.relative_to(provider.root) for path in provider.root.rglob("*")) == before
++
++    result = grant_observer(
++        target,
++        "bob",
++        observer="alice",
++        credentials=provider,
++        key=bob.public_key,
++    )
++    assert result.status == "applied"
++
++    receipt = emit_fact(
++        target,
++        "item",
++        {"value": 9},
++        observer="bob",
++        credentials=provider,
++    )
++    assert receipt.stored is True
++
++
++def test_mapped_provider_legacy_target_refuses_before_legacy_write(tmp_path: Path) -> None:
++    provider = _provider(tmp_path)
++    _create(provider, "alice", "create-alice")
++    target = tmp_path / "legacy.vertex"
++    init_vertex(target, store_type="sqlite")
++    before = _file_state(tmp_path)
++
++    with pytest.raises((SdkError, ValueError)):
++        emit_fact(
++            target,
++            "note",
++            {"value": 1},
++            observer="alice",
++            credentials=provider,
++        )
++
++    assert _file_state(tmp_path) == before
++
++
++def test_mapped_binding_existing_ref_rejects_unknown_key_without_replacement(
++    tmp_path: Path,
++) -> None:
++    provider = _provider(tmp_path)
++    created = _create(provider, "alice", "create-alice")
++    before = sorted(path.relative_to(provider.root) for path in provider.root.rglob("*"))
++
++    with pytest.raises((OSError, SdkValueError, ValueError)):
++        provider.bind_existing_ref(
++            "bob",
++            "missing-key-ref",
++            created.public_key,
++            token="bind-bob",
++        )
++
++    after = sorted(path.relative_to(provider.root) for path in provider.root.rglob("*"))
++    assert after == before
+diff --git a/libs/sdk/tests/test_mapped_credential_errors.py b/libs/sdk/tests/test_mapped_credential_errors.py
+new file mode 100644
+index 00000000..3dfef030
+--- /dev/null
++++ b/libs/sdk/tests/test_mapped_credential_errors.py
+@@ -0,0 +1,35 @@
++"""Malformed provider evidence remains a serializable precommit refusal."""
++
++import json
++
++import pytest
++from engine.credentials import (
++    CredentialBindingEvidence,
++    CredentialBindingRefused,
++    CredentialPurpose,
++    CredentialRequest,
++    SigningDomain,
++)
++
++from sdk.errors import ArrivalRefusal, normalize_exception
++
++
++@pytest.mark.parametrize("field", ["key_ref", "algorithm", "public_key", "provenance"])
++def test_malformed_binding_field_does_not_break_refusal_serialization(field):
++    request = CredentialRequest(
++        "work", "alice", SigningDomain.FACT, CredentialPurpose.AUTHORSHIP
++    )
++    values = dict(
++        key_ref="opaque-ref", algorithm="ed25519", public_key="public", provenance="created"
++    )
++    values[field] = object()
++    evidence = CredentialBindingEvidence(request=request, **values)
++    result = normalize_exception(
++        CredentialBindingRefused("corrupt-binding", request=request, evidence=evidence)
++    )
++    assert isinstance(result, ArrivalRefusal)
++    encoded = json.loads(json.dumps(result.as_dict()))
++    details = encoded["details"]["credential_binding"]
++    assert details["binding"][field] is None
++    assert details["request"]["observer"] == "alice"
++    assert details["reason"] == "corrupt-binding"

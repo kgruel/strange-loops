@@ -1,0 +1,11 @@
+{
+  "instruction": "You are Fable 5.1 at LOW effort conducting the final focused D0/D2 recovery review. Return ACCEPT or REVISE with concrete remaining correctness blockers, then optional notes; under 800 words. No tools or claimed test execution. Your last focused review found fresh caller tokens bypassed the completed slot original pending evidence. The implementation now reads the SLOT'S pending record independently of the caller token and validates it before completed return. Inspect current complete provider/test source below. Verify original-token create, original-token recover, fresh-token create, and missing-original-index plus substituted-slot. Also confirm earlier pending/index interruption fixes still hold. Missing original metadata is not authority to accept contradictory retained evidence. Do not invent a new local tamper-resistance or wire contract: simultaneous replacement of private material and all local binding evidence remains outside this slice; Arrival writes separately check captured key history. Explicit recovery may repair a missing index before later candidate refusal, as documented. No engine/SDK behavior change is in this final patch. Source and tests must justify the verdict; passing counts alone do not.",
+  "sources": [
+    "docs/scratch/arrival-break/consistency-d0-d2-final-review-2026-09-06.md",
+    "docs/scratch/arrival-break/reviews/consistency-d0-d2-recovery-2026-09-06/primary-triage.md",
+    "libs/custody/src/custody/binding.py",
+    "libs/custody/tests/test_binding.py",
+    "libs/custody/tests/test_binding_recovery_contract.py",
+    "libs/custody/README.md"
+  ]
+}

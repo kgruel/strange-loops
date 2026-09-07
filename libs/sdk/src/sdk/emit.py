@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from atoms import Fact
+from custody.binding import MappedCredentialProvider as _MappedCredentialProvider
 from custody.signing import arrival_signer_for, fact_signer_for, tick_signer_for
 from engine.admission import AdmissionError, UndeclaredKind, grant_for_observer
 from engine.arrival_registry import BackendRegistry
@@ -41,6 +42,7 @@ __all__ = [
     "emit_batch",
     "preview_emission",
     "CustodyCredentialProvider",
+    "MappedCredentialProvider",
 ]
 
 
@@ -107,6 +109,50 @@ class CustodyCredentialProvider:
         )
 
 
+class MappedCredentialProvider(_MappedCredentialProvider):
+    """SDK export for explicit namespace-scoped, persistent custody bindings."""
+
+    def __init__(
+        self,
+        root: Path | str,
+        *,
+        namespace: str,
+        receipt_observer: str | None = None,
+    ) -> None:
+        try:
+            super().__init__(root, namespace=namespace, receipt_observer=receipt_observer)
+        except ValueError as exc:
+            raise SdkValueError(str(exc)) from exc
+
+
+def _mapped_credentials(
+    value: CredentialProvider | WriteCredentials | None, *, vertex: Path | None = None
+) -> bool:
+    """Mapped credentials cannot silently route through legacy store writers."""
+    if value is None:
+        return False
+    if bool(getattr(value, "mapped", False)):
+        return True
+    if isinstance(value, WriteCredentials):
+        return value.mapped
+    provider = getattr(value, "for_write", None)
+    if vertex is None or not callable(provider):
+        return False
+    produced = provider(vertex)
+    if not isinstance(produced, WriteCredentials):
+        raise SdkValueError("credential provider did not return WriteCredentials")
+    return produced.mapped
+
+
+def _refuse_legacy_mapped_credentials(
+    value: CredentialProvider | WriteCredentials | None, *, vertex: Path
+) -> None:
+    if _mapped_credentials(value, vertex=vertex):
+        raise TargetUnsupported(
+            "mapped credentials require an explicit Arrival descriptor target"
+        )
+
+
 def preview_emission(
     target: Path | str,
     kind_or_fact: str | Fact,
@@ -136,6 +182,8 @@ def preview_emission(
     """
     target_path = Path(target).resolve()
     arrival = _arrival_descriptor(target_path)
+    if arrival is None:
+        _refuse_legacy_mapped_credentials(credentials, vertex=target_path)
 
     if isinstance(kind_or_fact, Fact):
         fact = kind_or_fact
@@ -345,6 +393,8 @@ def emit_fact(
     """
     target_path = Path(target).resolve()
     arrival = _arrival_descriptor(target_path)
+    if arrival is None:
+        _refuse_legacy_mapped_credentials(credentials, vertex=target_path)
 
     if isinstance(kind_or_fact, Fact):
         fact = kind_or_fact
@@ -635,6 +685,8 @@ def emit_batch(
 
     target_path = Path(target).resolve()
     arrival = _arrival_descriptor(target_path)
+    if arrival is None:
+        _refuse_legacy_mapped_credentials(credentials, vertex=target_path)
     if arrival is not None:
         from engine.arrival_contract import NotAuthority, Profile
         from engine.arrival_maintenance import sync_projection

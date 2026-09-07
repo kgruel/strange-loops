@@ -33,6 +33,13 @@ from engine.arrival_head_attestation import IndeterminateComparison
 from engine.arrival_head_seam import AttestedLedger, Indeterminate
 from engine.arrival_maintenance import sync_projection
 from engine.arrival_registry import BackendRegistry
+from engine.credentials import (
+    CredentialBindingEvidence,
+    CredentialBindingRefused,
+    CredentialRequest,
+    ResolvedCredential,
+    SigningDomain,
+)
 from engine.handle import WriteCredentials
 from engine.residence import index_path_for
 from engine.row_commitment import fact_row_hash, tick_commitment_hash, tick_row_hash
@@ -183,6 +190,117 @@ def _registry_with_limit(target: _Target, limit: int) -> BackendRegistry:
         binding_provider=lambda registered: file_binding(registered.location),
     )
     return registry
+
+
+def _mapped_credentials(keys, *, public_key: str | None = None, keypair=None):
+    from sign import ed25519
+
+    selected_keypair = keys.keypair if keypair is None else keypair
+    selected_public = keys.public if public_key is None else public_key
+    domain_names = {
+        SigningDomain.FACT: "test-fact-v1",
+        SigningDomain.ARRIVAL: "test-arrival-v1",
+        SigningDomain.TICK: "test-tick-v1",
+    }
+
+    def resolve(request: CredentialRequest) -> ResolvedCredential:
+        return ResolvedCredential(
+            CredentialBindingEvidence(
+                request,
+                key_ref="managed-kyle",
+                algorithm="ed25519",
+                public_key=selected_public,
+                provenance="test",
+            ),
+            lambda digest: ed25519.sign(
+                selected_keypair,
+                digest.encode(),
+                domain=domain_names[request.domain],
+            ),
+        )
+
+    def verify(domain, public, signature, digest):
+        return ed25519.verify(
+            ed25519.public_key_from_b64(public),
+            signature,
+            digest.encode(),
+            domain=domain_names[domain],
+        )
+
+    return WriteCredentials(
+        binding_namespace="test-space",
+        binding_resolver=resolve,
+        signature_verifier=verify,
+    )
+
+
+def test_real_capture_authorizes_mapped_fact_and_batch_domains(
+    tmp_path, monkeypatch, keys, signer
+):
+    from sign import ed25519
+
+    target = _make_target(tmp_path, monkeypatch, keys, signer)
+    plan = _prepare(
+        target,
+        _fact("mapped-one", 3.0),
+        _fact("mapped-two", 4.0),
+        credentials=_mapped_credentials(keys),
+    )
+
+    assert [draft.kind for draft in plan.drafts] == ["batch"]
+    assert {item.request.domain for item in plan.credential_bindings} == {
+        SigningDomain.FACT,
+        SigningDomain.ARRIVAL,
+    }
+    batch = plan.drafts[0]
+    assert ed25519.verify(
+        ed25519.public_key_from_b64(keys.public),
+        batch.signature,
+        content_commitment(
+            "batch", batch.authored_at, batch.observer, batch.origin, batch.body
+        ).encode(),
+        domain="test-arrival-v1",
+    )
+    for row in batch.body["rows"]:
+        digest = fact_commitment_hash(
+            row["kind"],
+            row["ts"],
+            row["observer"],
+            row["origin"],
+            row["payload"],
+        )
+        assert ed25519.verify(
+            ed25519.public_key_from_b64(keys.public),
+            row["signature"],
+            digest.encode(),
+            domain="test-fact-v1",
+        )
+
+
+def test_real_capture_refuses_mapped_author_key_outside_captured_registry(
+    tmp_path, monkeypatch, keys, signer
+):
+    from sign import ed25519
+
+    target = _make_target(tmp_path, monkeypatch, keys, signer)
+    other = ed25519.load_or_generate(tmp_path / "other-key")
+    before = target.log.head()
+
+    with pytest.raises(BatchWritePreparationRefused) as raised:
+        _prepare(
+            target,
+            _fact("unauthorized", 3.0),
+            credentials=_mapped_credentials(
+                keys,
+                public_key=other.public_b64,
+                keypair=other,
+            ),
+        )
+
+    assert raised.value.item_index == 0
+    assert isinstance(raised.value.cause, CredentialBindingRefused)
+    assert raised.value.cause.captured_head.ordinal == before["ord"]
+    assert target.log.head() == before
 
 
 def test_real_same_observer_batch_is_one_wire_record_and_one_shared_commit(

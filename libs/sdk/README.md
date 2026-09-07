@@ -177,6 +177,57 @@ can use the provider. Callers that need another credential source can continue
 to supply a custom `CredentialProvider`; that interface does not itself create
 an observer mapping or register public keys.
 
+For an explicit persisted namespace, use `MappedCredentialProvider` with an
+Arrival target. Prepare the binding separately from initializing the store:
+
+```python
+from pathlib import Path
+from sdk import MappedCredentialProvider, init_vertex, emit_fact
+
+credentials = MappedCredentialProvider(
+    Path("/absolute/path/to/private-custody"),
+    namespace="personal",
+    receipt_observer="alice",  # explicit local receipt-signing selection
+)
+binding = credentials.create_binding("alice", token="bootstrap-alice-1")
+init_vertex(
+    Path("observations.vertex"), store_type="arrival", observer="alice",
+    credentials=credentials,
+)
+emit_fact(
+    Path("observations.vertex"), "item", {"value": 1},
+    observer="alice", credentials=credentials,
+)
+```
+
+Mapped selection uses the exact namespace and observer, independently of the
+vertex filename or lineage. The engine checks author keys against verified
+history through captured H, for use after H, and verifies each signature in its
+own domain. Receipt signing uses the explicitly selected local observer and
+the effective declaration's current receipt-key policy; the unsigned outer tick
+still names the physical genesis custodian. Omitting `receipt_observer` permits
+unsigned ticks before the signed-tick era, and refuses a required signed tick.
+A missing author binding may remain unsigned where the existing policy allows;
+a contradictory or unauthorized binding refuses before append.
+
+Mapped initialization only loads a pre-created binding. For another observer,
+prepare its binding and pass `key=binding.public_key` to `grant_observer` with
+the existing author's credentials. Mapped `grant_observer(key=None)` refuses
+before creating keys. Recovery of an existing Arrival initialization intent
+signs nothing and does not require private custody to remain available.
+Mapped providers are supported on Arrival targets; legacy writers explicitly
+refuse them. The default `CustodyCredentialProvider` remains unchanged.
+
+`import_legacy(vertex_path, observer, token=...)` explicitly copies a verified
+legacy key into managed storage without changing the original. It preserves
+flat/nested ambiguity and alias refusals. After import, locator moves do not
+change mapped selection. No read, preview, or signer load imports or creates a
+binding. `bind_existing_ref(observer, key_ref, expected_public_key, token=...)`
+permits deliberate reuse of a completed managed key in another namespace;
+equal observer labels alone never select another namespace's key.
+See [custody binding recovery](../custody/README.md#explicit-mapped-bindings)
+for interruption handling and filesystem scope.
+
 Supported Arrival execution reserves the vertex name from its loop names.
 Every exact name collision refuses, including passive loops, reset/carry loops,
 and count- or event-triggered boundaries. The runtime also adds an implicit

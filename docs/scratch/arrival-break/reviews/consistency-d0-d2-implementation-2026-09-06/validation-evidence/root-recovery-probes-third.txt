@@ -1,0 +1,27 @@
+......F                                                                  [100%]
+=================================== FAILURES ===================================
+___ test_recovery_never_replaces_a_missing_key_named_by_a_published_binding ____
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-930/test_recovery_never_replaces_a0')
+
+    def test_recovery_never_replaces_a_missing_key_named_by_a_published_binding(tmp_path):
+        root = tmp_path / "mapped"
+        provider = MappedCredentialProvider(root, namespace="work")
+        created = provider.create_binding("alice", token="published")
+        (root / "keys-v1" / created.key_ref).rename(tmp_path / "unavailable-original-key")
+        before = _fingerprints(root)
+        with pytest.raises((ValueError, FileNotFoundError)):
+            provider.recover_binding("alice", token="published")
+>       assert _fingerprints(root) == before
+E       AssertionError: assert {'.bindings-v...02ca290', ...} == {'.bindings-v...02ca290', ...}
+E         
+E         Omitting 5 identical items, use -vv to show
+E         Left contains 2 more items:
+E         {'keys-v1/438bccbcd37f4564a2c28b8a8c1c8b84/ed25519.key': '309c9b681c72ce8ca51c6ec8d0c27ee71cdc3798a7756ed7e8a40d2a95adcc55',
+E          'keys-v1/438bccbcd37f4564a2c28b8a8c1c8b84/ed25519.pub': 'f205f14dc2ff81a72fcb030da8429e0e9c84ee990df4a7fc23f16a654ad0cc00'}
+E         Use -v to get more diff
+
+libs/custody/tests/test_binding_recovery_contract.py:139: AssertionError
+=========================== short test summary info ============================
+FAILED libs/custody/tests/test_binding_recovery_contract.py::test_recovery_never_replaces_a_missing_key_named_by_a_published_binding
+1 failed, 6 passed in 0.13s

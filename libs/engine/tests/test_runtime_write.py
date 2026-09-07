@@ -33,6 +33,15 @@ from engine.arrival_file_backend import FileLedger
 from engine.arrival_head_attestation import Outcome
 from engine.arrival_head_seam import AttestedLedger, Compared
 from engine.arrival_registry import BackendRegistry
+from engine.credentials import (
+    CapturedSigningContext,
+    CredentialBindingEvidence,
+    CredentialBindingRefused,
+    CredentialPurpose,
+    CredentialRequest,
+    ResolvedCredential,
+    SigningDomain,
+)
 from engine.handle import WriteCredentials
 from engine.loop import Loop
 from engine.peer import Grant
@@ -165,6 +174,192 @@ def test_fact_signer_never_substitutes_for_missing_arrival_signer():
 
     assert plan.drafts[0].body["signature"].startswith("fact:kyle:")
     assert plan.drafts[0].signature is None
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    (
+        {"binding_namespace": "space"},
+        {"binding_resolver": lambda _request: None},
+        {"signature_verifier": lambda *_args: True},
+        {"receipt_observer": "receipt"},
+        {
+            "binding_namespace": "space",
+            "binding_resolver": lambda _request: None,
+            "signature_verifier": lambda *_args: True,
+            "fact_signer": lambda _observer, _digest: "legacy",
+        },
+    ),
+)
+def test_mapped_write_credentials_refuse_partial_or_legacy_mixed_configuration(
+    kwargs,
+):
+    with pytest.raises(ValueError):
+        WriteCredentials(**kwargs)
+
+
+def test_mapped_plan_resolves_exact_domains_after_captured_authorization():
+    head = _head()
+    requests: list[CredentialRequest] = []
+
+    def resolve(request: CredentialRequest) -> ResolvedCredential:
+        requests.append(request)
+        return ResolvedCredential(
+            CredentialBindingEvidence(
+                request,
+                key_ref="managed-key",
+                algorithm="ed25519",
+                public_key="public-key",
+                provenance="test",
+            ),
+            lambda digest: f"{request.domain.value}:{digest}",
+        )
+
+    credentials = WriteCredentials(
+        binding_namespace="space",
+        receipt_observer="receipt",
+        binding_resolver=resolve,
+        signature_verifier=lambda domain, _key, signature, digest: signature
+        == f"{domain.value}:{digest}",
+    )
+    context = CapturedSigningContext(
+        head,
+        author_keys=(("kyle", ("public-key",)),),
+        receipt_keys=("public-key",),
+    )
+
+    plan = plan_ordinary_write(
+        Snapshot(head),
+        ReadBasis(head.lineage, head, head, "test-view"),
+        _vertex(),
+        AtomFact("note", 42.0, {"value": "one"}, observer="kyle"),
+        grant=None,
+        credentials=credentials,
+        custodian="kyle",
+        fact_id="fact-1",
+        _signing_context=context,
+    )
+
+    assert {(request.observer, request.domain, request.purpose) for request in requests} == {
+        ("kyle", SigningDomain.FACT, CredentialPurpose.AUTHORSHIP),
+        ("kyle", SigningDomain.ARRIVAL, CredentialPurpose.AUTHORSHIP),
+        ("receipt", SigningDomain.TICK, CredentialPurpose.RECEIPT),
+    }
+    assert len(plan.credential_bindings) == 3
+    assert plan.drafts[0].body["signature"].startswith("fact:")
+    assert plan.drafts[0].signature.startswith("arrival:")
+    assert plan.drafts[1].body["signature"].startswith("tick:")
+
+
+def test_mapped_tick_without_receipt_observer_is_unsigned_until_signed_era():
+    head = _head()
+    requests: list[CredentialRequest] = []
+
+    def resolve(request: CredentialRequest) -> ResolvedCredential:
+        requests.append(request)
+        return ResolvedCredential(
+            CredentialBindingEvidence(
+                request, "key", "ed25519", "public-key", "test"
+            ),
+            lambda digest: f"{request.domain.value}:{digest}",
+        )
+
+    credentials = WriteCredentials(
+        binding_namespace="space",
+        binding_resolver=resolve,
+        signature_verifier=lambda domain, _key, signature, digest: signature
+        == f"{domain.value}:{digest}",
+    )
+    context = CapturedSigningContext(
+        head,
+        author_keys=(("kyle", ("public-key",)),),
+        receipt_keys=("public-key",),
+    )
+    unsigned = plan_ordinary_write(
+        Snapshot(head),
+        ReadBasis(head.lineage, head, head, "test-view"),
+        _vertex(),
+        AtomFact("note", 41.0, {"value": "zero"}, observer="kyle"),
+        grant=None,
+        credentials=credentials,
+        custodian="kyle",
+        fact_id="fact-0",
+        _signing_context=context,
+    )
+    assert unsigned.drafts[1].body.get("signature") is None
+    assert SigningDomain.TICK not in {request.domain for request in requests}
+    requests.clear()
+    existing = Tick(
+        id="old-tick",
+        name="note",
+        ts=1.0,
+        since=None,
+        origin="kyle",
+        payload={},
+        arrival_ordinal=3,
+        arrival_seq=0,
+        payload_text="{}",
+        prev_hash=None,
+        window_start="",
+        fact_cursor="",
+        window_hash="hash",
+        signature="signed",
+    )
+
+    with pytest.raises(CredentialBindingRefused, match="missing-required") as raised:
+        plan_ordinary_write(
+            Snapshot(head, ticks=(existing,)),
+            ReadBasis(head.lineage, head, head, "test-view"),
+            _vertex(),
+            AtomFact("note", 42.0, {"value": "one"}, observer="kyle"),
+            grant=None,
+            credentials=credentials,
+            custodian="kyle",
+            fact_id="fact-1",
+            _signing_context=context,
+        )
+
+    assert raised.value.captured_head == head
+    assert raised.value.request is None
+    assert SigningDomain.TICK not in {request.domain for request in requests}
+
+
+def test_mapped_provider_failure_retains_exact_request_and_captured_head():
+    head = _head()
+    failure = RuntimeError("provider unavailable")
+
+    def resolve(_request: CredentialRequest):
+        raise failure
+
+    credentials = WriteCredentials(
+        binding_namespace="space",
+        binding_resolver=resolve,
+        signature_verifier=lambda *_args: True,
+    )
+    context = CapturedSigningContext(
+        head,
+        author_keys=(("kyle", ("public-key",)),),
+        receipt_keys=(),
+    )
+    with pytest.raises(CredentialBindingRefused) as raised:
+        plan_ordinary_write(
+            Snapshot(head),
+            ReadBasis(head.lineage, head, head, "test-view"),
+            _vertex(),
+            AtomFact("note", 42.0, {"value": "one"}, observer="kyle"),
+            grant=None,
+            credentials=credentials,
+            custodian="kyle",
+            fact_id="fact-1",
+            _signing_context=context,
+        )
+
+    assert raised.value.request == CredentialRequest(
+        "space", "kyle", SigningDomain.FACT, CredentialPurpose.AUTHORSHIP
+    )
+    assert raised.value.captured_head == head
+    assert raised.value.use_position == head.ordinal + 1
+    assert raised.value.__cause__ is failure
 
 
 def test_plan_refuses_unsigned_fresh_tick_after_signed_tick_era():

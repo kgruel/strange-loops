@@ -1,0 +1,25 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-d0-d2-durability-2026-09-06",
+  "due_at": "2026-09-07T00:00:01.048634+00:00",
+  "baseline": "39bf05d7",
+  "scope": "D0-D2 durability",
+  "jobs": [
+    {
+      "name": "durability",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-d0-d2-durability-2026-09-06/durability-prompt.txt",
+      "sha256": "376ad9ba3720935261fe603908001efab0fbae99810687445b1a2c97558ced12",
+      "sources": {
+        "docs/scratch/arrival-break/consistency-d0-d2-durability-2026-09-06.md": "6fbdbb2b5b0f677e436a422cb29ebc68a02d31a8597f62cd068f19160a7a8ece",
+        "docs/scratch/arrival-break/reviews/consistency-d0-d2-final-2026-09-06/primary-triage.md": "dbf514bc15de467f9b13522b2bfd7470e0e19fda732fff93fce7492350bba203",
+        "libs/custody/src/custody/binding.py": "41f51761b0b826ecef2072ea68ee91e2897f5538c90c25397ceeed862009dd04",
+        "libs/custody/tests/test_binding.py": "49b7f4586e4b6166742e094bb707f2b629684aaa37b77433c0e71e0ae71cd0df",
+        "libs/custody/tests/test_binding_recovery_contract.py": "4ef4e28f683d07150ebac0b0919cfa12822b3aaaa47279395d1b0ddede7a1c4c",
+        "libs/custody/README.md": "f4f21302bdcda69e3bafb911db9b678d468a6ae522ea66f9d65f14561a2bb78d"
+      },
+      "status": "pending"
+    }
+  ]
+}

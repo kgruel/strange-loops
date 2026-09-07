@@ -13,7 +13,13 @@ from .declare import (
     inspect_declaration,
     recover_declaration,
 )
-from .emit import CustodyCredentialProvider, emit_batch, emit_fact, preview_emission
+from .emit import (
+    CustodyCredentialProvider,
+    MappedCredentialProvider,
+    emit_batch,
+    emit_fact,
+    preview_emission,
+)
 from .errors import (
     ArrivalRefusal,
     CommittedIncomplete,
@@ -134,6 +140,7 @@ __all__ = [
     "recover_ceremony",
     # Providers
     "CustodyCredentialProvider",
+    "MappedCredentialProvider",
     # Models
     "TargetInfo",
     "ExportResult",

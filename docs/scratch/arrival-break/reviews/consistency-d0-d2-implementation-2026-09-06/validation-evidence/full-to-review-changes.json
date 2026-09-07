@@ -1,0 +1,7 @@
+[
+  "libs/engine/tests/test_ceremony_orchestration.py",
+  "libs/engine/tests/test_handle_receive.py",
+  "libs/sdk/src/sdk/errors.py",
+  "libs/sdk/src/sdk/kind.py",
+  "libs/sdk/tests/test_mapped_credential_errors.py"
+]

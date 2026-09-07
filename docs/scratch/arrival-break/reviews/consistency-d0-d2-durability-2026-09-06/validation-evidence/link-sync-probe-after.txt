@@ -1,0 +1,3 @@
+first call: BindingMutationIncomplete binding-published
+retry complete: alice
+binding directory synced on retry: True

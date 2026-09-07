@@ -58,7 +58,16 @@ from .arrival_head_seam import (
     complete_projection_custody,
 )
 from .arrival_registry import BackendRegistry
-from .credentials import WriteCredentials
+from .credentials import (
+    CapturedSigningContext,
+    CredentialBindingEvidence,
+    CredentialBindingRefused,
+    CredentialPurpose,
+    CredentialRequest,
+    CredentialResolutionSession,
+    SigningDomain,
+    WriteCredentials,
+)
 from .declaration import (
     Unhistorized,
     resolve_declaration_documents_from_snapshot,
@@ -200,6 +209,7 @@ class DeclarationEditPlan:
     proposed_text: str
     atomic_limit: int | None
     exact_drafts: str
+    credential_bindings: tuple[CredentialBindingEvidence, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -700,6 +710,7 @@ def _valid_author_keys(registry: Any, observer: str, head: Head) -> tuple[str, .
 
 def _signed_with_existing_key(
     *,
+    credentials: WriteCredentials,
     signer: Callable[[str, str], str | None] | None,
     verifier: Callable[[str, str, str], bool],
     registry: Any,
@@ -707,7 +718,35 @@ def _signed_with_existing_key(
     head: Head,
     digest: str,
     label: str,
+    domain: SigningDomain,
+    purpose: CredentialPurpose,
+    context: CapturedSigningContext,
+    session: CredentialResolutionSession,
 ) -> str:
+    if credentials.mapped:
+        request = CredentialRequest(
+            namespace=credentials.binding_namespace,
+            observer=author,
+            domain=domain,
+            purpose=purpose,
+        )
+        try:
+            signature = session.sign(
+                credentials,
+                request,
+                digest,
+                context=context,
+                authorized_keys=context.keys_for_author(author),
+                required=True,
+            )
+        except CredentialBindingRefused as exc:
+            raise _preparation_refused(
+                f"{label} mapped credential refused: {exc}",
+                captured_head=head,
+            ) from exc
+        if signature is None:  # required=True makes this unreachable
+            raise _preparation_refused(f"missing {label} signature")
+        return signature
     if not callable(signer):
         raise _preparation_refused(f"missing {label} signer")
     keys = _valid_author_keys(registry, author, head)
@@ -736,6 +775,8 @@ def _declaration_row(
     registry: Any,
     captured_head: Head,
     fact_verify: Callable[[str, str, str], bool],
+    context: CapturedSigningContext,
+    session: CredentialResolutionSession,
 ) -> tuple[str, tuple[Any, ...]]:
     row_payload: dict[str, Any] = {
         "lineage": lineage,
@@ -750,6 +791,7 @@ def _declaration_row(
         change.kind, authored_at, observer, "", payload_text
     )
     inner_signature = _signed_with_existing_key(
+        credentials=credentials,
         signer=credentials.fact_signer,
         verifier=fact_verify,
         registry=registry,
@@ -757,6 +799,10 @@ def _declaration_row(
         head=captured_head,
         digest=fact_digest,
         label="FACT",
+        domain=SigningDomain.FACT,
+        purpose=CredentialPurpose.AUTHORSHIP,
+        context=context,
+        session=session,
     )
     row = (
         fact_id,
@@ -780,10 +826,13 @@ def _key_draft(
     registry: Any,
     captured_head: Head,
     arrival_verify: Callable[[str, str, str], bool],
+    context: CapturedSigningContext,
+    session: CredentialResolutionSession,
 ) -> RecordDraft:
     body = {"observer": observer, "key": key}
     digest = content_commitment("key", authored_at, author, "", body)
     signature = _signed_with_existing_key(
+        credentials=credentials,
         signer=credentials.arrival_signer,
         verifier=arrival_verify,
         registry=registry,
@@ -791,6 +840,10 @@ def _key_draft(
         head=captured_head,
         digest=digest,
         label="Arrival key-introduction",
+        domain=SigningDomain.ARRIVAL,
+        purpose=CredentialPurpose.KEY_INTRODUCTION,
+        context=context,
+        session=session,
     )
     return RecordDraft(
         kind="key",
@@ -962,8 +1015,20 @@ def prepare_declaration_edit(
             target_documents=proposed_documents,
             verified_params=verified_params,
         )
+        registry_verifier = arrival_verify
+        if credentials is not None and credentials.mapped:
+            mapped_verifier = credentials.signature_verifier
+            if mapped_verifier is None:  # guarded by WriteCredentials construction
+                raise _preparation_refused(
+                    "mapped declaration credentials have no signature verifier",
+                    captured_head=captured_head,
+                )
+            def registry_verifier(key: str, signature: str, digest: str) -> bool:
+                return mapped_verifier(
+                    SigningDomain.ARRIVAL, key, signature, digest
+                )
         key_registry, _key_evidence = key_registry_from_records(
-            ledger.scan(through=captured_head), arrival_verify
+            ledger.scan(through=captured_head), registry_verifier
         )
         atomic_limit = ledger.capabilities().max_atomic_records
     except DeclarationPreparationError:
@@ -1011,6 +1076,23 @@ def prepare_declaration_edit(
         raise _preparation_refused(
             "declaration edits require fact and Arrival signers"
         )
+    signing_context = CapturedSigningContext(
+        captured_head=captured_head,
+        author_keys=tuple(
+            (
+                named_observer,
+                tuple(
+                    key
+                    for key, _introduced in key_registry.keys_valid_at(
+                        named_observer, captured_head.ordinal + 1
+                    )
+                ),
+            )
+            for named_observer in sorted(key_registry.introductions)
+        ),
+        receipt_keys=(),
+    )
+    credential_session = CredentialResolutionSession()
     authored_at = time.time()
     rows: list[tuple[Any, ...]] = []
     fact_ids: list[str] = []
@@ -1024,6 +1106,8 @@ def prepare_declaration_edit(
             registry=key_registry,
             captured_head=captured_head,
             fact_verify=fact_verify,
+            context=signing_context,
+            session=credential_session,
         )
         fact_ids.append(fact_id)
         rows.append(row)
@@ -1033,6 +1117,7 @@ def prepare_declaration_edit(
         envelope_kind, authored_at, observer, "", body
     )
     outer_signature = _signed_with_existing_key(
+        credentials=credentials,
         signer=credentials.arrival_signer,
         verifier=arrival_verify,
         registry=key_registry,
@@ -1040,6 +1125,10 @@ def prepare_declaration_edit(
         head=captured_head,
         digest=envelope_digest,
         label="Arrival declaration envelope",
+        domain=SigningDomain.ARRIVAL,
+        purpose=CredentialPurpose.AUTHORSHIP,
+        context=signing_context,
+        session=credential_session,
     )
     declaration_draft = RecordDraft(
         kind=envelope_kind,
@@ -1080,6 +1169,8 @@ def prepare_declaration_edit(
                 registry=key_registry,
                 captured_head=captured_head,
                 arrival_verify=arrival_verify,
+                context=signing_context,
+                session=credential_session,
             )
         )
 
@@ -1109,6 +1200,7 @@ def prepare_declaration_edit(
         proposed_text=proposed_text,
         atomic_limit=atomic_limit,
         exact_drafts=_exact_drafts(drafts),
+        credential_bindings=credential_session.evidence,
     )
 
 

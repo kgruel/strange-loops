@@ -1,0 +1,194 @@
+FFFFF.                                                                   [100%]
+=================================== FAILURES ===================================
+___________ test_recovery_without_an_intent_never_creates_a_binding ____________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-919/test_recovery_without_an_inten0')
+
+    def test_recovery_without_an_intent_never_creates_a_binding(tmp_path):
+        root = tmp_path / "mapped"
+        provider = MappedCredentialProvider(root, namespace="work")
+>       with pytest.raises((ValueError, FileNotFoundError)):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE any of (ValueError, FileNotFoundError)
+
+libs/custody/tests/test_binding_recovery_contract.py:39: Failed
+___________ test_completed_binding_is_revalidated_by_creation_retry ____________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-919/test_completed_binding_is_reva0')
+
+    def test_completed_binding_is_revalidated_by_creation_retry(tmp_path):
+        root = tmp_path / "mapped"
+        provider = MappedCredentialProvider(root, namespace="work")
+        created = provider.create_binding("alice", token="first")
+        public_file = root / "keys-v1" / created.key_ref / "ed25519.pub"
+        public_file.write_text("contradictory public evidence\n")
+        before = _bytes(root)
+>       with pytest.raises(ValueError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE ValueError
+
+libs/custody/tests/test_binding_recovery_contract.py:52: Failed
+___________ test_token_reuse_does_not_poison_a_second_observer_slot ____________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-919/test_token_reuse_does_not_pois0')
+
+    def test_token_reuse_does_not_poison_a_second_observer_slot(tmp_path):
+        root = tmp_path / "mapped"
+        provider = MappedCredentialProvider(root, namespace="work")
+        provider.create_binding("alice", token="one-operation")
+        before = _bytes(root)
+        with pytest.raises(ValueError):
+            provider.create_binding("bob", token="one-operation")
+>       assert _bytes(root) == before
+E       assert {'.bindings-v...ion"}\n', ...} == {'.bindings-v.../v1"}\n', ...}
+E         
+E         Omitting 6 identical items, use -vv to show
+E         Left contains 1 more item:
+E         {'pending-v1/f1509c48a739ff7298e4e8e4ecf85b86df110a50b2f3d1a7d40472d2f4bdd76e.json': b'{"ex'
+E                                                                                              b'pect'
+E                                                                                              b'ed_p'
+E                                                                                              b'ubli'...
+E         
+E         ...Full output truncated (52 lines hidden), use '-vv' to show
+
+libs/custody/tests/test_binding_recovery_contract.py:64: AssertionError
+______ test_import_recovery_uses_published_candidate_after_source_is_gone ______
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-919/test_import_recovery_uses_publ0')
+
+    def test_import_recovery_uses_published_candidate_after_source_is_gone(tmp_path):
+        target = tmp_path / "legacy" / "alice.vertex"
+        target.parent.mkdir()
+        original = ensure_signing_key(target, observer="alice")
+        root = tmp_path / "mapped"
+    
+        def interrupt(phase, _intent):
+            if phase == "key-published":
+                raise Interrupted()
+    
+        provider = MappedCredentialProvider(root, namespace="work", _creation_hook=interrupt)
+        with pytest.raises(Interrupted):
+            provider.import_legacy(target, "alice", token="import-alice")
+        candidate_paths = tuple(root.glob("keys-v1/*/ed25519.key"))
+        assert len(candidate_paths) == 1
+        candidate_bytes = candidate_paths[0].read_bytes()
+        (target.parent / "keys").rename(target.parent / "keys-moved-away")
+>       recovered = MappedCredentialProvider(root, namespace="work").recover_binding(
+            "alice", token="import-alice"
+        )
+
+libs/custody/tests/test_binding_recovery_contract.py:85: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+libs/custody/src/custody/binding.py:598: in recover_binding
+    return self._mutate(observer, token=token, provenance="created")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:558: in _mutate
+    intent = self._intent_for(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <custody.binding.MappedCredentialProvider object at 0x107af2b10>
+observer = 'alice', token = 'import-alice', provenance = 'created'
+key_ref = None, expected_public_key = None
+
+    def _intent_for(
+        self, observer: str, *, token: str, provenance: str, key_ref: str | None = None,
+        expected_public_key: str | None = None,
+    ) -> dict[str, object]:
+        completed = self._binding_record(self.namespace, observer)
+        if completed is not None:
+            if expected_public_key is not None and completed["public_key"] != expected_public_key:
+                raise BindingConflict("existing mapped binding has a different public key")
+            return {
+                "completed": True,
+                "key_ref": completed["key_ref"],
+                "public_key": completed["public_key"],
+                "provenance": completed["provenance"],
+                "token": token,
+            }
+        pending = self._read_json(self._pending_path(self.namespace, observer))
+        if pending is not None:
+            if pending.get("token") != token:
+                raise BindingRecoveryRequired(
+                    "a different durable token owns this mapped binding slot"
+                )
+            if (
+                pending.get("namespace") != self.namespace
+                or pending.get("observer") != observer
+                or pending.get("provenance") != provenance
+                or (key_ref is not None and pending.get("key_ref") != key_ref)
+                or (
+                    expected_public_key is not None
+                    and pending.get("expected_public_key") != expected_public_key
+                )
+            ):
+>               raise BindingConflict("mapped binding token was reused with different intent")
+E               custody.binding.BindingConflict: mapped binding token was reused with different intent
+
+libs/custody/src/custody/binding.py:439: BindingConflict
+__ test_recovery_retains_private_key_when_public_publication_was_interrupted ___
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-919/test_recovery_retains_private_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107b0f350>
+
+    def test_recovery_retains_private_key_when_public_publication_was_interrupted(
+        tmp_path, monkeypatch
+    ):
+        root = tmp_path / "mapped"
+        provider = MappedCredentialProvider(root, namespace="work")
+        publish_public = ed25519._publish_public
+    
+        def interrupt(_key_dir, _keypair):
+            raise Interrupted()
+    
+        monkeypatch.setattr(ed25519, "_publish_public", interrupt)
+        with pytest.raises(Interrupted):
+            provider.create_binding("alice", token="private-first")
+        private_files = tuple(root.glob("keys-v1/*/ed25519.key"))
+        assert len(private_files) == 1
+        private_bytes = private_files[0].read_bytes()
+        original_public = ed25519.load(private_files[0].parent).public_b64
+        monkeypatch.setattr(ed25519, "_publish_public", publish_public)
+>       recovered = provider.recover_binding("alice", token="private-first")
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+libs/custody/tests/test_binding_recovery_contract.py:111: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+libs/custody/src/custody/binding.py:598: in recover_binding
+    return self._mutate(observer, token=token, provenance="created")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:577: in _mutate
+    pair, key_created = self._ensure_created_key(intent)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+libs/custody/src/custody/binding.py:484: in _ensure_created_key
+    pair = self._load_keypair(key_ref, require_public_file=True)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <custody.binding.MappedCredentialProvider object at 0x107b61c70>
+key_ref = '662afb5ae9a74f5b9b6e5e8481d9ef3d', require_public_file = True
+
+    def _load_keypair(self, key_ref: str, *, require_public_file: bool = False):
+        keys = self._subdir("keys-v1", create=False)
+        if keys is None:
+            raise FileNotFoundError(self.root / "keys-v1")
+        key_dir = keys / key_ref
+        mode = _lstat_kind(key_dir)
+        if mode is None or not S_ISDIR(mode):
+            raise FileNotFoundError(key_dir)
+        private_path = key_dir / "ed25519.key"
+        _regular(private_path)
+        pair = ed25519.load(key_dir)
+        public_path = key_dir / "ed25519.pub"
+        exists = _regular(public_path, required=False)
+        if require_public_file and not exists:
+>           raise ValueError("mapped custody key is missing its public evidence")
+E           ValueError: mapped custody key is missing its public evidence
+
+libs/custody/src/custody/binding.py:320: ValueError
+=========================== short test summary info ============================
+FAILED libs/custody/tests/test_binding_recovery_contract.py::test_recovery_without_an_intent_never_creates_a_binding
+FAILED libs/custody/tests/test_binding_recovery_contract.py::test_completed_binding_is_revalidated_by_creation_retry
+FAILED libs/custody/tests/test_binding_recovery_contract.py::test_token_reuse_does_not_poison_a_second_observer_slot
+FAILED libs/custody/tests/test_binding_recovery_contract.py::test_import_recovery_uses_published_candidate_after_source_is_gone
+FAILED libs/custody/tests/test_binding_recovery_contract.py::test_recovery_retains_private_key_when_public_publication_was_interrupted
+5 failed, 1 passed in 0.18s

@@ -1,0 +1,11 @@
+{
+  "instruction": "You are Fable 5.1 at LOW effort reviewing the final narrow D0/D2 imported-key durability correction. Return ACCEPT or REVISE with concrete blockers then optional notes, under 700 words. No tools or claimed test execution. Your previous review found one blocker: recover_binding non-created provenance failed to fsync the key directory if the copied public file was already visible after its link-before-fsync interruption. The patch adds unconditional fsync after validated full pair/expected public, and an actual interrupted import regression that recovers without the legacy source. Verify ordering, all provenance branches, read-only resolution, and preservation of prior directory-chain and completed-slot corrections from full current source. No invented external tamper-proof or wire changes. Tests establish sync order, not literal power-loss simulation. Keep this review focused on the final small correction and any direct regressions.",
+  "sources": [
+    "docs/scratch/arrival-break/consistency-d0-d2-durability-followup-2026-09-06.md",
+    "docs/scratch/arrival-break/reviews/consistency-d0-d2-durability-2026-09-06/primary-triage.md",
+    "libs/custody/src/custody/binding.py",
+    "libs/custody/tests/test_binding.py",
+    "libs/custody/tests/test_binding_recovery_contract.py",
+    "libs/custody/README.md"
+  ]
+}

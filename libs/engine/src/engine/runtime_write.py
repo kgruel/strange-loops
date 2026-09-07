@@ -48,7 +48,16 @@ from .arrival_head_seam import (
     PreGenesis,
     complete_projection_custody,
 )
-from .credentials import WriteCredentials
+from .credentials import (
+    CapturedSigningContext,
+    CredentialBindingEvidence,
+    CredentialBindingRefused,
+    CredentialPurpose,
+    CredentialRequest,
+    CredentialResolutionSession,
+    SigningDomain,
+    WriteCredentials,
+)
 from .row_commitment import fact_row_hash, tick_commitment_hash, tick_row_hash
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -258,6 +267,9 @@ class OrdinaryWritePlan:
     custodian: str | None = None
     admit_undeclared: bool = False
     tick_run: str | None = field(default=None, repr=False, compare=False)
+    credential_bindings: tuple[CredentialBindingEvidence, ...] = field(
+        default=(), repr=False, compare=False
+    )
 
 
 class PostCommitProjectionFailed(Exception):
@@ -346,6 +358,9 @@ class BatchWritePlan:
     pending_tick_runs: tuple[str | None, ...] = field(
         default=(), repr=False, compare=False
     )
+    credential_bindings: tuple[CredentialBindingEvidence, ...] = field(
+        default=(), repr=False, compare=False
+    )
 
 
 @dataclass(frozen=True)
@@ -387,6 +402,9 @@ class RuntimeCapture:
     )
     _sources: tuple[Any, ...] = field(default=(), repr=False, compare=False)
     _pending_boundaries: tuple[Any, ...] = field(default=(), repr=False, compare=False)
+    _signing_context: CapturedSigningContext | None = field(
+        default=None, repr=False, compare=False
+    )
 
     @property
     def effective_declaration(self) -> VertexFile:
@@ -659,20 +677,14 @@ def _existing_fact_plan(
     fact: Fact,
     credentials: WriteCredentials,
     fact_id: str | None,
+    *,
+    signing_context: CapturedSigningContext | None = None,
+    credential_session: CredentialResolutionSession | None = None,
 ) -> OrdinaryWritePlan | None:
     """Recognize an exact retry before any new-fact admission decision."""
     if fact_id is None:
         return None
     chosen_id = fact_id
-    payload_text = _payload_text(fact.payload)
-    inner_signature = (
-        credentials.fact_signer(
-            fact.observer,
-            fact_commitment_hash(fact.kind, fact.ts, fact.observer, fact.origin, payload_text),
-        )
-        if credentials.fact_signer is not None
-        else None
-    )
     existing = next(
         (
             row
@@ -685,6 +697,21 @@ def _existing_fact_plan(
     )
     if existing is None:
         return None
+    payload_text = _payload_text(fact.payload)
+    session = credential_session or CredentialResolutionSession()
+    inner_signature = _author_signature(
+        credentials,
+        session,
+        signing_context,
+        captured_head=basis.captured_head,
+        observer=fact.observer,
+        domain=SigningDomain.FACT,
+        purpose=CredentialPurpose.AUTHORSHIP,
+        digest=fact_commitment_hash(
+            fact.kind, fact.ts, fact.observer, fact.origin, payload_text
+        ),
+        legacy_signer=credentials.fact_signer,
+    )
     if existing.payload_text is None:
         raise RuntimeWriteRefused("snapshot omitted exact fact payload text")
     if (
@@ -702,6 +729,7 @@ def _existing_fact_plan(
         tick_id=None,
         drafts=(),
         already_present=True,
+        credential_bindings=session.evidence,
     )
 
 
@@ -737,6 +765,107 @@ def _current_write_basis(
         captured_head=captured,
         projected_through=projected,
         view_generation=snapshot.view_generation,
+    )
+
+
+def _require_signing_context(
+    credentials: WriteCredentials,
+    context: CapturedSigningContext | None,
+    *,
+    captured_head: Head,
+) -> CapturedSigningContext:
+    if context is None or context.captured_head != captured_head:
+        raise CredentialBindingRefused(
+            "mapped signing requires authorization evidence from the captured head",
+            captured_head=captured_head,
+            use_position=captured_head.ordinal + 1,
+        )
+    return context
+
+
+def _author_signature(
+    credentials: WriteCredentials,
+    session: CredentialResolutionSession,
+    context: CapturedSigningContext | None,
+    *,
+    captured_head: Head,
+    observer: str,
+    domain: SigningDomain,
+    purpose: CredentialPurpose,
+    digest: str,
+    legacy_signer: Callable[[str, str], str | None] | None,
+    required: bool = False,
+) -> str | None:
+    if not credentials.mapped:
+        if legacy_signer is None:
+            if required:
+                raise RuntimeWriteRefused(f"missing {domain.value} signer")
+            return None
+        signature = legacy_signer(observer, digest)
+        if required and not signature:
+            raise RuntimeWriteRefused(f"missing {domain.value} signature")
+        return signature
+    resolved_context = _require_signing_context(
+        credentials, context, captured_head=captured_head
+    )
+    request = CredentialRequest(
+        namespace=credentials.binding_namespace,
+        observer=observer,
+        domain=domain,
+        purpose=purpose,
+    )
+    return session.sign(
+        credentials,
+        request,
+        digest,
+        context=resolved_context,
+        authorized_keys=resolved_context.keys_for_author(observer),
+        required=required,
+    )
+
+
+def _tick_signature(
+    credentials: WriteCredentials,
+    session: CredentialResolutionSession,
+    context: CapturedSigningContext | None,
+    *,
+    captured_head: Head,
+    digest: str,
+    signed_era: bool,
+) -> str | None:
+    if not credentials.mapped:
+        signature = (
+            credentials.tick_signer(digest)
+            if credentials.tick_signer is not None
+            else None
+        )
+        if signature is None and signed_era:
+            raise RuntimeWriteRefused("refusing an unsigned tick in the signed tick era")
+        return signature
+    resolved_context = _require_signing_context(
+        credentials, context, captured_head=captured_head
+    )
+    if credentials.receipt_observer is None:
+        if signed_era:
+            raise CredentialBindingRefused(
+                "missing-required",
+                captured_head=captured_head,
+                use_position=resolved_context.use_position,
+            )
+        return None
+    request = CredentialRequest(
+        namespace=credentials.binding_namespace,
+        observer=credentials.receipt_observer,
+        domain=SigningDomain.TICK,
+        purpose=CredentialPurpose.RECEIPT,
+    )
+    return session.sign(
+        credentials,
+        request,
+        digest,
+        context=resolved_context,
+        authorized_keys=resolved_context.receipt_keys,
+        required=signed_era,
     )
 
 
@@ -903,6 +1032,8 @@ def plan_ordinary_write(
     fact_id: str | None = None,
     admit_undeclared: bool = False,
     _mutate_candidate: bool = False,
+    _signing_context: CapturedSigningContext | None = None,
+    _credential_session: CredentialResolutionSession | None = None,
 ) -> OrdinaryWritePlan:
     """Internal, caller-responsible planner for one local fact and tick.
 
@@ -931,7 +1062,16 @@ def plan_ordinary_write(
 
     validate_arrival_declaration_anchor(anchor, basis.captured_head)
 
-    existing_plan = _existing_fact_plan(snapshot, basis, fact, credentials, fact_id)
+    credential_session = _credential_session or CredentialResolutionSession()
+    existing_plan = _existing_fact_plan(
+        snapshot,
+        basis,
+        fact,
+        credentials,
+        fact_id,
+        signing_context=_signing_context,
+        credential_session=credential_session,
+    )
     if existing_plan is not None:
         return existing_plan
     facts = snapshot.facts(FactRequest(limit=None, include_internal=True, order="oldest")).items
@@ -942,13 +1082,18 @@ def plan_ordinary_write(
     ticks = snapshot.ticks(TickRequest())
     chosen_id = fact_id if fact_id is not None else str(ULID())
     payload_text = _payload_text(fact.payload)
-    inner_signature = (
-        credentials.fact_signer(
-            fact.observer,
-            fact_commitment_hash(fact.kind, fact.ts, fact.observer, fact.origin, payload_text),
-        )
-        if credentials.fact_signer is not None
-        else None
+    inner_signature = _author_signature(
+        credentials,
+        credential_session,
+        _signing_context,
+        captured_head=basis.captured_head,
+        observer=fact.observer,
+        domain=SigningDomain.FACT,
+        purpose=CredentialPurpose.AUTHORSHIP,
+        digest=fact_commitment_hash(
+            fact.kind, fact.ts, fact.observer, fact.origin, payload_text
+        ),
+        legacy_signer=credentials.fact_signer,
     )
     fact_row = (
         chosen_id,
@@ -969,13 +1114,18 @@ def plan_ordinary_write(
     if not receipt.stored:
         raise _AdmissionPlanRefused("admission rejected the fact before append")
     fact_body = body_of_fact_row(fact_row)
-    outer_signature = (
-        credentials.arrival_signer(
-            fact.observer,
-            content_commitment("fact", fact.ts, fact.observer, fact.origin, fact_body),
-        )
-        if credentials.arrival_signer is not None
-        else None
+    outer_signature = _author_signature(
+        credentials,
+        credential_session,
+        _signing_context,
+        captured_head=basis.captured_head,
+        observer=fact.observer,
+        domain=SigningDomain.ARRIVAL,
+        purpose=CredentialPurpose.AUTHORSHIP,
+        digest=content_commitment(
+            "fact", fact.ts, fact.observer, fact.origin, fact_body
+        ),
+        legacy_signer=credentials.arrival_signer,
     )
     drafts = [
         RecordDraft(
@@ -1007,16 +1157,18 @@ def plan_ordinary_write(
             chosen_id,
             _window_hash(facts, start=window_start, appended=fact_row),
         )
-        tick_signature = (
-            credentials.tick_signer(tick_commitment_hash(tick_row))
-            if credentials.tick_signer is not None
-            else None
-        )
-        if tick_signature is None and any(
+        signed_era = any(
             existing.signature is not None and existing.window_hash is not None
             for existing in ticks
-        ):
-            raise RuntimeWriteRefused("refusing an unsigned tick in the signed tick era")
+        )
+        tick_signature = _tick_signature(
+            credentials,
+            credential_session,
+            _signing_context,
+            captured_head=basis.captured_head,
+            digest=tick_commitment_hash(tick_row),
+            signed_era=signed_era,
+        )
         tick_body = body_of_tick_row((*tick_row, tick_signature))
         drafts.append(
             RecordDraft(
@@ -1034,6 +1186,7 @@ def plan_ordinary_write(
         tick_id=tick_id,
         drafts=tuple(drafts),
         tick_run=None if receipt.tick is None else receipt.tick.run,
+        credential_bindings=credential_session.evidence,
     )
 
 
@@ -1056,6 +1209,7 @@ def capture_runtime(
     fold_overrides: dict[str, FoldOverride] | None = None,
     source_mode: bool = False,
     evaluated_at: float | None = None,
+    credentials: WriteCredentials | None = None,
 ) -> RuntimeCapture:
     """Capture one immutable, closed-handle Authority/CURRENT runtime view."""
     from .arrival_contract import Profile, ProjectionRequirement
@@ -1092,6 +1246,60 @@ def capture_runtime(
             else ()
         )
         captured_locator = _capture_locator_ingress(locator)
+        signing_context = None
+        if credentials is not None and credentials.mapped:
+            from .arrival import key_registry_from_records
+
+            verifier = credentials.signature_verifier
+            if verifier is None:  # guarded by WriteCredentials construction
+                raise CredentialBindingRefused(
+                    "mapped signing requires a signature verifier",
+                    captured_head=captured,
+                    use_position=captured.ordinal + 1,
+                )
+            try:
+                key_registry, _key_rows = key_registry_from_records(
+                    ledger.scan(through=captured),
+                    lambda key, signature, digest: verifier(
+                        SigningDomain.ARRIVAL, key, signature, digest
+                    ),
+                )
+            except CredentialBindingRefused as exc:
+                raise CredentialBindingRefused(
+                    exc.reason,
+                    request=exc.request,
+                    captured_head=captured,
+                    use_position=captured.ordinal + 1,
+                    evidence=exc.evidence,
+                ) from exc
+            except Exception as exc:
+                raise CredentialBindingRefused(
+                    "key-history-unverified",
+                    captured_head=captured,
+                    use_position=captured.ordinal + 1,
+                ) from exc
+            author_keys = tuple(
+                (
+                    observer,
+                    tuple(
+                        key
+                        for key, _introduced in key_registry.keys_valid_at(
+                            observer, captured.ordinal + 1
+                        )
+                    ),
+                )
+                for observer in sorted(key_registry.introductions)
+            )
+            receipt_keys = tuple(
+                observer.key
+                for observer in (effective.observers or ())
+                if isinstance(observer.key, str) and observer.key
+            )
+            signing_context = CapturedSigningContext(
+                captured_head=captured,
+                author_keys=author_keys,
+                receipt_keys=receipt_keys,
+            )
         return RuntimeCapture(
             basis=basis,
             custodian=_custodian_from_verified_genesis(ledger),
@@ -1111,6 +1319,7 @@ def capture_runtime(
             ),
             _sources=copy.deepcopy(sources),
             _pending_boundaries=copy.deepcopy(tuple(pending)),
+            _signing_context=signing_context,
         )
     finally:
         if snapshot is not None:
@@ -1137,12 +1346,27 @@ def prepare_ordinary_write(
     detached plan; execution later compares the same complete head under the
     ledger fence and refuses any intervening append.
     """
-    capture = capture_runtime(registry, descriptor, locator, fold_overrides=fold_overrides)
+    capture = capture_runtime(
+        registry,
+        descriptor,
+        locator,
+        fold_overrides=fold_overrides,
+        credentials=credentials,
+    )
     basis = capture.basis
     effective = capture.effective_declaration
     candidate = capture._candidate_copy()
     snapshot = _BatchSnapshot(capture, capture._facts, capture._ticks)
-    duplicate = _existing_fact_plan(snapshot, basis, fact, credentials, fact_id)
+    credential_session = CredentialResolutionSession()
+    duplicate = _existing_fact_plan(
+        snapshot,
+        basis,
+        fact,
+        credentials,
+        fact_id,
+        signing_context=capture._signing_context,
+        credential_session=credential_session,
+    )
     if duplicate is not None:
         return replace(
             duplicate,
@@ -1165,6 +1389,8 @@ def prepare_ordinary_write(
             custodian=capture.custodian,
             fact_id=fact_id,
             admit_undeclared=admit_undeclared,
+            _signing_context=capture._signing_context,
+            _credential_session=credential_session,
         )
     except (AdmissionError, _AdmissionPlanRefused) as exc:
         raise OrdinaryWritePreparationRefused(
@@ -1254,11 +1480,17 @@ def execute_ordinary_write(
 
 
 def _pack_batch_drafts(
-    drafts: Sequence[RecordDraft], credentials: WriteCredentials
+    drafts: Sequence[RecordDraft],
+    credentials: WriteCredentials,
+    *,
+    captured_head: Head | None = None,
+    signing_context: CapturedSigningContext | None = None,
+    credential_session: CredentialResolutionSession | None = None,
 ) -> tuple[RecordDraft, ...]:
     """Turn adjacent ordinary fact drafts into wire-valid same-author batches."""
     packed: list[RecordDraft] = []
     held: list[RecordDraft] = []
+    session = credential_session or CredentialResolutionSession()
 
     def flush() -> None:
         if not held:
@@ -1280,16 +1512,31 @@ def _pack_batch_drafts(
                 for row in held
             ]
             body = body_of_batch(rows)
-            signature = (
-                credentials.arrival_signer(
-                    first.observer,
-                    content_commitment(
-                        "batch", first.authored_at, first.observer, first.origin, body
-                    ),
-                )
-                if credentials.arrival_signer is not None
-                else None
+            digest = content_commitment(
+                "batch", first.authored_at, first.observer, first.origin, body
             )
+            if credentials.mapped:
+                if captured_head is None:
+                    raise CredentialBindingRefused(
+                        "mapped batch signing requires a captured head"
+                    )
+                signature = _author_signature(
+                    credentials,
+                    session,
+                    signing_context,
+                    captured_head=captured_head,
+                    observer=first.observer,
+                    domain=SigningDomain.ARRIVAL,
+                    purpose=CredentialPurpose.AUTHORSHIP,
+                    digest=digest,
+                    legacy_signer=None,
+                )
+            else:
+                signature = (
+                    credentials.arrival_signer(first.observer, digest)
+                    if credentials.arrival_signer is not None
+                    else None
+                )
             packed.append(
                 RecordDraft(
                     kind="batch",
@@ -1322,6 +1569,9 @@ def _pending_tick_draft(
     *,
     credentials: WriteCredentials,
     custodian: str,
+    captured_head: Head,
+    signing_context: CapturedSigningContext | None,
+    credential_session: CredentialResolutionSession,
 ) -> RecordDraft:
     """Encode one captured pending boundary without re-evaluating it."""
     if not facts:
@@ -1342,15 +1592,17 @@ def _pending_tick_draft(
         current_fact.id,
         _window_hash(facts, start=window_start),
     )
-    signature = (
-        credentials.tick_signer(tick_commitment_hash(row))
-        if credentials.tick_signer is not None
-        else None
-    )
-    if signature is None and any(
+    signed_era = any(
         existing.signature is not None and existing.window_hash is not None for existing in ticks
-    ):
-        raise RuntimeWriteRefused("refusing an unsigned tick in the signed tick era")
+    )
+    signature = _tick_signature(
+        credentials,
+        credential_session,
+        signing_context,
+        captured_head=captured_head,
+        digest=tick_commitment_hash(row),
+        signed_era=signed_era,
+    )
     return RecordDraft(
         kind="tick",
         authored_at=tick.ts.timestamp(),
@@ -1390,6 +1642,7 @@ def plan_batch_from_capture(
     pending_ids: list[str] = []
     pending_names: list[str] = []
     pending_runs: list[str | None] = []
+    credential_session = CredentialResolutionSession()
     for sequence, tick in enumerate(copy.deepcopy(pending)):
         draft = _pending_tick_draft(
             tick,
@@ -1397,6 +1650,9 @@ def plan_batch_from_capture(
             ticks,
             credentials=credentials,
             custodian=capture.custodian,
+            captured_head=basis.captured_head,
+            signing_context=capture._signing_context,
+            credential_session=credential_session,
         )
         logical.append(draft)
         pending_ids.append(str(draft.body["id"]))
@@ -1411,7 +1667,15 @@ def plan_batch_from_capture(
     for index, item in enumerate(items):
         synthetic = _BatchSnapshot(capture, facts, ticks)
         try:
-            plan = _existing_fact_plan(synthetic, basis, item.fact, credentials, item.fact_id)
+            plan = _existing_fact_plan(
+                synthetic,
+                basis,
+                item.fact,
+                credentials,
+                item.fact_id,
+                signing_context=capture._signing_context,
+                credential_session=credential_session,
+            )
             if plan is None:
                 grant = grant_for_observer(effective, item.fact.observer)
                 plan = plan_ordinary_write(
@@ -1425,6 +1689,8 @@ def plan_batch_from_capture(
                     fact_id=item.fact_id,
                     admit_undeclared=item.admit_undeclared,
                     _mutate_candidate=True,
+                    _signing_context=capture._signing_context,
+                    _credential_session=credential_session,
                 )
         except (AdmissionError, _AdmissionPlanRefused) as exc:
             raise BatchWritePreparationRefused(
@@ -1435,6 +1701,16 @@ def plan_batch_from_capture(
                 basis=basis,
                 cause=exc,
                 admission_refused=True,
+            ) from exc
+        except CredentialBindingRefused as exc:
+            raise BatchWritePreparationRefused(
+                input_index=index,
+                item=item,
+                effective_declaration=capture.effective_declaration,
+                custodian=capture.custodian,
+                basis=basis,
+                cause=exc,
+                admission_refused=False,
             ) from exc
         except RuntimeWriteRefused as exc:
             raise BatchWritePreparationRefused(
@@ -1466,7 +1742,13 @@ def plan_batch_from_capture(
                 ticks = (*ticks, _tick_from_draft(draft, ordinal, sequence))
         logical.extend(plan.drafts)
 
-    packed = _pack_batch_drafts(logical, credentials)
+    packed = _pack_batch_drafts(
+        logical,
+        credentials,
+        captured_head=basis.captured_head,
+        signing_context=capture._signing_context,
+        credential_session=credential_session,
+    )
     if capture.max_atomic_records is not None and len(packed) > capture.max_atomic_records:
         raise AtomicLimitExceeded(
             f"{len(packed)} packed records exceeds this backend's configured "
@@ -1481,6 +1763,7 @@ def plan_batch_from_capture(
         pending_tick_ids=tuple(pending_ids),
         pending_tick_names=tuple(pending_names),
         pending_tick_runs=tuple(pending_runs),
+        credential_bindings=credential_session.evidence,
     )
 
 
@@ -1496,7 +1779,13 @@ def prepare_batch_write(
     """Capture once, then prepare every item against that exact evidence."""
     if not items:
         raise RuntimeWriteRefused("batch requires at least one fact")
-    capture = capture_runtime(registry, descriptor, locator, fold_overrides=fold_overrides)
+    capture = capture_runtime(
+        registry,
+        descriptor,
+        locator,
+        fold_overrides=fold_overrides,
+        credentials=credentials,
+    )
     return plan_batch_from_capture(capture, items, credentials=credentials)
 
 

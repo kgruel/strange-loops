@@ -1,3 +1,73 @@
+## September 6: D0/D2 checkpoint; resume with public SDK workload conformance
+
+This checkpoint contains the accepted D0/D2 implementation, recovery/durability
+corrections, native validation, and all Fable-low review/primary-triage artifacts.
+The working branch is `arrival/finish` in `loops-wt/arrival-finish`; its parent is
+`39bf05d7`. No push or live-store/key migration is part of this checkpoint.
+
+**Next after compaction:** use the established Sol/Terra/Luna delegation and
+Fable-low final review pattern for a bounded public SDK workload-conformance
+slice. Begin with an isolated two-observer lifecycle: prepare mapped bindings,
+initialize a lineage, introduce the second observer, emit a mixed-author batch,
+read and verify, then move the vertex descriptor and repeat credential selection
+and an authorized write. Exercise public SDK calls and reuse existing integration
+fixtures. Preserve exact observer labels, explicit custody namespace, independent
+captured authorization, domain separation, and honest outcome evidence. This is
+the next agreed direction; no conformance implementation began before compaction.
+
+Follow with declaration interruption/recovery, partial source tiers, and captured
+export/restore/sync/read workflows as bounded slices. The larger maintenance,
+transfer, descriptor adoption and C9 transition work remains as described in the
+completion worklist. The default legacy provider is still supported; mapped
+credentials remain opt-in. All tests must keep isolated XDG state/config and
+LOOPS_HOME. No real credentials or live stores are required for this next slice.
+
+D0/D2 evidence: engine 2,611 passed / 1 skipped; SDK 578 passed; final custody
+81 passed; signing 40 passed; architecture 101 passed. SDK validation predates
+only the last custody recovery/durability corrections, covered by the final
+custody suite. Final Fable-low and primary verdicts ACCEPT; no jobs remain.
+Checkpoint whitespace checks pass for source, tests and maintained docs. Frozen
+review packets/raw logs retain their original whitespace and hashes; the staged
+whole-tree check reports those archival bytes rather than rewriting evidence.
+See [implementation](consistency-d0-d2-2026-09-06.md) and
+[final triage](reviews/consistency-d0-d2-durability-followup-2026-09-06/primary-triage.md).
+
+Earlier entries below preserve their status at the time of writing.
+
+## September 6: D0/D2 complete and accepted; ready to checkpoint
+
+D0/D2 is complete in `loops-wt/arrival-finish` on `arrival/finish`, based on
+`39bf05d7`, and remains uncommitted. The opt-in mapped provider selects keys by
+explicit namespace and exact observer, with domain/purpose requests separate
+from engine-owned captured authorization. Runtime, batch, source-tier and
+declaration writes verify mapped public evidence after capture. Initialization
+loads pre-created bindings; creation/import/reuse/recovery are explicit custody
+operations. Default legacy callers remain supported without automatic migration.
+
+Sol implemented engine integration, Terra implemented custody/SDK and recovery,
+Luna covered public SDK flows, and root integrated validation and independent
+probes. Design Fable-low returned REVISE; its corrections were incorporated.
+The first broad implementation ACCEPT was overridden by two root recovery
+reproductions. Focused recovery REVISE exposed a fresh-token bypass, then ACCEPT
+confirmed its fix. Root's final directory inspection exposed parent-entry and
+linked-binding sync gaps. The durability review returned REVISE for the remaining
+imported-key branch; the last focused Fable-low review and primary triage now
+both **ACCEPT**, with no outstanding blockers or review jobs.
+
+Measured validation: engine **2,611 passed / 1 skipped**, SDK **578 passed**,
+final custody **81 passed**, sign **40 passed**, architecture **101 passed**.
+The SDK run predates the last custody-only recovery/durability corrections,
+covered by the final full custody suite. Scoped Ruff and diff checks pass.
+Tests use isolated state/config/Loops roots. No real credentials or live stores
+were migrated; nothing was committed or pushed, and the main checkout is clean.
+
+See the [D0/D2 report](consistency-d0-d2-2026-09-06.md),
+[validation report](consistency-d0-d2-validation-2026-09-06.md), and
+[final review triage](reviews/consistency-d0-d2-durability-followup-2026-09-06/primary-triage.md).
+Checkpoint when requested; next roadmap work is workload conformance, explicit
+maintenance/transfer completion and adoption, followed by C9 once its SDK/CLI
+retirement conditions are met. Earlier entries below preserve historical status.
+
 ## September 6: C7 resolver continuation complete; handoff to D0 → D2
 
 C7 is checkpointed as `f5563d2f` (`feat(arrival): inspect bounded aggregate

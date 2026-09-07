@@ -281,6 +281,7 @@ def init_vertex(
     signer=None,
     fact_signer=None,
     public_key: str | None = None,
+    credentials: CredentialProvider | None = None,
     recover: bool = False,
     registry: BackendRegistry | None = None,
 ) -> InitVertexResult:
@@ -325,9 +326,14 @@ def init_vertex(
             signer=signer,
             fact_signer=fact_signer,
             public_key=public_key,
+            credentials=credentials,
             recover=recover,
             overwrite=overwrite,
             registry=registry,
+        )
+    if credentials is not None:
+        raise TargetUnsupported(
+            "initialization credentials require an explicit Arrival descriptor target"
         )
     if vertex_path.exists() and not overwrite:
         raise TargetError(f"vertex file already exists: {vertex_path}")
@@ -400,6 +406,7 @@ def _init_arrival(
     signer,
     fact_signer,
     public_key: str | None,
+    credentials: CredentialProvider | None,
     recover: bool,
     overwrite: bool,
     registry: BackendRegistry | None,
@@ -508,8 +515,97 @@ def _init_arrival(
         # to headless deployments; absent one, key creation/loading is the
         # same explicit custody operation used by the existing init command.
         from custody import arrival_signer_for, ensure_signing_key, fact_signer_for
+        from engine.credentials import (
+            CredentialBindingEvidence,
+            CredentialPurpose,
+            CredentialRequest,
+            ResolvedCredential,
+            SigningDomain,
+        )
 
-        if signer is None and fact_signer is None and public_key is None:
+        if credentials is not None:
+            if signer is not None or fact_signer is not None:
+                raise SdkValueError(
+                    "mapped Arrival initialization does not accept separate signer inputs"
+                )
+            write_credentials = _arrival_credentials(vertex_path, credentials)
+            if not write_credentials.mapped or write_credentials.binding_resolver is None:
+                raise SdkValueError(
+                    "Arrival initialization requires a mapped provider or explicit signers"
+                )
+            fact_request = CredentialRequest(
+                write_credentials.binding_namespace or "",
+                observer,
+                SigningDomain.FACT,
+                CredentialPurpose.INITIALIZATION,
+            )
+            arrival_request = CredentialRequest(
+                write_credentials.binding_namespace or "",
+                observer,
+                SigningDomain.ARRIVAL,
+                CredentialPurpose.INITIALIZATION,
+            )
+            try:
+                fact_credential = write_credentials.binding_resolver(fact_request)
+                arrival_credential = write_credentials.binding_resolver(arrival_request)
+            except Exception as exc:
+                normalized = normalize_exception(exc)
+                if normalized is not exc:
+                    raise normalized from exc
+                raise SdkValueError(
+                    "Arrival initialization could not resolve its pre-created mapped binding"
+                ) from exc
+            if fact_credential is None or arrival_credential is None:
+                raise SdkValueError(
+                    "mapped Arrival initialization requires a pre-created founding binding"
+                )
+            def valid_bootstrap_credential(value: object, request: CredentialRequest) -> bool:
+                if not isinstance(value, ResolvedCredential):
+                    return False
+                evidence = value.evidence
+                return (
+                    isinstance(evidence, CredentialBindingEvidence)
+                    and evidence.request == request
+                    and all(
+                        isinstance(item, str) and bool(item)
+                        for item in (
+                            evidence.key_ref,
+                            evidence.algorithm,
+                            evidence.public_key,
+                            evidence.provenance,
+                        )
+                    )
+                    and callable(value.sign_digest)
+                )
+
+            fact_valid = valid_bootstrap_credential(fact_credential, fact_request)
+            arrival_valid = valid_bootstrap_credential(arrival_credential, arrival_request)
+            if not fact_valid or not arrival_valid:
+                raise SdkValueError(
+                    "mapped Arrival initialization resolver returned contradictory binding evidence"
+                )
+            if (
+                fact_credential.evidence.public_key != arrival_credential.evidence.public_key
+                or fact_credential.evidence.key_ref != arrival_credential.evidence.key_ref
+            ):
+                raise SdkValueError(
+                    "mapped Arrival initialization requires FACT and ARRIVAL bindings with one key"
+                )
+            if public_key is not None and public_key != fact_credential.evidence.public_key:
+                raise SdkValueError(
+                    "mapped Arrival initialization public_key disagrees with its binding"
+                )
+            public_key = fact_credential.evidence.public_key
+
+            def mapped_arrival_signer(author: str, digest: str) -> str | None:
+                return arrival_credential.sign_digest(digest) if author == observer else None
+
+            def mapped_fact_signer(author: str, digest: str) -> str | None:
+                return fact_credential.sign_digest(digest) if author == observer else None
+
+            signer = mapped_arrival_signer
+            fact_signer = mapped_fact_signer
+        elif signer is None and fact_signer is None and public_key is None:
             try:
                 keypair = ensure_signing_key(vertex_path, observer=observer)
             except ValueError as exc:

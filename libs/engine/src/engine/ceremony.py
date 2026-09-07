@@ -559,7 +559,16 @@ def apply_declaration_update(
 
     fact_signer = None
     if credentials is not None:
-        fact_signer = credentials.for_write(vertex_path).fact_signer
+        write_credentials = credentials.for_write(vertex_path)
+        if write_credentials.mapped:
+            return DeclarationUpdateResult(
+                status="refused",
+                reason=(
+                    "mapped credentials require the Arrival declaration writer; "
+                    "the legacy ceremony cannot establish captured binding authority"
+                ),
+            )
+        fact_signer = write_credentials.fact_signer
 
     # ONE store open, BEFORE the intent lands (SOL-R2-04 two-scope floor):
     # a failure at the open provably mutated nothing — no log byte written,

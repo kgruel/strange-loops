@@ -1,0 +1,68 @@
+........F............................................................... [ 67%]
+...................................                                      [100%]
+=================================== FAILURES ===================================
+_______________ test_process_lock_converges_absent_provider_root _______________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-965/test_process_lock_converges_ab0')
+
+    def test_process_lock_converges_absent_provider_root(tmp_path: Path) -> None:
+        root = tmp_path / "bindings"
+        context = get_context("spawn")
+        queue = context.Queue()
+        processes = [
+            context.Process(target=_create_in_process, args=(str(root), token, queue))
+            for token in ("process-one", "process-two")
+        ]
+        for process in processes:
+            process.start()
+>       outcomes = [queue.get(timeout=15) for _ in processes]
+                    ^^^^^^^^^^^^^^^^^^^^^
+
+libs/custody/tests/test_binding.py:148: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <multiprocessing.queues.Queue object at 0x10940f380>, block = True
+timeout = 14.999995916034095
+
+    def get(self, block=True, timeout=None):
+        if self._closed:
+            raise ValueError(f"Queue {self!r} is closed")
+        if block and timeout is None:
+            with self._rlock:
+                res = self._recv_bytes()
+            self._sem.release()
+        else:
+            if block:
+                deadline = time.monotonic() + timeout
+            if not self._rlock.acquire(block, timeout):
+                raise Empty
+            try:
+                if block:
+                    timeout = deadline - time.monotonic()
+                    if not self._poll(timeout):
+>                       raise Empty
+E                       _queue.Empty
+
+../../../.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/multiprocessing/queues.py:112: Empty
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=15, pipe_handle=21)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 132, in _main
+    self = reduction.pickle.load(from_parent)
+ModuleNotFoundError: No module named 'libs'
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(tracker_fd=15, pipe_handle=19)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "/Users/kaygee/.local/share/uv/python/cpython-3.13-macos-aarch64-none/lib/python3.13/multiprocessing/spawn.py", line 132, in _main
+    self = reduction.pickle.load(from_parent)
+ModuleNotFoundError: No module named 'libs'
+=========================== short test summary info ============================
+FAILED libs/custody/tests/test_binding.py::test_process_lock_converges_absent_provider_root
+1 failed, 106 passed in 20.43s

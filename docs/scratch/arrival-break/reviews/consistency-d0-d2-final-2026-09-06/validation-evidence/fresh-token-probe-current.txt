@@ -1,0 +1,3 @@
+create_binding alice-token REFUSED BindingConflict
+recover_binding alice-token REFUSED BindingConflict
+create_binding fresh-token REFUSED BindingConflict

@@ -1,0 +1,44 @@
+I001 [*] Import block is un-sorted or un-formatted
+   --> libs/engine/tests/test_ceremony_orchestration.py:614:5
+    |
+612 |       JsonlCanonicalUnsupported — that must be a typed 'refused' with no
+613 |       intent residue, not a raw exception."""
+614 | /     import dataclasses
+615 | |
+616 | |     from atoms import Fact
+617 | |     from engine.sqlite_store import SqliteStore
+    | |_______________________________________________^
+618 |
+619 |       locator = "./store/x.jsonl"
+    |
+help: Organize imports
+    |
+616 |     from atoms import Fact
+617 +
+618 |     from engine.sqlite_store import SqliteStore
+    |
+
+E501 Line too long (111 > 100)
+   --> libs/engine/tests/test_handle_receive.py:104:101
+    |
+102 |     ord_val = conn.execute("SELECT COALESCE(MAX(arrival_ordinal), 0) + 1 FROM facts").fetchone()[0]
+103 |     conn.execute(
+104 |         "INSERT INTO facts (id, kind, ts, observer, origin, payload, signature, arrival_ordinal, arrival_seq) "
+    |                                                                                                     ^^^^^^^^^^^
+105 |         "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 0)",
+106 |         (fid, kind, ts, "kyle", "", json.dumps(payload), ord_val),
+    |
+
+E501 Line too long (103 > 100)
+  --> libs/sdk/tests/test_mapped_credential_errors.py:22:101
+   |
+20 |         "work", "alice", SigningDomain.FACT, CredentialPurpose.AUTHORSHIP
+21 |     )
+22 |     values = dict(key_ref="opaque-ref", algorithm="ed25519", public_key="public", provenance="created")
+   |                                                                                                     ^^^
+23 |     values[field] = object()
+24 |     evidence = CredentialBindingEvidence(request=request, **values)
+   |
+
+Found 3 errors.
+[*] 1 fixable with the `--fix` option.

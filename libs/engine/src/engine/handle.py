@@ -1489,6 +1489,12 @@ class VertexHandle:
                     f"handle for {self._vertex_path} is read-only — open with "
                     "credentials= to write through it"
                 )
+            creds = self._credentials.for_write(self._vertex_path)
+            if creds.mapped:
+                raise HandleError(
+                    "mapped credentials require the Arrival registry writer; "
+                    "the legacy handle cannot establish captured binding authority"
+                )
 
             # 1. Catch up so the write sees external commits (does not make the
             #    boundary decision serializable — that is the deferred CAS).
@@ -1497,7 +1503,6 @@ class VertexHandle:
             # 2. Operation-fresh signers on the held writer (which creates the
             #    store on first write — open a probe now if it did).
             writer = self._ensure_writer()
-            creds = self._credentials.for_write(self._vertex_path)
             self._apply_credentials(creds)
             if (self._probe is None and self._store_path is not None
                     and self._store_path.exists()):

@@ -26,6 +26,14 @@ from engine.arrival_declarations import (
 )
 from engine.arrival_head_attestation import Outcome
 from engine.arrival_head_seam import Compared
+from engine.credentials import (
+    CredentialBindingEvidence,
+    CredentialPurpose,
+    CredentialRequest,
+    ResolvedCredential,
+    SigningDomain,
+    WriteCredentials,
+)
 
 
 class _Snapshot:
@@ -333,6 +341,59 @@ def test_proposed_declaration_can_repair_ambiguous_effective_history(
         )
 
     assert "scan" in activity
+
+
+def test_declaration_preparation_uses_mapped_fact_and_arrival_bindings(
+    tmp_path, monkeypatch
+) -> None:
+    from engine import arrival_declarations
+    from engine.arrival import KeyRegistry
+
+    registry, descriptor, target, proposed, captured, _, activity, _ = (
+        _declaration_fixture(tmp_path, case="advance", changed=True)
+    )
+    monkeypatch.setattr(
+        arrival_declarations,
+        "key_registry_from_records",
+        lambda _records, _verify: (
+            KeyRegistry(captured.lineage, {"alice": (("public-key", 0),)}),
+            (),
+        ),
+    )
+    requests: list[CredentialRequest] = []
+
+    def resolve(request: CredentialRequest) -> ResolvedCredential:
+        requests.append(request)
+        return ResolvedCredential(
+            CredentialBindingEvidence(
+                request, "key", "ed25519", "public-key", "test"
+            ),
+            lambda digest: f"{request.domain.value}:{digest}",
+        )
+
+    plan = prepare_declaration_edit(
+        registry,
+        descriptor,
+        target=target,
+        proposed_text=proposed,
+        observer="alice",
+        credentials=WriteCredentials(
+            binding_namespace="space",
+            binding_resolver=resolve,
+            signature_verifier=lambda domain, _key, signature, digest: signature
+            == f"{domain.value}:{digest}",
+        ),
+        fact_verify=lambda *_args: False,
+        arrival_verify=lambda *_args: False,
+    )
+
+    assert plan.status == "planned"
+    assert {(request.domain, request.purpose) for request in requests} == {
+        (SigningDomain.FACT, CredentialPurpose.AUTHORSHIP),
+        (SigningDomain.ARRIVAL, CredentialPurpose.AUTHORSHIP),
+    }
+    assert len(plan.credential_bindings) == 2
+    assert activity[-2:] == ["query-close", "ledger-close"]
 
 
 def test_declaration_preparation_refuses_ticked_reincarnation_before_scan(

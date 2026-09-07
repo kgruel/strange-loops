@@ -1,0 +1,8 @@
+{
+  "status": "complete",
+  "raw_verdict": "REVISE",
+  "primary_disposition": "resolved design requirements; implementation authorized",
+  "findings": 3,
+  "pending_design_decisions": [],
+  "implementation_review_required": true
+}

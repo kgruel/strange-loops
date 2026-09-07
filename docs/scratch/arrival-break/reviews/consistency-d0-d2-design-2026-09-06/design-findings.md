@@ -1,0 +1,35 @@
+# design — Fable review
+
+Effort: low. Finished: 2026-09-06T22:59:28.626985+00:00.
+Packet SHA-256: `bacca7225908defa9df9c38ac75b1eca8cab2a34dd0d367fe0250f754a202769`.
+
+Static reviewer output; findings still require primary triage.
+
+**Verdict: REVISE.** The identity separation, ordering (capture before resolve), no-fallback rule, and read-only preview are right and match the baseline seams. Three contracts are under-specified enough that implementation would either regress existing behavior or be unrecoverable.
+
+## Blockers
+
+**1. "Introduced subject is not the signer" regresses additive self-key introduction.**
+Authorization table row for key introduction says the introduced subject is not the signer. Current `prepare_declaration_edit` builds key drafts for every proposed key absent from `key_registry.introductions`, including one where `named_observer == observer` (`arrival_declarations.py:1069-1084`); `_key_draft` signs it with the author's existing key valid at H+1. That is the protocol's additive rotation path from the D1 decision ("old keys remain valid; selecting a new key and revoking an old key are separate"). Counterexample: alice, holding key K1 introduced at ordinal 3, edits the declaration to declare K2 for herself. Baseline: FACT/ARRIVAL signed under K1, key record `{observer: alice, key: K2}` appended. Under the design's wording, a subject-equals-signer check refuses. Restate as: the *introduced key* may not authorize the introducing signature; the subject may equal the author. Only initialization skips subject==founder (`arrival_initialization.py:361-366`), and only because the founding key is already in genesis.
+
+**2. Pending-intent discovery is not implementable as written, and the creation rules contradict each other.**
+Storage puts intents at `intents-v1/<operation-token>.json`, but the state machine says "another call for the same namespace/observer discovers the pending intent and must resume or explicitly reconcile it rather than minting a fresh candidate," while the next paragraph says "two creators with different tokens may prepare candidates" and race at the slot. Both cannot hold. Without an index keyed by the slot hash, discovery is a full directory scan and is racy against a concurrent intent link. Pick one and specify it:
+- Slot-level race (matches `ed25519._generate`'s no-clobber link at `ed25519.py:117-120`): intents are per-token, discovery is not required, losers reconcile. Then delete the "must resume" sentence.
+- Or add `pending-v1/<slot-hash>` published no-clobber with the token inside, so a second creator sees the token and resumes/refuses. Then "different tokens may prepare candidates" only holds after the pending marker is removed.
+Also state who may remove a lost candidate: "proving no binding references it" needs a scan of all bindings while a concurrent `bind_existing_ref` could be linking a slot that names that ref. Either forbid `bind_existing_ref` for refs whose intent is not complete, or make loser cleanup part of explicit maintenance only.
+
+**3. Receipt observer absence versus a boundary that fires is undefined.**
+`receipt_observer` is "required only when a TICK signature is requested," but whether a tick exists is known only after admission planning (`runtime_write.py:991`, `1318-1361`). Counterexample: mapped provider configured without `receipt_observer`; an ordinary fact fires a boundary; the lineage has no signed ticks. Baseline appends an unsigned tick (`runtime_write.py:1015-1019` only refuses in the signed era). The design must say explicitly: no configured receipt observer means no TICK request is constructed, the tick is unsigned where the era permits, and refuses with `missing-required` in the signed era. Otherwise an implementer can equally read it as refuse-before-plan, which changes ordinary emit for every mapped user with only author keys.
+
+## Notes (non-blocking)
+
+- **Retry equality by re-signing.** `_existing_fact_plan` (`runtime_write.py:668-698`) resolves a signer and compares its fresh signature to the stored row. In mapped mode this runs full resolution and H+1 authorization for a no-op retry, and a binding that changed since the original write turns an exact retry into "already exists with different content." Prefer: verify the stored inner signature against captured key history for that observer and skip resolution when the row matches on all non-signature fields. Not a correctness bug, but the refusal reason misleads.
+- **Domain naming and verifier shape.** `SigningDomain` values are `"fact"/"arrival"/"tick"`; custody prefixes are `loops-fact-v1` and friends (`signing.py:30-32`). The design says domain "determines the signature prefix" but never says the mapping lives in the provider, not the engine. Say so, and give the adapter from the four-argument `signature_verifier` to the three-argument `fact_verify`/`arrival_verify` that `prepare_declaration_edit` and `initialize_arrival` already take, so mapped and legacy verification are one code path.
+- **Initialization ordering.** The design creates the founding binding before the engine's intent, and accepts that a refused init leaves a binding. Fine, but require the SDK to run the zero-mutation checks that already exist (`_check_preconditions`: target exists, intent exists, key-format, atomic limit; `validate_arrival_runtime_identity` at `declare.py:472`) before mapped creation. Today `ensure_signing_key` at `declare.py:514` runs before those, which is exactly the hidden-mutation pattern the design is removing.
+- **Recovery and binding drift.** Design correctly keeps recovery signing nothing (`recover_arrival_initialization` ignores signers). State the consequence in results: after recovery, if the current binding's public key differs from the intent's, the vertex is initialized but the next mapped write refuses with `unauthorized-public-key`. That is honest, but the user needs to see both facts in the init result.
+- **Raw `WriteCredentials` injection.** `_arrival_credentials` accepts a caller-built `WriteCredentials`. The all-or-none rule for the four mapped fields needs enforcement in the value itself, or a partial mapped configuration silently degrades to legacy callbacks, defeating the no-fallback rule.
+- **Cost of the O(N) scan.** `capture_runtime` closes the ledger before returning (`runtime_write.py:1115-1119`), so key-history evidence must be built inside capture. Acceptable as scoped; the design already flags it.
+
+## What is acceptable as scoped
+
+Domain-independent v1 bindings, any-declared-key TICK policy retained with the receipt observer as local selection only, the outer tick envelope staying the verified genesis custodian, no initialization-intent schema change, explicit import copying private material, and mapped mode refusing rather than falling back. These are limitations correctly labeled as such, not new guarantees. The "authorized public key at H+1" check for ordinary mapped authorship is new versus baseline, but it is the stated purpose of D0/D1 and is justified as long as the missing-binding-means-unsigned rule stays as written.

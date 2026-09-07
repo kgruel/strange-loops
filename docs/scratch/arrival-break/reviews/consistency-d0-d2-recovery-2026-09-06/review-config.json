@@ -1,0 +1,15 @@
+{
+  "instruction": "You are Fable 5.1 at LOW effort reviewing a focused D0/D2 custody RECOVERY correction. Return ACCEPT or REVISE, concrete remaining blockers with source and counterexample, and optional notes. No tools, no claims of test execution; under 1100 words. Your prior broad implementation review returned ACCEPT but ROOT REJECTED it based on two executable failures: published recovery accepted a valid different key contradicting its retained intent, and pending-before-token-index interruption allowed a conflicting token to publish another binding before refusal. Those scripts/results are included. Inspect the CURRENT complete custody implementation and tests below, not your earlier reasoning. Focus on every path that returns a completed binding, absent/contradictory pending-index-completion evidence, create retry and recover symmetry, no new binding/key on token conflicts, and typed partial/unknown evidence during recovery. Missing index/completion can be a legitimate crash; contradictory content cannot be silently selected. Mutation lock already serializes all provider writers. No automatic deletion, no global identity, no engine or SDK behavior redesign. Compare the combined case missing index plus substituted binding, not only each case independently. Distinguish false completion from conservatively reported incomplete recovery. Full custody74 and SDK578 pass as reported; review is independent of those test results.",
+  "sources": [
+    "docs/scratch/arrival-break/consistency-d0-d2-recovery-2026-09-06.md",
+    "docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/primary-triage.md",
+    "docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/validation-evidence/published_intent_probe.py",
+    "docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/validation-evidence/published-intent-probe.txt",
+    "docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/validation-evidence/pending_index_probe.py",
+    "docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/validation-evidence/pending-index-probe.txt",
+    "libs/custody/src/custody/binding.py",
+    "libs/custody/tests/test_binding.py",
+    "libs/custody/tests/test_binding_recovery_contract.py",
+    "libs/custody/README.md"
+  ]
+}

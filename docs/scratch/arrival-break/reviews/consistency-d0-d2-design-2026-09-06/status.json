@@ -1,0 +1,87 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-d0-d2-design-2026-09-06",
+  "due_at": "2026-09-06T22:55:32.409334+00:00",
+  "baseline": "39bf05d7",
+  "scope": "D0-D2 design",
+  "jobs": [
+    {
+      "name": "design",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/consistency-d0-d2-design-2026-09-06/design-prompt.txt",
+      "sha256": "bacca7225908defa9df9c38ac75b1eca8cab2a34dd0d367fe0250f754a202769",
+      "sources": {
+        "docs/scratch/arrival-break/consistency-d0-d2-design-2026-09-06.md": "7a72e00bc8ae924a2abb19c56508350bc430a4a1c858965405a7142a623ba9c7",
+        "docs/scratch/arrival-break/identity-decisions-2026-09-06.md": "1eb94753d6729c4f20a20c9eb9ac12f9406f4a8d4528da1ed032b1691af4a734",
+        "docs/scratch/arrival-break/consistency-d0-d2-code-audit-2026-09-06.md": "0cfc13edd29621f4b92f6e0106ab86dd3b9d1536e8329f05e2b881bd8cd41ef2",
+        "docs/scratch/arrival-break/consistency-d0-d2-validation-2026-09-06.md": "99132aa074842971e2ab010f67d6a7d4a323ff315e61241adb968fce16348561",
+        "libs/engine/src/engine/credentials.py": "92284d915b2ba1a2a0b2b461c85aa761cf60416ba66f53510f94b69bb837fdb7",
+        "libs/custody/src/custody/signing.py": "8a8f506b35c67b671c7714fbf11cfbdaa86c4a14c3cc4a3d429fc8b05a338710",
+        "libs/sign/src/sign/ed25519.py": "73b912ddf1b281ad2dedf02d33af02c236731af70014f3393b240096c501bb83",
+        "libs/engine/src/engine/runtime_write.py": "8e95338b936b884112553f3f17603310444bedc540f5779cb8653a67df9437a3",
+        "libs/engine/src/engine/arrival_initialization.py": "49cd10b3fce2a0170c7105cce06cd09b3d7a7b6a300624a3244ae12e27faaf39",
+        "libs/engine/src/engine/arrival_declarations.py": "ec142ac85023601964aabf3d031b557b5a4ecb72a731a5b77b384eaba4862ef1",
+        "libs/sdk/src/sdk/emit.py": "6a73c80688aae65b35f1690b9fa1908aaebd1e4ae591f43817cd5cc2b142f129",
+        "libs/sdk/src/sdk/declare.py": "afe6a0aaaad3667c85209ee378d1444db4caef4b64b30141ef988d53b242a5b9",
+        "libs/sdk/src/sdk/kind.py": "df66c2f6c5f986d72ece95d37d6b491f26f0b422ad09c32fa9177607397ea68d"
+      },
+      "status": "reviewed-awaiting-triage",
+      "started_at": "2026-09-06T22:55:32.478285+00:00",
+      "effort": "low",
+      "source_drift": [],
+      "command": [
+        "/Users/kaygee/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--model",
+        "claude-fable-5-1[1m]",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--output-format",
+        "json"
+      ],
+      "returncode": 0,
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 101877,
+          "outputTokens": 18,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.101967,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 4,
+          "outputTokens": 7451,
+          "cacheReadInputTokens": 138569,
+          "cacheCreationInputTokens": 132041,
+          "webSearchRequests": 0,
+          "costUSD": 3.04805225,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 5133,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "response_subtype": "success",
+      "finished_at": "2026-09-06T22:59:28.627219+00:00"
+    }
+  ],
+  "status": "reviews-finished-awaiting-triage",
+  "pid": 89570,
+  "updated_at": "2026-09-06T22:59:28.627223+00:00",
+  "started_at": "2026-09-06T22:55:32.478117+00:00",
+  "finished_at": "2026-09-06T22:59:28.627518+00:00"
+}

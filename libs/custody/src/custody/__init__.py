@@ -6,6 +6,13 @@ architecture/custody-lib-extraction) when tasked became the second
 consumer — a format definition sits below every writer.
 """
 
+from custody.binding import (
+    BindingConflict,
+    BindingCreationResult,
+    BindingMutationIncomplete,
+    BindingRecoveryRequired,
+    MappedCredentialProvider,
+)
 from custody.signing import (
     ARRIVAL_DOMAIN,
     FACT_DOMAIN,
@@ -26,6 +33,11 @@ __all__ = [
     "ARRIVAL_DOMAIN",
     "FACT_DOMAIN",
     "TICK_DOMAIN",
+    "BindingConflict",
+    "BindingCreationResult",
+    "BindingMutationIncomplete",
+    "BindingRecoveryRequired",
+    "MappedCredentialProvider",
     "arrival_signer_for",
     "arrival_verifier_for",
     "declared_observer_keys",

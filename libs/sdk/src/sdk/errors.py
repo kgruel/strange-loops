@@ -31,6 +31,7 @@ from engine.arrival_initialization import (
 from engine.arrival_maintenance import ProjectionSyncError
 from engine.arrival_restore import RestoreForwardIncomplete, RestoreForwardUnknown
 from engine.arrival_search import SearchIndexSyncError
+from engine.credentials import CredentialBindingRefused
 from engine.runtime_write import (
     BatchPostCommitProjectionFailed,
     BatchWriteCommitUnknown,
@@ -166,6 +167,44 @@ def _identity_details(exc: BaseException) -> dict[str, Any]:
         if commit_details:
             details["commit"] = commit_details
     return details
+
+
+def _credential_binding_details(exc: BaseException) -> dict[str, Any] | None:
+    """Extract public mapped-binding evidence from an explicit causal chain."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    for _ in range(3):
+        if current is None or id(current) in seen:
+            return None
+        seen.add(id(current))
+        if isinstance(current, CredentialBindingRefused):
+            result: dict[str, Any] = {"reason": current.reason}
+            request = current.request
+            if request is not None:
+                result["request"] = {
+                    "namespace": request.namespace,
+                    "observer": request.observer,
+                    "domain": request.domain.value,
+                    "purpose": request.purpose.value,
+                }
+            if current.captured_head is not None:
+                head = _head_dict(current.captured_head)
+                if head is not None:
+                    result["captured_head"] = head
+            if current.use_position is not None:
+                result["use_position"] = current.use_position
+            binding = current.evidence
+            if binding is not None:
+                # A malformed provider response can be the reason for refusal.
+                # Do not serialize arbitrary objects retained as that evidence.
+                result["binding"] = {
+                    name: value if isinstance(value, str) else None
+                    for name in ("key_ref", "algorithm", "public_key", "provenance")
+                    for value in (getattr(binding, name, None),)
+                }
+            return result
+        current = _causal_exception(current)
+    return None
 
 
 def _causal_exception(exc: BaseException) -> BaseException | None:
@@ -415,6 +454,9 @@ def normalize_exception(
         if coordinate is not None or value is None:
             details[name] = coordinate
     details["source_type"] = type(exc).__name__
+    credential = _credential_binding_details(exc)
+    if credential is not None:
+        details["credential_binding"] = credential
     evidence = _evidence_details(exc, details)
     if evidence is not None:
         details["evidence"] = evidence
@@ -470,6 +512,8 @@ def normalize_exception(
             kind=getattr(exc, "kind", None),
             vertex=getattr(exc, "vertex", None),
         )
+    if isinstance(exc, CredentialBindingRefused):
+        return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
     if isinstance(
         exc,
         (

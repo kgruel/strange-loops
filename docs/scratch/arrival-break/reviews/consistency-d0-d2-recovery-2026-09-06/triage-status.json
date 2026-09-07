@@ -1,0 +1,10 @@
+{
+  "status": "complete",
+  "raw_verdict": "REVISE",
+  "primary_disposition": "REVISE",
+  "blockers": 0,
+  "followup_review_required": false,
+  "historical_blockers": 1,
+  "remediation": "resolved",
+  "closure": "../consistency-d0-d2-final-2026-09-06/primary-triage.md"
+}

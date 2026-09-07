@@ -1,0 +1,2561 @@
+........................................................................ [ 12%]
+........................................................................ [ 25%]
+........................................................................ [ 37%]
+........................................................................ [ 50%]
+........................................................FFFFF..FFF..FFF. [ 62%]
+.....FFFFFFFF.FFFFFFFFFFFFFF............................EE.E.EEEE.FF.... [ 75%]
+..F.....F.F............................................................. [ 87%]
+.....................FF...............................................   [100%]
+==================================== ERRORS ====================================
+___ ERROR at setup of test_read_summary_discover_aggregate_pins_every_field ____
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_discover_agg0')
+
+    @pytest.fixture
+    def rich_store(tmp_path: Path) -> tuple[Path, Path, Path]:
+        """One populated child vertex, reachable through all three read_summary
+        branches: as a discover-aggregate parent, as the vertex itself, and as a
+        bare sqlite store.
+    
+        Deliberately asymmetric so that no field can be confused with another:
+        fact_total 3 != tick_total 2, signed 2 != unsigned 1, two kinds with
+        counts 2 and 1, one `_decl.genesis` behind include_internal, and a real
+        latest_ts. Every default in the `.get(key, default)` chains differs from
+        the true value.
+    
+        Returns (parent, child, bare_db).
+        """
+        children = tmp_path / "children"
+        children.mkdir()
+        child = children / "child.vertex"
+        child.write_text(
+            'name "child"\n'
+            'store "child.db"\n'
+            "loops {\n"
+            "  task {\n"
+            '    fold { items "collect" 100 }\n'
+            "    boundary every=1\n"
+            "  }\n"
+            '  note { fold { items "collect" 100 } }\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        ensure_signing_key(child, "admin")
+>       add_kind(child, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_discover_agg0/children/child.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_ ERROR at setup of test_read_summary_discover_aggregate_kind_entries_carry_time_bounds _
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_discover_agg1')
+
+    @pytest.fixture
+    def rich_store(tmp_path: Path) -> tuple[Path, Path, Path]:
+        """One populated child vertex, reachable through all three read_summary
+        branches: as a discover-aggregate parent, as the vertex itself, and as a
+        bare sqlite store.
+    
+        Deliberately asymmetric so that no field can be confused with another:
+        fact_total 3 != tick_total 2, signed 2 != unsigned 1, two kinds with
+        counts 2 and 1, one `_decl.genesis` behind include_internal, and a real
+        latest_ts. Every default in the `.get(key, default)` chains differs from
+        the true value.
+    
+        Returns (parent, child, bare_db).
+        """
+        children = tmp_path / "children"
+        children.mkdir()
+        child = children / "child.vertex"
+        child.write_text(
+            'name "child"\n'
+            'store "child.db"\n'
+            "loops {\n"
+            "  task {\n"
+            '    fold { items "collect" 100 }\n'
+            "    boundary every=1\n"
+            "  }\n"
+            '  note { fold { items "collect" 100 } }\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        ensure_signing_key(child, "admin")
+>       add_kind(child, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_discover_agg1/children/child.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_ ERROR at setup of test_read_summary_aggregate_include_internal_is_forwarded __
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_aggregate_in0')
+
+    @pytest.fixture
+    def rich_store(tmp_path: Path) -> tuple[Path, Path, Path]:
+        """One populated child vertex, reachable through all three read_summary
+        branches: as a discover-aggregate parent, as the vertex itself, and as a
+        bare sqlite store.
+    
+        Deliberately asymmetric so that no field can be confused with another:
+        fact_total 3 != tick_total 2, signed 2 != unsigned 1, two kinds with
+        counts 2 and 1, one `_decl.genesis` behind include_internal, and a real
+        latest_ts. Every default in the `.get(key, default)` chains differs from
+        the true value.
+    
+        Returns (parent, child, bare_db).
+        """
+        children = tmp_path / "children"
+        children.mkdir()
+        child = children / "child.vertex"
+        child.write_text(
+            'name "child"\n'
+            'store "child.db"\n'
+            "loops {\n"
+            "  task {\n"
+            '    fold { items "collect" 100 }\n'
+            "    boundary every=1\n"
+            "  }\n"
+            '  note { fold { items "collect" 100 } }\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        ensure_signing_key(child, "admin")
+>       add_kind(child, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_aggregate_in0/children/child.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+___ ERROR at setup of test_read_summary_vertex_branch_pins_totals_and_paths ____
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_vertex_branc0')
+
+    @pytest.fixture
+    def rich_store(tmp_path: Path) -> tuple[Path, Path, Path]:
+        """One populated child vertex, reachable through all three read_summary
+        branches: as a discover-aggregate parent, as the vertex itself, and as a
+        bare sqlite store.
+    
+        Deliberately asymmetric so that no field can be confused with another:
+        fact_total 3 != tick_total 2, signed 2 != unsigned 1, two kinds with
+        counts 2 and 1, one `_decl.genesis` behind include_internal, and a real
+        latest_ts. Every default in the `.get(key, default)` chains differs from
+        the true value.
+    
+        Returns (parent, child, bare_db).
+        """
+        children = tmp_path / "children"
+        children.mkdir()
+        child = children / "child.vertex"
+        child.write_text(
+            'name "child"\n'
+            'store "child.db"\n'
+            "loops {\n"
+            "  task {\n"
+            '    fold { items "collect" 100 }\n'
+            "    boundary every=1\n"
+            "  }\n"
+            '  note { fold { items "collect" 100 } }\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        ensure_signing_key(child, "admin")
+>       add_kind(child, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_vertex_branc0/children/child.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_ ERROR at setup of test_read_summary_bare_sqlite_store_pins_totals_and_counts _
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_bare_sqlite_0')
+
+    @pytest.fixture
+    def rich_store(tmp_path: Path) -> tuple[Path, Path, Path]:
+        """One populated child vertex, reachable through all three read_summary
+        branches: as a discover-aggregate parent, as the vertex itself, and as a
+        bare sqlite store.
+    
+        Deliberately asymmetric so that no field can be confused with another:
+        fact_total 3 != tick_total 2, signed 2 != unsigned 1, two kinds with
+        counts 2 and 1, one `_decl.genesis` behind include_internal, and a real
+        latest_ts. Every default in the `.get(key, default)` chains differs from
+        the true value.
+    
+        Returns (parent, child, bare_db).
+        """
+        children = tmp_path / "children"
+        children.mkdir()
+        child = children / "child.vertex"
+        child.write_text(
+            'name "child"\n'
+            'store "child.db"\n'
+            "loops {\n"
+            "  task {\n"
+            '    fold { items "collect" 100 }\n'
+            "    boundary every=1\n"
+            "  }\n"
+            '  note { fold { items "collect" 100 } }\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        ensure_signing_key(child, "admin")
+>       add_kind(child, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_bare_sqlite_0/children/child.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_ ERROR at setup of test_read_summary_pre_signature_store_reports_zero_not_one _
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_pre_signatur0')
+
+    @pytest.fixture
+    def rich_store(tmp_path: Path) -> tuple[Path, Path, Path]:
+        """One populated child vertex, reachable through all three read_summary
+        branches: as a discover-aggregate parent, as the vertex itself, and as a
+        bare sqlite store.
+    
+        Deliberately asymmetric so that no field can be confused with another:
+        fact_total 3 != tick_total 2, signed 2 != unsigned 1, two kinds with
+        counts 2 and 1, one `_decl.genesis` behind include_internal, and a real
+        latest_ts. Every default in the `.get(key, default)` chains differs from
+        the true value.
+    
+        Returns (parent, child, bare_db).
+        """
+        children = tmp_path / "children"
+        children.mkdir()
+        child = children / "child.vertex"
+        child.write_text(
+            'name "child"\n'
+            'store "child.db"\n'
+            "loops {\n"
+            "  task {\n"
+            '    fold { items "collect" 100 }\n'
+            "    boundary every=1\n"
+            "  }\n"
+            '  note { fold { items "collect" 100 } }\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        ensure_signing_key(child, "admin")
+>       add_kind(child, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_pre_signatur0/children/child.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_ ERROR at setup of test_read_summary_bare_store_include_internal_is_forwarded _
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_bare_store_i0')
+
+    @pytest.fixture
+    def rich_store(tmp_path: Path) -> tuple[Path, Path, Path]:
+        """One populated child vertex, reachable through all three read_summary
+        branches: as a discover-aggregate parent, as the vertex itself, and as a
+        bare sqlite store.
+    
+        Deliberately asymmetric so that no field can be confused with another:
+        fact_total 3 != tick_total 2, signed 2 != unsigned 1, two kinds with
+        counts 2 and 1, one `_decl.genesis` behind include_internal, and a real
+        latest_ts. Every default in the `.get(key, default)` chains differs from
+        the true value.
+    
+        Returns (parent, child, bare_db).
+        """
+        children = tmp_path / "children"
+        children.mkdir()
+        child = children / "child.vertex"
+        child.write_text(
+            'name "child"\n'
+            'store "child.db"\n'
+            "loops {\n"
+            "  task {\n"
+            '    fold { items "collect" 100 }\n'
+            "    boundary every=1\n"
+            "  }\n"
+            '  note { fold { items "collect" 100 } }\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        ensure_signing_key(child, "admin")
+>       add_kind(child, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_bare_store_i0/children/child.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+=================================== FAILURES ===================================
+________________________ test_add_kind_default_and_emit ________________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_default_and_emit0/test.vertex')
+
+    def test_add_kind_default_and_emit(sample_vertex: Path) -> None:
+        """add_kind adds default definition, writes file, and permits emission."""
+        ensure_signing_key(sample_vertex, "admin")
+    
+>       result = add_kind(
+            sample_vertex,
+            "todo",
+            observer="admin",
+        )
+
+libs/sdk/tests/test_kind.py:28: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_default_and_emit0/test.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_______________________ test_add_kind_custom_definition ________________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_custom_definitio0/test.vertex')
+
+    def test_add_kind_custom_definition(sample_vertex: Path) -> None:
+        """add_kind with explicit LoopDef applies custom fold operations."""
+        ensure_signing_key(sample_vertex, "admin")
+    
+        custom_def = LoopDef(
+            folds=(
+                FoldDecl("items", FoldCollect(25)),
+                FoldDecl("count", FoldCount()),
+            )
+        )
+    
+>       result = add_kind(
+            sample_vertex,
+            "metric",
+            definition=custom_def,
+            observer="admin",
+        )
+
+libs/sdk/tests/test_kind.py:66: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_custom_definitio0/test.vertex')
+kind_name = 'metric'
+definition = LoopDef(folds=(FoldDecl(target='items', op=FoldCollect(max_items=25)), FoldDecl(target='count', op=FoldCount())), boundary=None, search=(), parse=(), preview_fields=(), edges=(), lifecycle=None)
+observer = 'admin', credentials = None, registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+________________________________ test_edit_kind ________________________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind0/test.vertex')
+
+    def test_edit_kind(sample_vertex: Path) -> None:
+        """edit_kind modifies an existing kind definition."""
+        ensure_signing_key(sample_vertex, "admin")
+    
+        new_def = LoopDef(folds=(FoldDecl("items", FoldCollect(10)),))
+    
+>       result = edit_kind(
+            sample_vertex,
+            "note",
+            definition=new_def,
+            observer="admin",
+        )
+
+libs/sdk/tests/test_kind.py:84: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind0/test.vertex')
+kind_name = 'note'
+definition = LoopDef(folds=(FoldDecl(target='items', op=FoldCollect(max_items=10)),), boundary=None, search=(), parse=(), preview_fields=(), edges=(), lifecycle=None)
+observer = 'admin', credentials = None, registry = None
+
+    def edit_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Edit an existing loop-kind definition in a vertex and orchestrate declaration persistence."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:364: TypeError
+_______________________________ test_remove_kind _______________________________
+
+multi_kind_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind0/multi_kind.vertex')
+
+    def test_remove_kind(multi_kind_vertex: Path) -> None:
+        """remove_kind removes a declared kind from the vertex."""
+        ensure_signing_key(multi_kind_vertex, "admin")
+    
+>       result = remove_kind(
+            multi_kind_vertex,
+            "note",
+            observer="admin",
+        )
+
+libs/sdk/tests/test_kind.py:100: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind0/multi_kind.vertex')
+kind_name = 'note', observer = 'admin', credentials = None, registry = None
+
+    def remove_kind(
+        target: Path | str,
+        kind_name: str,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Remove a loop-kind definition from a vertex and orchestrate declaration persistence."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:424: TypeError
+___________________ test_kind_operations_target_unsupported ____________________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_kind_operations_target_un0')
+
+    def test_kind_operations_target_unsupported(tmp_path: Path) -> None:
+        """Kind mutation operations raise TargetUnsupported on non-vertex targets."""
+        log_path = tmp_path / "standalone.jsonl"
+        log_path.write_text('{"kind": "note"}\n', encoding="utf-8")
+    
+        with pytest.raises(TargetUnsupported):
+>           add_kind(log_path, "test", observer="admin")
+
+libs/sdk/tests/test_kind.py:118: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_kind_operations_target_un0/standalone.jsonl')
+kind_name = 'test', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+________________ test_add_kind_duplicate_raises_ceremony_failed ________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_duplicate_raises0/test.vertex')
+
+    def test_add_kind_duplicate_raises_ceremony_failed(sample_vertex: Path) -> None:
+        """add_kind for an already existing kind raises CeremonyFailed."""
+        ensure_signing_key(sample_vertex, "admin")
+    
+        with pytest.raises(CeremonyFailed) as exc_info:
+>           add_kind(sample_vertex, "note", observer="admin")
+
+libs/sdk/tests/test_kind.py:158: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_duplicate_raises0/test.vertex')
+kind_name = 'note', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+______________ test_edit_kind_nonexistent_raises_ceremony_failed _______________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_nonexistent_rai0/test.vertex')
+
+    def test_edit_kind_nonexistent_raises_ceremony_failed(sample_vertex: Path) -> None:
+        """edit_kind for a non-existent kind raises CeremonyFailed."""
+        ensure_signing_key(sample_vertex, "admin")
+    
+        with pytest.raises(CeremonyFailed) as exc_info:
+>           edit_kind(sample_vertex, "ghost_kind", LoopDef(folds=()), observer="admin")
+
+libs/sdk/tests/test_kind.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_nonexistent_rai0/test.vertex')
+kind_name = 'ghost_kind'
+definition = LoopDef(folds=(), boundary=None, search=(), parse=(), preview_fields=(), edges=(), lifecycle=None)
+observer = 'admin', credentials = None, registry = None
+
+    def edit_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Edit an existing loop-kind definition in a vertex and orchestrate declaration persistence."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:364: TypeError
+_____________ test_remove_kind_nonexistent_raises_ceremony_failed ______________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind_nonexistent_r0/test.vertex')
+
+    def test_remove_kind_nonexistent_raises_ceremony_failed(sample_vertex: Path) -> None:
+        """remove_kind for a non-existent kind raises CeremonyFailed."""
+        ensure_signing_key(sample_vertex, "admin")
+    
+        with pytest.raises(CeremonyFailed) as exc_info:
+>           remove_kind(sample_vertex, "ghost_kind", observer="admin")
+
+libs/sdk/tests/test_kind.py:180: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind_nonexistent_r0/test.vertex')
+kind_name = 'ghost_kind', observer = 'admin', credentials = None
+registry = None
+
+    def remove_kind(
+        target: Path | str,
+        kind_name: str,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Remove a loop-kind definition from a vertex and orchestrate declaration persistence."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:424: TypeError
+________________________ test_grant_and_revoke_observer ________________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_and_revoke_observer0/test.vertex')
+
+    def test_grant_and_revoke_observer(sample_vertex: Path) -> None:
+        """grant_observer and revoke_observer manage the declared admission block."""
+        from sdk import grant_observer, inspect_declaration, revoke_observer
+    
+        ensure_signing_key(sample_vertex, "admin")
+    
+        # Grant 'alice' with task and note capabilities
+>       res = grant_observer(
+            sample_vertex,
+            "alice",
+            grants=["task", "note"],
+            observer="admin",
+        )
+
+libs/sdk/tests/test_kind.py:222: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_and_revoke_observer0/test.vertex')
+observer_name = 'alice', grants = ['task', 'note'], identity = None, key = None
+observer = 'admin', credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+___________ test_revoke_nonexistent_observer_raises_ceremony_failed ____________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_revoke_nonexistent_observ0/test.vertex')
+
+    def test_revoke_nonexistent_observer_raises_ceremony_failed(sample_vertex: Path) -> None:
+        """revoke_observer for a non-existent observer raises CeremonyFailed."""
+        from sdk import CeremonyFailed, revoke_observer
+    
+        ensure_signing_key(sample_vertex, "admin")
+    
+        with pytest.raises(CeremonyFailed) as exc_info:
+>           revoke_observer(sample_vertex, "ghost_observer", observer="admin")
+
+libs/sdk/tests/test_kind.py:275: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_revoke_nonexistent_observ0/test.vertex')
+observer_name = 'ghost_observer', observer = 'admin', credentials = None
+registry = None
+
+    def revoke_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Remove an observer from the vertex's declared admission block via ceremony."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:595: TypeError
+__________________ test_target_unsupported_messages_are_exact __________________
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_target_unsupported_messag0')
+
+    def test_target_unsupported_messages_are_exact(tmp_path: Path) -> None:
+        """Each op's TargetUnsupported message names the op and the wrong target type."""
+        log_path = tmp_path / "standalone.jsonl"
+        log_path.write_text('{"kind": "note"}\n', encoding="utf-8")
+    
+        with pytest.raises(
+            TargetUnsupported, match=r"^add_kind requires a \.vertex target, got jsonl_log$"
+        ):
+>           add_kind(log_path, "test", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_target_unsupported_messag0/standalone.jsonl')
+kind_name = 'test', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+___________________ test_add_kind_result_fields_and_changes ____________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_result_fields_an0/test.vertex')
+
+    def test_add_kind_result_fields_and_changes(sample_vertex: Path) -> None:
+        """add_kind's KindMutationResult carries every field wired to the right source,
+        and `changes` is a non-empty list of change descriptions naming the added kind."""
+        ensure_signing_key(sample_vertex, "admin")
+>       add_kind(sample_vertex, "priming", observer="admin")  # leave genesis mode first
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+libs/sdk/tests/test_kind_mutants.py:144: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_result_fields_an0/test.vertex')
+kind_name = 'priming', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_________________________ test_edit_kind_result_fields _________________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_result_fields0/test.vertex')
+
+    def test_edit_kind_result_fields(sample_vertex: Path) -> None:
+        """edit_kind's result generation/changes reflect the edit against gen 1."""
+        ensure_signing_key(sample_vertex, "admin")
+>       add_kind(sample_vertex, "priming", observer="admin")  # leave genesis mode first
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+libs/sdk/tests/test_kind_mutants.py:170: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_result_fields0/test.vertex')
+kind_name = 'priming', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+________________________ test_remove_kind_result_fields ________________________
+
+multi_kind_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind_result_fields0/multi_kind.vertex')
+
+    def test_remove_kind_result_fields(multi_kind_vertex: Path) -> None:
+        """remove_kind's result generation/changes reflect the removal against gen 1."""
+        ensure_signing_key(multi_kind_vertex, "admin")
+>       add_kind(multi_kind_vertex, "priming", observer="admin")  # leave genesis mode first
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+libs/sdk/tests/test_kind_mutants.py:189: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind_result_fields0/multi_kind.vertex')
+kind_name = 'priming', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+______________________ test_grant_observer_result_fields _______________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_result_fie0/test.vertex')
+
+    def test_grant_observer_result_fields(sample_vertex: Path) -> None:
+        """grant_observer's result generation/changes reflect the grant against gen 1."""
+        ensure_signing_key(sample_vertex, "admin")
+>       add_kind(sample_vertex, "priming", observer="admin")  # leave genesis mode first
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+libs/sdk/tests/test_kind_mutants.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_result_fie0/test.vertex')
+kind_name = 'priming', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+______________________ test_revoke_observer_result_fields ______________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_revoke_observer_result_fi0/test.vertex')
+
+    def test_revoke_observer_result_fields(sample_vertex: Path) -> None:
+        """revoke_observer's result generation/changes reflect the revoke."""
+        ensure_signing_key(sample_vertex, "admin")
+>       grant_observer(sample_vertex, "bob", grants=["note"], observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:225: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_revoke_observer_result_fi0/test.vertex')
+observer_name = 'bob', grants = ['note'], identity = None, key = None
+observer = 'admin', credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+____________________ test_plan_kind_mutation_result_fields _____________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_plan_kind_mutation_result0/test.vertex')
+
+    def test_plan_kind_mutation_result_fields(sample_vertex: Path) -> None:
+        """plan_kind_mutation's applicable-plan result carries preview fields and changes."""
+        ensure_signing_key(sample_vertex, "admin")
+>       add_kind(sample_vertex, "priming", observer="admin")  # leave genesis mode first
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+libs/sdk/tests/test_kind_mutants.py:243: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_plan_kind_mutation_result0/test.vertex')
+kind_name = 'priming', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_________________ test_edit_kind_identical_definition_is_noop __________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_identical_defin0/test.vertex')
+
+    def test_edit_kind_identical_definition_is_noop(sample_vertex: Path) -> None:
+        """Editing a kind with the exact definition it already has produces status='noop'
+        (engine.ceremony's mode=='edit' and not preview.changes path)."""
+        ensure_signing_key(sample_vertex, "admin")
+>       add_kind(sample_vertex, "priming", observer="admin")  # leave genesis mode first
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+libs/sdk/tests/test_kind_mutants.py:261: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_identical_defin0/test.vertex')
+kind_name = 'priming', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_________________ test_grant_observer_identical_grant_is_noop __________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_identical_0/test.vertex')
+
+    def test_grant_observer_identical_grant_is_noop(sample_vertex: Path) -> None:
+        """Re-granting an observer with identical identity/key/grants produces status='noop'."""
+        ensure_signing_key(sample_vertex, "admin")
+        explicit_key = "Z" * 43 + "="
+    
+>       grant_observer(sample_vertex, "gina", key=explicit_key, grants=["note"], observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:274: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_identical_0/test.vertex')
+observer_name = 'gina', grants = ['note'], identity = None
+key = 'ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ=', observer = 'admin'
+credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+______________ test_grant_observer_explicit_key_is_used_verbatim _______________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_explicit_k0/test.vertex')
+
+    def test_grant_observer_explicit_key_is_used_verbatim(sample_vertex: Path) -> None:
+        """An explicitly supplied key bypasses custody minting and lands in the file as-is."""
+        ensure_signing_key(sample_vertex, "admin")
+        explicit_key = "Q" * 43 + "="  # syntactically key-shaped, not required to be valid crypto
+    
+>       grant_observer(sample_vertex, "carol", key=explicit_key, observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:308: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_explicit_k0/test.vertex')
+observer_name = 'carol', grants = None, identity = None
+key = 'QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ=', observer = 'admin'
+credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+___________ test_grant_observer_auto_minted_keys_differ_per_observer ___________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_auto_minte0/test.vertex')
+
+    def test_grant_observer_auto_minted_keys_differ_per_observer(sample_vertex: Path) -> None:
+        """Two observers granted without an explicit key each get their OWN minted key
+        (ensure_signing_key must be called with this observer's name, not None/shared)."""
+        ensure_signing_key(sample_vertex, "admin")
+    
+>       grant_observer(sample_vertex, "alice", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:319: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_auto_minte0/test.vertex')
+observer_name = 'alice', grants = None, identity = None, key = None
+observer = 'admin', credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+________________ test_revoke_nonexistent_observer_message_exact ________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_revoke_nonexistent_observ1/test.vertex')
+
+    def test_revoke_nonexistent_observer_message_exact(sample_vertex: Path) -> None:
+        ensure_signing_key(sample_vertex, "admin")
+        with pytest.raises(
+            CeremonyFailed,
+            match=r"^could not remove observer 'ghost_observer': ",
+        ):
+>           revoke_observer(sample_vertex, "ghost_observer", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:339: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_revoke_nonexistent_observ1/test.vertex')
+observer_name = 'ghost_observer', observer = 'admin', credentials = None
+registry = None
+
+    def revoke_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Remove an observer from the vertex's declared admission block via ceremony."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:595: TypeError
+_________________ test_grant_observer_empty_name_message_exact _________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_empty_name0/test.vertex')
+
+    def test_grant_observer_empty_name_message_exact(sample_vertex: Path) -> None:
+        """An empty observer_name makes upsert_vertex_observer raise; grant_observer
+        wraps it with the 'could not splice observer grant' prefix and the real detail."""
+        ensure_signing_key(sample_vertex, "admin")
+        with pytest.raises(CeremonyFailed, match=r"^could not splice observer grant: "):
+>           grant_observer(sample_vertex, "", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:347: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_empty_name0/test.vertex')
+observer_name = '', grants = None, identity = None, key = None
+observer = 'admin', credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+____________________ test_add_kind_duplicate_message_exact _____________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_duplicate_messag0/test.vertex')
+
+    def test_add_kind_duplicate_message_exact(sample_vertex: Path) -> None:
+        ensure_signing_key(sample_vertex, "admin")
+        with pytest.raises(CeremonyFailed, match=r"^could not generate kind mutation: "):
+>           add_kind(sample_vertex, "note", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:358: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_duplicate_messag0/test.vertex')
+kind_name = 'note', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+___________________ test_edit_kind_nonexistent_message_exact ___________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_nonexistent_mes0/test.vertex')
+
+    def test_edit_kind_nonexistent_message_exact(sample_vertex: Path) -> None:
+        ensure_signing_key(sample_vertex, "admin")
+        with pytest.raises(CeremonyFailed, match=r"^could not generate kind mutation: "):
+>           edit_kind(sample_vertex, "ghost_kind", LoopDef(folds=()), observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:364: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_nonexistent_mes0/test.vertex')
+kind_name = 'ghost_kind'
+definition = LoopDef(folds=(), boundary=None, search=(), parse=(), preview_fields=(), edges=(), lifecycle=None)
+observer = 'admin', credentials = None, registry = None
+
+    def edit_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Edit an existing loop-kind definition in a vertex and orchestrate declaration persistence."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:364: TypeError
+__________________ test_remove_kind_nonexistent_message_exact __________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind_nonexistent_m0/test.vertex')
+
+    def test_remove_kind_nonexistent_message_exact(sample_vertex: Path) -> None:
+        ensure_signing_key(sample_vertex, "admin")
+        with pytest.raises(CeremonyFailed, match=r"^could not generate kind mutation: "):
+>           remove_kind(sample_vertex, "ghost_kind", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:370: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind_nonexistent_m0/test.vertex')
+kind_name = 'ghost_kind', observer = 'admin', credentials = None
+registry = None
+
+    def remove_kind(
+        target: Path | str,
+        kind_name: str,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Remove a loop-kind definition from a vertex and orchestrate declaration persistence."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:424: TypeError
+_______________ test_grant_observer_identity_and_grants_threaded _______________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_identity_a0/test.vertex')
+
+    def test_grant_observer_identity_and_grants_threaded(sample_vertex: Path) -> None:
+        """identity= and grants= reach the written declaration verbatim."""
+        ensure_signing_key(sample_vertex, "admin")
+    
+>       grant_observer(
+            sample_vertex,
+            "erin",
+            identity="erin-identity",
+            grants=["note", "todo"],
+            observer="admin",
+        )
+
+libs/sdk/tests/test_kind_mutants.py:382: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_identity_a0/test.vertex')
+observer_name = 'erin', grants = ['note', 'todo'], identity = 'erin-identity'
+key = None, observer = 'admin', credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+____________ test_grant_observer_no_grants_produces_empty_grant_set ____________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_no_grants_0/test.vertex')
+
+    def test_grant_observer_no_grants_produces_empty_grant_set(sample_vertex: Path) -> None:
+        """Omitting grants= (None) must not silently pass through a bogus/None grants value."""
+        ensure_signing_key(sample_vertex, "admin")
+    
+>       result = grant_observer(sample_vertex, "frank", observer="admin")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+libs/sdk/tests/test_kind_mutants.py:403: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_no_grants_0/test.vertex')
+observer_name = 'frank', grants = None, identity = None, key = None
+observer = 'admin', credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+__________________ test_add_kind_not_applicable_message_exact __________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_not_applicable_m0/test.vertex')
+
+    def test_add_kind_not_applicable_message_exact(sample_vertex: Path) -> None:
+        ensure_signing_key(sample_vertex, "admin")
+        _plant_pending_intent(sample_vertex)
+    
+        with pytest.raises(CeremonyFailed, match=r"^declaration update not applicable: "):
+>           add_kind(sample_vertex, "todo", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:427: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_not_applicable_m0/test.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_________________ test_edit_kind_not_applicable_message_exact __________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_not_applicable_0/test.vertex')
+
+    def test_edit_kind_not_applicable_message_exact(sample_vertex: Path) -> None:
+        ensure_signing_key(sample_vertex, "admin")
+        _plant_pending_intent(sample_vertex)
+        new_def = LoopDef(folds=(FoldDecl("items", FoldCollect(5)),))
+    
+        with pytest.raises(CeremonyFailed, match=r"^declaration update not applicable: "):
+>           edit_kind(sample_vertex, "note", new_def, observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:436: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_edit_kind_not_applicable_0/test.vertex')
+kind_name = 'note'
+definition = LoopDef(folds=(FoldDecl(target='items', op=FoldCollect(max_items=5)),), boundary=None, search=(), parse=(), preview_fields=(), edges=(), lifecycle=None)
+observer = 'admin', credentials = None, registry = None
+
+    def edit_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Edit an existing loop-kind definition in a vertex and orchestrate declaration persistence."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:364: TypeError
+________________ test_remove_kind_not_applicable_message_exact _________________
+
+multi_kind_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind_not_applicabl0/multi_kind.vertex')
+
+    def test_remove_kind_not_applicable_message_exact(multi_kind_vertex: Path) -> None:
+        ensure_signing_key(multi_kind_vertex, "admin")
+        _plant_pending_intent(multi_kind_vertex)
+    
+        with pytest.raises(CeremonyFailed, match=r"^declaration update not applicable: "):
+>           remove_kind(multi_kind_vertex, "note", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:444: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_remove_kind_not_applicabl0/multi_kind.vertex')
+kind_name = 'note', observer = 'admin', credentials = None, registry = None
+
+    def remove_kind(
+        target: Path | str,
+        kind_name: str,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Remove a loop-kind definition from a vertex and orchestrate declaration persistence."""
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:424: TypeError
+_______________ test_grant_observer_not_applicable_message_exact _______________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_not_applic0/test.vertex')
+
+    def test_grant_observer_not_applicable_message_exact(sample_vertex: Path) -> None:
+        ensure_signing_key(sample_vertex, "admin")
+        _plant_pending_intent(sample_vertex)
+    
+        with pytest.raises(CeremonyFailed, match=r"^declaration update not applicable: "):
+>           grant_observer(sample_vertex, "alice", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:452: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_grant_observer_not_applic0/test.vertex')
+observer_name = 'alice', grants = None, identity = None, key = None
+observer = 'admin', credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+______________ test_revoke_observer_not_applicable_message_exact _______________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_revoke_observer_not_appli0/test.vertex')
+
+    def test_revoke_observer_not_applicable_message_exact(sample_vertex: Path) -> None:
+        ensure_signing_key(sample_vertex, "admin")
+>       grant_observer(sample_vertex, "alice", observer="admin")
+
+libs/sdk/tests/test_kind_mutants.py:457: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_revoke_observer_not_appli0/test.vertex')
+observer_name = 'alice', grants = None, identity = None, key = None
+observer = 'admin', credentials = None, registry = None
+
+    def grant_observer(
+        target: Path | str,
+        observer_name: str,
+        *,
+        grants: Sequence[str] | None = None,
+        identity: str | None = None,
+        key: str | None = None,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add or update an observer in the vertex's admission block via ceremony.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            observer_name: Name of the observer to declare/grant.
+            grants: List of kind names this observer is allowed to emit.
+            identity: Optional backing vertex identity store name.
+            key: Optional base64 public key (if omitted, ensured via custody).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the applied ceremony outcome.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:502: TypeError
+_______ test_read_summary_include_internal_default_excludes_decl_genesis _______
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_include_inte0/test.vertex')
+
+    def test_read_summary_include_internal_default_excludes_decl_genesis(sample_vertex: Path) -> None:
+        """include_internal defaults to False: the `_decl.genesis` row that the
+        add_kind ceremony absorbs into the store must not show up in totals or
+        kinds unless the caller explicitly opts in.
+        """
+        ensure_signing_key(sample_vertex, "admin")
+>       add_kind(sample_vertex, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:442: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_include_inte0/test.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+___ test_read_summary_unfolded_kinds_excludes_decl_prefix_even_with_internal ___
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_unfolded_kin1/test.vertex')
+
+    def test_read_summary_unfolded_kinds_excludes_decl_prefix_even_with_internal(
+        sample_vertex: Path,
+    ) -> None:
+        """`_decl.*` kinds never land in unfolded_kinds, even when surfaced via
+        include_internal=True (they are reserved, not undeclared-admitted).
+        """
+        ensure_signing_key(sample_vertex, "admin")
+>       add_kind(sample_vertex, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:462: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_summary_unfolded_kin1/test.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+__________ test_read_facts_include_internal_default_excludes_genesis ___________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_facts_include_intern0/test.vertex')
+
+    def test_read_facts_include_internal_default_excludes_genesis(sample_vertex: Path) -> None:
+        """read_facts, like read_summary, hides `_decl.genesis` by default and
+        surfaces it only with include_internal=True.
+        """
+        ensure_signing_key(sample_vertex, "admin")
+>       add_kind(sample_vertex, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:585: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_facts_include_intern0/test.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+___ test_read_facts_aggregate_combine_reverses_for_newest_and_caps_at_limit ____
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_facts_aggregate_comb0')
+
+    def test_read_facts_aggregate_combine_reverses_for_newest_and_caps_at_limit(
+        tmp_path: Path,
+    ) -> None:
+        """The aggregate branch fetches ALL matching facts chronologically then
+        manually reverses for order="newest" and caps with `[:limit]` — pin the
+        reversal, the cap, the kind/observer filter passthrough, and the
+        truncated flag it derives from comparing lengths (not a hardcoded value).
+        A fact at ts=0.5 distinguishes the hardcoded since_ts=0.0 lower bound
+        from a since_ts=1.0 mutant, and an internal `_decl.genesis` fact
+        distinguishes include_internal=True from a dropped/None-ed passthrough.
+        """
+        child = tmp_path / "child.vertex"
+        child.write_text(
+            'name "child"\n'
+            'store ".loops/data/child.db"\n'
+            "loops {\n"
+            '  task { fold { items "collect" 100 } }\n'
+            '  note { fold { items "collect" 100 } }\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        ensure_signing_key(child, "admin")
+>       add_kind(child, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:724: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_facts_aggregate_comb0/child.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+____ test_read_facts_bare_store_kind_observer_include_internal_passthrough _____
+
+tmp_path = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_facts_bare_store_kin0')
+
+    def test_read_facts_bare_store_kind_observer_include_internal_passthrough(
+        tmp_path: Path,
+    ) -> None:
+        """The bare-store branch's reader.query_facts call forwards kind,
+        observer, and include_internal — dropping/None-ing any one of them
+        would surface facts that should have been filtered out.
+        """
+        from sdk import sync_target
+    
+        vertex_path = tmp_path / "bare_filter.vertex"
+        vertex_path.write_text(
+            'name "bare_filter"\n'
+            'store ".loops/data/bare_filter.db"\n'
+            "loops {\n"
+            '  task { fold { items "collect" 100 } }\n'
+            '  note { fold { items "collect" 100 } }\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        ensure_signing_key(vertex_path, "admin")
+>       add_kind(vertex_path, "todo", observer="admin")
+
+libs/sdk/tests/test_read_mutants.py:822: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_read_facts_bare_store_kin0/bare_filter.vertex')
+kind_name = 'todo', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+____________________________ test_add_kind_ceremony ____________________________
+
+sample_vertex = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_ceremony0/test.vertex')
+
+    def test_add_kind_ceremony(sample_vertex: Path):
+        from custody import ensure_signing_key
+    
+        ensure_signing_key(sample_vertex, "admin")
+    
+        # Add a new kind 'task'
+>       result = add_kind(
+            sample_vertex,
+            "task",
+            observer="admin",
+        )
+
+libs/sdk/tests/test_smoke.py:108: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = PosixPath('/private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/pytest-of-kaygee/pytest-966/test_add_kind_ceremony0/test.vertex')
+kind_name = 'task', definition = None, observer = 'admin', credentials = None
+registry = None
+
+    def add_kind(
+        target: Path | str,
+        kind_name: str,
+        definition: LoopDef | None = None,
+        *,
+        observer: str,
+        credentials: CredentialProvider | None = None,
+        registry: BackendRegistry | None = None,
+    ) -> KindMutationResult:
+        """Add a new loop-kind definition to a vertex and orchestrate declaration persistence.
+    
+        Parameters:
+            target: Path to the .vertex file.
+            kind_name: The name of the kind to add.
+            definition: LoopDef AST node (defaults to items 'collect' 100).
+            observer: Authorship identity performing the declaration update.
+            credentials: Key provider for signing the ceremony.
+    
+        Returns:
+            KindMutationResult detailing the preview, apply status, and updated generation.
+        """
+        vertex_path = Path(target).resolve()
+        arrival = _arrival_descriptor_for(vertex_path)
+        if arrival is None:
+>           _refuse_legacy_mapped_credentials(credentials)
+E           TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+
+libs/sdk/src/sdk/kind.py:302: TypeError
+_________________________ TestSdkStateMachine.runTest __________________________
+  + Exception Group Traceback (most recent call last):
+  |   File "/Users/kaygee/Code/loops-wt/arrival-finish/.venv/lib/python3.13/site-packages/hypothesis/stateful.py", line 507, in runTest
+  |     run_state_machine_as_test(cls, settings=self.settings)
+  |     ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   File "/Users/kaygee/Code/loops-wt/arrival-finish/.venv/lib/python3.13/site-packages/hypothesis/stateful.py", line 271, in run_state_machine_as_test
+  |     state_machine_test()
+  |     ~~~~~~~~~~~~~~~~~~^^
+  |   File "/Users/kaygee/Code/loops-wt/arrival-finish/.venv/lib/python3.13/site-packages/hypothesis/stateful.py", line 122, in run_state_machine
+  |     @given(st.data())
+  |                ^^^
+  |   File "/Users/kaygee/Code/loops-wt/arrival-finish/.venv/lib/python3.13/site-packages/hypothesis/core.py", line 2295, in wrapped_test
+  |     raise the_error_hypothesis_found
+  | ExceptionGroup: Hypothesis found 5 distinct failures. (5 sub-exceptions)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 164, in call_sdk
+    |     return fn(*args, **kwargs)
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py", line 364, in edit_kind
+    |     _refuse_legacy_mapped_credentials(credentials)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+    | TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 422, in edit_kind_rule
+    |     res = self.call_sdk(
+    |         edit_kind,
+    |     ...<3 lines>...
+    |         observer="admin",
+    |     )
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 170, in call_sdk
+    |     raise AssertionError(
+    |     ...<2 lines>...
+    |     ) from exc
+    | AssertionError: SDK operation edit_kind raised non-SdkError exception of type TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | Failing test case:
+    | state = SdkStateMachine()
+    | state.invariant_all_facts_retrievable_by_id()
+    | state.invariant_dry_run_semantics_and_non_mutation()
+    | state.invariant_fact_count_agreement()
+    | state.invariant_observer_declaration_sync()
+    | state.invariant_pagination_consistency()
+    | state.invariant_removed_kinds_append_only()
+    | state.edit_kind_rule(kind='item', max_items=10)
+    | state.teardown()
+    | Explanation:
+    |     These lines were always and only run by failing test cases:
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:361
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:362
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:363
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:165
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:410
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:411
+    +---------------- 2 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 164, in call_sdk
+    |     return fn(*args, **kwargs)
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py", line 595, in revoke_observer
+    |     _refuse_legacy_mapped_credentials(credentials)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+    | TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 488, in revoke_observer_rule
+    |     self.call_sdk(
+    |     ~~~~~~~~~~~~~^
+    |         revoke_observer,
+    |         ^^^^^^^^^^^^^^^^
+    |     ...<2 lines>...
+    |         observer="admin",
+    |         ^^^^^^^^^^^^^^^^^
+    |     )
+    |     ^
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 170, in call_sdk
+    |     raise AssertionError(
+    |     ...<2 lines>...
+    |     ) from exc
+    | AssertionError: SDK operation revoke_observer raised non-SdkError exception of type TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | Failing test case:
+    | state = SdkStateMachine()
+    | state.invariant_all_facts_retrievable_by_id()
+    | state.invariant_dry_run_semantics_and_non_mutation()
+    | state.invariant_fact_count_agreement()
+    | state.invariant_observer_declaration_sync()
+    | state.invariant_pagination_consistency()
+    | state.invariant_removed_kinds_append_only()
+    | state.revoke_observer_rule(observer_name='alice')
+    | state.teardown()
+    | Explanation:
+    |     These lines were always and only run by failing test cases:
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:592
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:593
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:594
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:165
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:486
+    +---------------- 3 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 164, in call_sdk
+    |     return fn(*args, **kwargs)
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py", line 424, in remove_kind
+    |     _refuse_legacy_mapped_credentials(credentials)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+    | TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 437, in remove_kind_rule
+    |     self.call_sdk(remove_kind, self.vertex_path, kind, observer="admin")
+    |     ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 170, in call_sdk
+    |     raise AssertionError(
+    |     ...<2 lines>...
+    |     ) from exc
+    | AssertionError: SDK operation remove_kind raised non-SdkError exception of type TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | Failing test case:
+    | state = SdkStateMachine()
+    | state.invariant_all_facts_retrievable_by_id()
+    | state.invariant_dry_run_semantics_and_non_mutation()
+    | state.invariant_fact_count_agreement()
+    | state.invariant_observer_declaration_sync()
+    | state.invariant_pagination_consistency()
+    | state.invariant_removed_kinds_append_only()
+    | state.remove_kind_rule(kind='item')
+    | state.teardown()
+    | Explanation:
+    |     These lines were always and only run by failing test cases:
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:421
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:422
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:423
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:165
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:435
+    +---------------- 4 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 164, in call_sdk
+    |     return fn(*args, **kwargs)
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py", line 502, in grant_observer
+    |     _refuse_legacy_mapped_credentials(credentials)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+    | TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 474, in grant_observer_rule
+    |     res = self.call_sdk(
+    |         grant_observer,
+    |     ...<2 lines>...
+    |         observer="admin",
+    |     )
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 170, in call_sdk
+    |     raise AssertionError(
+    |     ...<2 lines>...
+    |     ) from exc
+    | AssertionError: SDK operation grant_observer raised non-SdkError exception of type TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | Failing test case:
+    | state = SdkStateMachine()
+    | state.invariant_all_facts_retrievable_by_id()
+    | state.invariant_dry_run_semantics_and_non_mutation()
+    | state.invariant_fact_count_agreement()
+    | state.invariant_observer_declaration_sync()
+    | state.invariant_pagination_consistency()
+    | state.invariant_removed_kinds_append_only()
+    | state.grant_observer_rule(observer_name='alice')
+    | state.teardown()
+    | Explanation:
+    |     These lines were always and only run by failing test cases:
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:499
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:500
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:501
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:165
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:474
+    +---------------- 5 ----------------
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 164, in call_sdk
+    |     return fn(*args, **kwargs)
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py", line 302, in add_kind
+    |     _refuse_legacy_mapped_credentials(credentials)
+    |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+    | TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | 
+    | The above exception was the direct cause of the following exception:
+    | 
+    | Traceback (most recent call last):
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 394, in add_kind_rule
+    |     self.call_sdk(add_kind, self.vertex_path, kind, observer="admin")
+    |     ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "/Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py", line 170, in call_sdk
+    |     raise AssertionError(
+    |     ...<2 lines>...
+    |     ) from exc
+    | AssertionError: SDK operation add_kind raised non-SdkError exception of type TypeError: _refuse_legacy_mapped_credentials() missing 1 required keyword-only argument: 'vertex'
+    | Failing test case:
+    | state = SdkStateMachine()
+    | state.invariant_all_facts_retrievable_by_id()
+    | state.invariant_dry_run_semantics_and_non_mutation()
+    | state.invariant_fact_count_agreement()
+    | state.invariant_observer_declaration_sync()
+    | state.invariant_pagination_consistency()
+    | state.invariant_removed_kinds_append_only()
+    | state.add_kind_rule(kind='item')
+    | state.teardown()
+    | Explanation:
+    |     These lines were always and only run by failing test cases:
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:299
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:300
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/src/sdk/kind.py:301
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:165
+    |         /Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk/tests/test_stateful_sdk.py:392
+    +------------------------------------
+=========================== short test summary info ============================
+FAILED libs/sdk/tests/test_kind.py::test_add_kind_default_and_emit - TypeErro...
+FAILED libs/sdk/tests/test_kind.py::test_add_kind_custom_definition - TypeErr...
+FAILED libs/sdk/tests/test_kind.py::test_edit_kind - TypeError: _refuse_legac...
+FAILED libs/sdk/tests/test_kind.py::test_remove_kind - TypeError: _refuse_leg...
+FAILED libs/sdk/tests/test_kind.py::test_kind_operations_target_unsupported
+FAILED libs/sdk/tests/test_kind.py::test_add_kind_duplicate_raises_ceremony_failed
+FAILED libs/sdk/tests/test_kind.py::test_edit_kind_nonexistent_raises_ceremony_failed
+FAILED libs/sdk/tests/test_kind.py::test_remove_kind_nonexistent_raises_ceremony_failed
+FAILED libs/sdk/tests/test_kind.py::test_grant_and_revoke_observer - TypeErro...
+FAILED libs/sdk/tests/test_kind.py::test_revoke_nonexistent_observer_raises_ceremony_failed
+FAILED libs/sdk/tests/test_kind_mutants.py::test_target_unsupported_messages_are_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_add_kind_result_fields_and_changes
+FAILED libs/sdk/tests/test_kind_mutants.py::test_edit_kind_result_fields - Ty...
+FAILED libs/sdk/tests/test_kind_mutants.py::test_remove_kind_result_fields - ...
+FAILED libs/sdk/tests/test_kind_mutants.py::test_grant_observer_result_fields
+FAILED libs/sdk/tests/test_kind_mutants.py::test_revoke_observer_result_fields
+FAILED libs/sdk/tests/test_kind_mutants.py::test_plan_kind_mutation_result_fields
+FAILED libs/sdk/tests/test_kind_mutants.py::test_edit_kind_identical_definition_is_noop
+FAILED libs/sdk/tests/test_kind_mutants.py::test_grant_observer_identical_grant_is_noop
+FAILED libs/sdk/tests/test_kind_mutants.py::test_grant_observer_explicit_key_is_used_verbatim
+FAILED libs/sdk/tests/test_kind_mutants.py::test_grant_observer_auto_minted_keys_differ_per_observer
+FAILED libs/sdk/tests/test_kind_mutants.py::test_revoke_nonexistent_observer_message_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_grant_observer_empty_name_message_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_add_kind_duplicate_message_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_edit_kind_nonexistent_message_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_remove_kind_nonexistent_message_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_grant_observer_identity_and_grants_threaded
+FAILED libs/sdk/tests/test_kind_mutants.py::test_grant_observer_no_grants_produces_empty_grant_set
+FAILED libs/sdk/tests/test_kind_mutants.py::test_add_kind_not_applicable_message_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_edit_kind_not_applicable_message_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_remove_kind_not_applicable_message_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_grant_observer_not_applicable_message_exact
+FAILED libs/sdk/tests/test_kind_mutants.py::test_revoke_observer_not_applicable_message_exact
+FAILED libs/sdk/tests/test_read_mutants.py::test_read_summary_include_internal_default_excludes_decl_genesis
+FAILED libs/sdk/tests/test_read_mutants.py::test_read_summary_unfolded_kinds_excludes_decl_prefix_even_with_internal
+FAILED libs/sdk/tests/test_read_mutants.py::test_read_facts_include_internal_default_excludes_genesis
+FAILED libs/sdk/tests/test_read_mutants.py::test_read_facts_aggregate_combine_reverses_for_newest_and_caps_at_limit
+FAILED libs/sdk/tests/test_read_mutants.py::test_read_facts_bare_store_kind_observer_include_internal_passthrough
+FAILED libs/sdk/tests/test_smoke.py::test_add_kind_ceremony - TypeError: _ref...
+FAILED libs/sdk/tests/test_stateful_sdk.py::TestSdkStateMachine::runTest - Ex...
+ERROR libs/sdk/tests/test_read_mutants.py::test_read_summary_discover_aggregate_pins_every_field
+ERROR libs/sdk/tests/test_read_mutants.py::test_read_summary_discover_aggregate_kind_entries_carry_time_bounds
+ERROR libs/sdk/tests/test_read_mutants.py::test_read_summary_aggregate_include_internal_is_forwarded
+ERROR libs/sdk/tests/test_read_mutants.py::test_read_summary_vertex_branch_pins_totals_and_paths
+ERROR libs/sdk/tests/test_read_mutants.py::test_read_summary_bare_sqlite_store_pins_totals_and_counts
+ERROR libs/sdk/tests/test_read_mutants.py::test_read_summary_pre_signature_store_reports_zero_not_one
+ERROR libs/sdk/tests/test_read_mutants.py::test_read_summary_bare_store_include_internal_is_forwarded
+40 failed, 527 passed, 7 errors in 23.61s

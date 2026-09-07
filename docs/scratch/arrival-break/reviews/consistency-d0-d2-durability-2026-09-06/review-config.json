@@ -1,0 +1,11 @@
+{
+  "instruction": "You are Fable 5.1 at LOW effort conducting a focused D0/D2 directory durability review. Return ACCEPT or REVISE with concrete correctness blockers, then optional notes, under 900 words. No tools or claimed test execution. Earlier recovery findings were corrected and accepted, but root subsequently found that mkdir lacked parent-directory fsync, so new directory entries could be lost after power loss despite child file fsync. Inspect current provider source and tests below for durable directory creation ordering, retry after mkdir-before-parent-fsync interruption (including nested root/ancestors), read-only resolution remaining read-only, symlink/refusal behavior, and preservation of prior completed-slot/pending-index fixes. Supported filesystem provides POSIX flock/link/fsync; no cross-platform or external tamper-proof guarantee is claimed. Process interruption tests alone do not simulate power loss; validate the sync logic. Scope narrowly around final directory durability correction; engine/SDK unchanged. Passing tests alone are insufficient. Also inspect the root-confirmed linked-binding-before-directory-fsync failure: retry previously returned completed without syncing bindings-v1. Ensure successful explicit create/recovery reconciles durable publication of all required retained files/directories, including FileExists paths, without moving contradiction checks after repair. No successful recovery should rely solely on prior file visibility.",
+  "sources": [
+    "docs/scratch/arrival-break/consistency-d0-d2-durability-2026-09-06.md",
+    "docs/scratch/arrival-break/reviews/consistency-d0-d2-final-2026-09-06/primary-triage.md",
+    "libs/custody/src/custody/binding.py",
+    "libs/custody/tests/test_binding.py",
+    "libs/custody/tests/test_binding_recovery_contract.py",
+    "libs/custody/README.md"
+  ]
+}

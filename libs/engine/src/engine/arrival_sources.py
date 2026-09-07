@@ -496,6 +496,7 @@ def prepare_source_invocation(
         locator,
         source_mode=True,
         evaluated_at=evaluated_at,
+        credentials=credentials,
     )
     sources = capture.sources
     evidence = tuple(
@@ -959,7 +960,12 @@ async def execute_source_invocation(
     for tier_index, _indices in enumerate(tiers):
         if tier_index:
             try:
-                current_capture = capture_runtime(registry, descriptor, frozen_locator)
+                current_capture = capture_runtime(
+                    registry,
+                    descriptor,
+                    frozen_locator,
+                    credentials=credentials,
+                )
             except Exception as exc:
                 return _result(
                     invocation,

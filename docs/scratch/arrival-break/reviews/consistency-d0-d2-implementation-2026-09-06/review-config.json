@@ -1,0 +1,19 @@
+{
+  "instruction": "You are Fable 5.1 at LOW effort conducting the final adversarial static IMPLEMENTATION review of D0\u2192D2. Return ACCEPT or REVISE, concrete correctness blockers with source and counterexample, followed by optional notes. No tools: do not claim to run tests. Keep output under 1600 words. Your design review returned REVISE; the primary triage and amended design explain adopted corrections. Review actual final code, not old proposal wording. Exact local namespace/observer/domain binding is separate from captured lineage/H authorization. Mapped credentials are opt-in, legacy callbacks keep compatibility, and mapped-to-legacy downgrade refuses. Mapped init loads pre-created bindings; grant(key=None) refuses before effects; explicit create/import/reuse/recovery are separate local mutations. Same-key self-introduction under an older key is legal. Receipt omission preserves unsigned pre-signed-era ticks. Provider mutations serialize with flock, complete-file links, durable pending/token records; no automatic candidate cleanup. Focus on binding-vs-intent consistency on completed/recovery paths, interrupted publication, no replacement of published keys, token conflicts, cross-domain/ref/public/request coherence, source recapture, no-fallback guards, honest error evidence, and preserving old init recovery. All relevant suites pass as reported, including independent red/green recovery probes; tests do not prove untested races. Full production/test patch is supplied plus enclosing coordinator sources. Identify substantive remaining failures, not speculative rewrite requests or deliberate scoped limitations. Engine production unchanged since full engine validation; two engine test formatting changes only. SDK full run includes final guard and serialization fixes.",
+  "patch": true,
+  "sources": [
+    "docs/scratch/arrival-break/consistency-d0-d2-2026-09-06.md",
+    "docs/scratch/arrival-break/consistency-d0-d2-design-2026-09-06.md",
+    "docs/scratch/arrival-break/consistency-d0-d2-validation-2026-09-06.md",
+    "docs/scratch/arrival-break/reviews/consistency-d0-d2-design-2026-09-06/primary-triage.md",
+    "libs/custody/README.md",
+    "libs/engine/src/engine/runtime_write.py",
+    "libs/engine/src/engine/arrival_declarations.py",
+    "libs/engine/src/engine/arrival_initialization.py",
+    "libs/engine/src/engine/arrival_sources.py",
+    "libs/sdk/src/sdk/declare.py",
+    "libs/sdk/src/sdk/emit.py",
+    "libs/sdk/src/sdk/kind.py",
+    "libs/sdk/src/sdk/errors.py"
+  ]
+}

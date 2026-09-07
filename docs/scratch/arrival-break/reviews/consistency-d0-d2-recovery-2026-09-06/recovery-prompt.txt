@@ -1,0 +1,1706 @@
+You are Fable 5.1 at LOW effort reviewing a focused D0/D2 custody RECOVERY correction. Return ACCEPT or REVISE, concrete remaining blockers with source and counterexample, and optional notes. No tools, no claims of test execution; under 1100 words. Your prior broad implementation review returned ACCEPT but ROOT REJECTED it based on two executable failures: published recovery accepted a valid different key contradicting its retained intent, and pending-before-token-index interruption allowed a conflicting token to publish another binding before refusal. Those scripts/results are included. Inspect the CURRENT complete custody implementation and tests below, not your earlier reasoning. Focus on every path that returns a completed binding, absent/contradictory pending-index-completion evidence, create retry and recover symmetry, no new binding/key on token conflicts, and typed partial/unknown evidence during recovery. Missing index/completion can be a legitimate crash; contradictory content cannot be silently selected. Mutation lock already serializes all provider writers. No automatic deletion, no global identity, no engine or SDK behavior redesign. Compare the combined case missing index plus substituted binding, not only each case independently. Distinguish false completion from conservatively reported incomplete recovery. Full custody74 and SDK578 pass as reported; review is independent of those test results.
+
+===== docs/scratch/arrival-break/consistency-d0-d2-recovery-2026-09-06.md =====
+1: # D0/D2 recovery follow-up
+2: 
+3: Status: corrective implementation validated; focused Fable-low review pending.
+4: This follows the [primary rejection of the first implementation review's
+5: ACCEPT](reviews/consistency-d0-d2-implementation-2026-09-06/primary-triage.md).
+6: 
+7: ## Observed failures
+8: 
+9: Root executed the frozen implementation against two independent counterexamples:
+10: 
+11: - Alice and Bob each had valid managed keys. Substituting Bob's ref/public in
+12:   Alice's published slot made create retry refuse, but recovery returned Bob's
+13:   key under Alice's original token. Material validity alone did not establish
+14:   consistency with the retained intent.
+15: - A process interrupted between pending-slot and token-index publication left
+16:   a reserved token without its index. Recovery failed to restore that index.
+17:   A second observer using the same token could publish a binding before its
+18:   completion conflict raised (binding count changed from one to two).
+19: 
+20: The raw Fable ACCEPT remains archived. It was insufficient evidence to complete
+21: this slice; root's primary verdict was REVISE based on executable failures.
+22: 
+23: ## Correction
+24: 
+25: Provider mutations already share one lock. Within it, pending records now
+26: reserve their token even if the token index was not published. Creation retry
+27: and recovery compare exact pending/index ownership and reconstruct a missing
+28: index only from the matching retained intent. A different slot's use of that
+29: token refuses before publishing another binding.
+30: 
+31: Published recovery checks namespace, observer, key reference, provenance,
+32: pinned public material when present, token-index content, and any completion
+33: record against the retained intent. A legitimate missing completion can be
+34: published after validation; contradictory evidence refuses. Completed create
+35: retry also checks retained pending evidence rather than relying only on a
+36: possibly missing token index.
+37: 
+38: Unexpected recovery failures during mutation retain BindingMutationIncomplete
+39: coordinates (namespace, observer, token, key reference, phase). Process-control
+40: BaseExceptions retain identity. No cleanup, migration default, wire change, or
+41: engine/SDK production change is part of this follow-up.
+42: 
+43: ## Validation
+44: 
+45: - Root reran both standalone probes: both create/recover refuse substituted
+46:   intent evidence; the interrupted-index probe recovers Alice and refuses Bob
+47:   with binding count unchanged at one.
+48: - Four root regression cases cover substituted recovery and the token/index
+49:   gap before recovery, after creation retry, and after recovery.
+50: - Terra added three provider cases, including the combined missing-index plus
+51:   substituted-slot state and a failure after recovery publication.
+52: - Terra's isolated full custody suite: **74 passed** (agent tool execution;
+53:   original terminal result, no separate raw log captured).
+54: - Root's full SDK suite against the corrected provider: **578 passed / 22.17s**.
+55: - Prior full engine **2,611 passed, 1 skipped**, sign **40 passed**, and
+56:   architecture **101 passed** remain applicable: their production code did not
+57:   change in this follow-up.
+58: 
+59: Only custody/binding.py and its two test files changed from the first
+60: implementation-review source freeze. Root compared source hashes. The normal
+61: SDK suite and all probes used isolated XDG state/config and LOOPS_HOME.
+62: 
+63: ## Independent native audit
+64: 
+65: Luna independently ran the 24 focused provider/recovery tests and source-audited
+66: the correction. It confirmed both blocking counterexamples are fixed. It also
+67: observed that explicit recovery can restore a missing token index from a valid
+68: retained pending intent before refusing a candidate with public material but
+69: no private key. Root treats that as a permitted partial metadata repair: it
+70: creates no key or binding, overwrites no prior evidence, and makes no completion
+71: claim. Recovery is an explicit mutation operation; read resolution still creates
+72: nothing. This is not a blanket zero-filesystem-effect refusal guarantee, and the
+73: focused reviewer should challenge this distinction if it breaks a stated
+74: contract. The observed refusal remains a candidate error; no private key is
+75: invented to continue.
+
+===== docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/primary-triage.md =====
+1: # D0/D2 implementation review — primary triage
+2: 
+3: Fable-low returned **ACCEPT** on frozen packet
+4: `1edcdb938b9676779eefc3b9b6246ca50e4e7565cd76f619e2ca56a8c7aaaa05`.
+5: Primary disposition is **REVISE**: two independent executable counterexamples
+6: contradict the review's stated recovery/publication conclusions. Passing tests
+7: and the external verdict do not override these observed correctness failures.
+8: 
+9: ## Required corrections
+10: 
+11: 1. **Published binding contradicts retained intent.** Create Alice and Bob with
+12:    distinct valid managed keys. Replace Alice's slot's ref/public with Bob's
+13:    while retaining Alice's namespace/observer. `create_binding` refuses, but
+14:    `recover_binding(alice, original_token)` returns Bob's binding. The published
+15:    shortcut validates material but does not compare it with the pending/token/
+16:    completion evidence. Recovery must compare exact identities/ref/provenance
+17:    and pinned public material before returning. Missing completion is a valid
+18:    crash window, but a conflicting completion is not.
+19: 2. **Pending publication precedes token-index publication.** Interrupt between
+20:    those two links. Recovery succeeds without restoring the token index. A
+21:    second observer using the same token can publish its own binding before a
+22:    completion conflict raises. The original token must remain reserved even
+23:    with only its pending marker present. Under the existing provider lock,
+24:    inspect pending token ownership before any new publication and reconcile
+25:    the exact token index on both create retry and recovery.
+26: 
+27: Root scripts and results are retained in validation evidence. The four new
+28: independent regression cases cover contradictory published recovery and the
+29: pending/index gap before recovery, after create retry, and after recovery.
+30: Terra owns the minimal production correction; root owns independent regressions.
+31: Full custody and a focused Fable-low follow-up review are required.
+32: 
+33: ## External notes
+34: 
+35: The remaining notes are non-blocking and do not authorize unrelated changes.
+36: The current declaration's receipt-key policy is deliberate; corrupt unrelated
+37: bindings may conservatively refuse explicit existing-ref reuse. Initialization
+38: recovery signs nothing and does not assert present signing readiness. Retained
+39: pending records are recovery evidence, not a list of unfinished operations.
+40: The follow-up should verify these scope statements without claiming every
+41: partial state is correct from the prior ACCEPT.
+
+===== docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/validation-evidence/published_intent_probe.py =====
+1: import json
+2: import tempfile
+3: from pathlib import Path
+4: from custody.binding import MappedCredentialProvider
+5: 
+6: with tempfile.TemporaryDirectory(prefix='loops-d2-intent-probe-') as raw:
+7:     root = Path(raw) / 'mapped'
+8:     provider = MappedCredentialProvider(root, namespace='work')
+9:     alice = provider.create_binding('alice', token='alice-token')
+10:     bob = provider.create_binding('bob', token='bob-token')
+11:     for path in (root/'bindings-v1').glob('*.json'):
+12:         value=json.loads(path.read_text())
+13:         if value['observer']=='alice':
+14:             value.update(key_ref=bob.key_ref, public_key=bob.public_key)
+15:             path.write_text(json.dumps(value)+'\n')
+16:     for action in ('create_binding','recover_binding'):
+17:         try:
+18:             result=getattr(provider, action)('alice',token='alice-token')
+19:         except Exception as exc:
+20:             print(action, 'REFUSED',type(exc).__name__)
+21:         else:
+22:             print(action, 'ACCEPTED_CONTRADICTORY_INTENT' if result.key_ref != alice.key_ref else 'original')
+
+===== docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/validation-evidence/published-intent-probe.txt =====
+1: create_binding REFUSED BindingConflict
+2: recover_binding ACCEPTED_CONTRADICTORY_INTENT
+
+===== docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/validation-evidence/pending_index_probe.py =====
+1: import tempfile
+2: from pathlib import Path
+3: import custody.binding as binding
+4: 
+5: class Interrupted(BaseException):
+6:     pass
+7: 
+8: with tempfile.TemporaryDirectory(prefix='loops-d2-index-probe-') as raw:
+9:     root=Path(raw)/'mapped'
+10:     provider=binding.MappedCredentialProvider(root,namespace='work')
+11:     publish=binding._publish_no_clobber
+12:     def interrupt_index(path,*args,**kwargs):
+13:         if path.parent.name=='intents-v1':
+14:             raise Interrupted()
+15:         return publish(path,*args,**kwargs)
+16:     binding._publish_no_clobber=interrupt_index
+17:     try:
+18:         provider.create_binding('alice',token='one-token')
+19:     except Interrupted:
+20:         print('interrupted between pending slot and token index')
+21:     finally:
+22:         binding._publish_no_clobber=publish
+23:     try:
+24:         result=provider.recover_binding('alice',token='one-token')
+25:         print('alice recovery succeeded')
+26:     except Exception as exc:
+27:         print('alice recovery refused',type(exc).__name__)
+28:     before=len(list((root/'bindings-v1').glob('*.json')))
+29:     try:
+30:         result=provider.create_binding('bob',token='one-token')
+31:         print('bob wrongly accepted same token')
+32:     except Exception as exc:
+33:         print('bob refused',type(exc).__name__)
+34:     after=len(list((root/'bindings-v1').glob('*.json')))
+35:     print('binding count before/after conflicting token:',before,after)
+
+===== docs/scratch/arrival-break/reviews/consistency-d0-d2-implementation-2026-09-06/validation-evidence/pending-index-probe.txt =====
+1: interrupted between pending slot and token index
+2: alice recovery succeeded
+3: bob refused BindingMutationIncomplete
+4: binding count before/after conflicting token: 1 2
+
+===== libs/custody/src/custody/binding.py =====
+1: """Explicit, namespace-scoped local signing-key bindings.
+2: 
+3: This module deliberately does not inspect a vertex locator while resolving a
+4: credential.  Locator-derived custody remains in :mod:`custody.signing`; a
+5: mapped binding is an explicit local record keyed by exact namespace and
+6: observer strings.
+7: """
+8: 
+9: from __future__ import annotations
+10: 
+11: import fcntl
+12: import hashlib
+13: import json
+14: import os
+15: import re
+16: import tempfile
+17: import uuid
+18: from collections.abc import Callable, Iterator
+19: from contextlib import contextmanager, nullcontext
+20: from dataclasses import dataclass
+21: from pathlib import Path
+22: from stat import S_ISDIR, S_ISREG
+23: 
+24: from engine.credentials import (
+25:     CredentialBindingEvidence,
+26:     CredentialBindingRefused,
+27:     CredentialRequest,
+28:     ResolvedCredential,
+29:     SigningDomain,
+30:     WriteCredentials,
+31: )
+32: from sign import ed25519
+33: 
+34: from .signing import (
+35:     ARRIVAL_DOMAIN,
+36:     FACT_DOMAIN,
+37:     TICK_DOMAIN,
+38:     _observer_key_dir,
+39:     _self_key_dir,
+40:     _self_observer,
+41:     keys_dir_for,
+42: )
+43: 
+44: __all__ = [
+45:     "BindingConflict",
+46:     "BindingCreationResult",
+47:     "BindingMutationIncomplete",
+48:     "BindingRecoveryRequired",
+49:     "MappedCredentialProvider",
+50: ]
+51: 
+52: _SCHEMA = "loops.custody/binding/v1"
+53: _INTENT_SCHEMA = "loops.custody/binding-intent/v1"
+54: _KEY_REF = re.compile(r"^[0-9a-f]{32}$")
+55: 
+56: 
+57: class BindingConflict(ValueError):
+58:     """An explicit mutation conflicts with an already published binding."""
+59: 
+60: 
+61: class BindingRecoveryRequired(ValueError):
+62:     """A different durable mutation token owns this namespace/observer slot."""
+63: 
+64: 
+65: class BindingMutationIncomplete(ValueError):
+66:     """A durable binding mutation needs reconciliation rather than blind retry."""
+67: 
+68:     def __init__(
+69:         self,
+70:         *,
+71:         namespace: str,
+72:         observer: str,
+73:         token: str,
+74:         key_ref: str,
+75:         phase: str,
+76:     ) -> None:
+77:         super().__init__("mapped binding mutation outcome is incomplete or unknown")
+78:         self.namespace = namespace
+79:         self.observer = observer
+80:         self.token = token
+81:         self.key_ref = key_ref
+82:         self.phase = phase
+83: 
+84: 
+85: @dataclass(frozen=True)
+86: class BindingCreationResult:
+87:     """The durable result of an explicit local binding mutation."""
+88: 
+89:     namespace: str
+90:     observer: str
+91:     key_ref: str
+92:     public_key: str
+93:     provenance: str
+94:     token: str
+95:     binding_created: bool
+96:     key_created: bool
+97: 
+98: 
+99: def _exact(value: str, field: str) -> str:
+100:     if not isinstance(value, str) or not value:
+101:         raise ValueError(f"{field} must be a non-empty string")
+102:     return value
+103: 
+104: 
+105: def _frame(*values: str) -> bytes:
+106:     encoded = [value.encode("utf-8") for value in values]
+107:     return b"".join(len(value).to_bytes(8, "big") + value for value in encoded)
+108: 
+109: 
+110: def _digest(*values: str) -> str:
+111:     return hashlib.sha256(_frame(*values)).hexdigest()
+112: 
+113: 
+114: def _domain_prefix(domain: SigningDomain) -> str:
+115:     prefixes = {
+116:         SigningDomain.FACT: FACT_DOMAIN,
+117:         SigningDomain.ARRIVAL: ARRIVAL_DOMAIN,
+118:         SigningDomain.TICK: TICK_DOMAIN,
+119:     }
+120:     try:
+121:         return prefixes[domain]
+122:     except KeyError as exc:  # defensive for a future neutral enum member
+123:         raise ValueError(f"unsupported signing domain {domain!r}") from exc
+124: 
+125: 
+126: def _lstat_kind(path: Path) -> int | None:
+127:     try:
+128:         return path.lstat().st_mode
+129:     except FileNotFoundError:
+130:         return None
+131: 
+132: 
+133: def _regular(path: Path, *, required: bool = True) -> bool:
+134:     mode = _lstat_kind(path)
+135:     if mode is None:
+136:         if required:
+137:             raise FileNotFoundError(path)
+138:         return False
+139:     if not S_ISREG(mode):
+140:         raise ValueError(f"mapped custody path is not a regular file: {path}")
+141:     return True
+142: 
+143: 
+144: def _directory(path: Path, *, create: bool = False) -> None:
+145:     mode = _lstat_kind(path)
+146:     if mode is None:
+147:         if not create:
+148:             raise FileNotFoundError(path)
+149:         try:
+150:             path.mkdir(parents=True, exist_ok=False)
+151:         except FileExistsError:
+152:             # Another process may have created it between lstat and mkdir.
+153:             # Recheck its real type below; never treat a symlink as convergence.
+154:             pass
+155:         mode = _lstat_kind(path)
+156:     if mode is None or not S_ISDIR(mode):
+157:         raise ValueError(f"mapped custody path is not a directory: {path}")
+158: 
+159: 
+160: def _fsync_directory(path: Path) -> None:
+161:     fd = os.open(path, os.O_RDONLY)
+162:     try:
+163:         os.fsync(fd)
+164:     finally:
+165:         os.close(fd)
+166: 
+167: 
+168: def _publish_no_clobber(path: Path, payload: bytes, *, mode: int = 0o600) -> bool:
+169:     """Atomically publish bytes, returning false if another complete file won."""
+170:     _directory(path.parent, create=True)
+171:     fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+172:     temporary = Path(raw)
+173:     try:
+174:         with os.fdopen(fd, "wb") as stream:
+175:             stream.write(payload)
+176:             stream.flush()
+177:             os.fsync(stream.fileno())
+178:         temporary.chmod(mode)
+179:         try:
+180:             os.link(temporary, path)
+181:         except FileExistsError:
+182:             return False
+183:         _fsync_directory(path.parent)
+184:         return True
+185:     finally:
+186:         temporary.unlink(missing_ok=True)
+187: 
+188: 
+189: def _json_bytes(value: dict[str, object]) -> bytes:
+190:     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+191: 
+192: 
+193: class MappedCredentialProvider:
+194:     """Resolve explicit namespace/observer bindings without locator inference.
+195: 
+196:     ``resolve`` and ``verify`` are read-only.  Binding creation, import, and
+197:     existing-reference publication are separate durable mutations serialized by
+198:     one provider-root advisory lock.
+199:     """
+200: 
+201:     def __init__(
+202:         self,
+203:         root: Path | str,
+204:         *,
+205:         namespace: str,
+206:         receipt_observer: str | None = None,
+207:         _creation_hook: Callable[[str, dict[str, object]], None] | None = None,
+208:     ) -> None:
+209:         self.root = Path(root)
+210:         self.namespace = _exact(namespace, "namespace")
+211:         self.receipt_observer = (
+212:             _exact(receipt_observer, "receipt_observer")
+213:             if receipt_observer is not None
+214:             else None
+215:         )
+216:         # Test-only fault injection. It is intentionally absent from public
+217:         # results and never called by read resolution.
+218:         self._creation_hook = _creation_hook
+219: 
+220:     @property
+221:     def mapped(self) -> bool:
+222:         """Allow SDK compatibility arms to refuse mapped-to-legacy downgrade."""
+223:         return True
+224: 
+225:     def for_write(self, vertex: Path) -> WriteCredentials:
+226:         """Return lazy mapped credentials; ``vertex`` selects no local key."""
+227:         del vertex
+228:         return WriteCredentials(
+229:             binding_namespace=self.namespace,
+230:             receipt_observer=self.receipt_observer,
+231:             binding_resolver=self.resolve,
+232:             signature_verifier=self.verify,
+233:         )
+234: 
+235:     def _slot(self, namespace: str, observer: str) -> str:
+236:         return _digest(namespace, observer)
+237: 
+238:     def _binding_path(self, namespace: str, observer: str) -> Path:
+239:         return self.root / "bindings-v1" / f"{self._slot(namespace, observer)}.json"
+240: 
+241:     def _pending_path(self, namespace: str, observer: str) -> Path:
+242:         return self.root / "pending-v1" / f"{self._slot(namespace, observer)}.json"
+243: 
+244:     def _intent_path(self, token: str) -> Path:
+245:         return self.root / "intents-v1" / f"{_digest(token)}.json"
+246: 
+247:     def _key_dir(self, key_ref: str) -> Path:
+248:         if not _KEY_REF.fullmatch(key_ref):
+249:             raise ValueError("mapped custody key reference is malformed")
+250:         return self.root / "keys-v1" / key_ref
+251: 
+252:     def _root_dir(self, *, create: bool) -> bool:
+253:         """Validate the configured root without making reads persistent."""
+254:         mode = _lstat_kind(self.root)
+255:         if mode is None:
+256:             if not create:
+257:                 return False
+258:             _directory(self.root, create=True)
+259:         elif not S_ISDIR(mode):
+260:             raise ValueError("mapped custody root is not a directory")
+261:         return True
+262: 
+263:     def _subdir(self, name: str, *, create: bool) -> Path | None:
+264:         if not self._root_dir(create=create):
+265:             return None
+266:         path = self.root / name
+267:         mode = _lstat_kind(path)
+268:         if mode is None:
+269:             if not create:
+270:                 return None
+271:             _directory(path, create=True)
+272:         elif not S_ISDIR(mode):
+273:             raise ValueError(f"mapped custody path is not a directory: {path}")
+274:         return path
+275: 
+276:     @contextmanager
+277:     def _mutation_lock(self) -> Iterator[None]:
+278:         self._root_dir(create=True)
+279:         lock_path = self.root / ".bindings-v1.lock"
+280:         flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+281:         fd = os.open(lock_path, flags, 0o600)
+282:         try:
+283:             if not S_ISREG(os.fstat(fd).st_mode):
+284:                 raise ValueError("mapped custody lock is not a regular file")
+285:             fcntl.flock(fd, fcntl.LOCK_EX)
+286:             yield
+287:         finally:
+288:             fcntl.flock(fd, fcntl.LOCK_UN)
+289:             os.close(fd)
+290: 
+291:     def _read_json(self, path: Path) -> dict[str, object] | None:
+292:         if not _regular(path, required=False):
+293:             return None
+294:         try:
+295:             def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+296:                 result: dict[str, object] = {}
+297:                 for key, value in pairs:
+298:                     if key in result:
+299:                         raise ValueError(f"duplicate field {key!r}")
+300:                     result[key] = value
+301:                 return result
+302: 
+303:             loaded = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates)
+304:         except (OSError, json.JSONDecodeError) as exc:
+305:             raise ValueError(f"malformed mapped custody record: {path}") from exc
+306:         if not isinstance(loaded, dict):
+307:             raise TypeError(f"mapped custody record is not an object: {path}")
+308:         return loaded
+309: 
+310:     def _binding_record(self, namespace: str, observer: str) -> dict[str, object] | None:
+311:         parent = self._subdir("bindings-v1", create=False)
+312:         if parent is None:
+313:             return None
+314:         record = self._read_json(parent / f"{self._slot(namespace, observer)}.json")
+315:         if record is None:
+316:             return None
+317:         expected = {
+318:             "schema": _SCHEMA,
+319:             "namespace": namespace,
+320:             "observer": observer,
+321:         }
+322:         if any(record.get(key) != value for key, value in expected.items()):
+323:             raise ValueError("mapped custody binding does not match its slot")
+324:         for key in ("key_ref", "algorithm", "public_key", "provenance"):
+325:             if not isinstance(record.get(key), str) or not record[key]:
+326:                 raise ValueError(f"mapped custody binding lacks {key}")
+327:         if record["algorithm"] != "ed25519":
+328:             raise ValueError("mapped custody binding has unsupported algorithm")
+329:         self._key_dir(str(record["key_ref"]))
+330:         return record
+331: 
+332:     def _load_keypair(self, key_ref: str, *, require_public_file: bool = False):
+333:         keys = self._subdir("keys-v1", create=False)
+334:         if keys is None:
+335:             raise FileNotFoundError(self.root / "keys-v1")
+336:         key_dir = keys / key_ref
+337:         mode = _lstat_kind(key_dir)
+338:         if mode is None or not S_ISDIR(mode):
+339:             raise FileNotFoundError(key_dir)
+340:         private_path = key_dir / "ed25519.key"
+341:         _regular(private_path)
+342:         pair = ed25519.load(key_dir)
+343:         public_path = key_dir / "ed25519.pub"
+344:         exists = _regular(public_path, required=False)
+345:         if require_public_file and not exists:
+346:             raise ValueError("mapped custody key is missing its public evidence")
+347:         if exists and public_path.read_text(encoding="utf-8") != pair.public_b64 + "\n":
+348:             raise ValueError("mapped custody public evidence disagrees with private key")
+349:         return pair
+350: 
+351:     def _validated_binding(self, namespace: str, observer: str) -> dict[str, object] | None:
+352:         record = self._binding_record(namespace, observer)
+353:         if record is None:
+354:             return None
+355:         pair = self._load_keypair(str(record["key_ref"]))
+356:         if pair.public_b64 != record["public_key"]:
+357:             raise ValueError("mapped custody binding public key disagrees with private key")
+358:         return record
+359: 
+360:     def _completed_key_reference(self, key_ref: str, expected_public_key: str) -> None:
+361:         """Require explicit reuse to name a published, validated binding."""
+362:         bindings = self._subdir("bindings-v1", create=False)
+363:         if bindings is None:
+364:             raise FileNotFoundError("no completed mapped binding names this key reference")
+365:         found = False
+366:         for path in bindings.iterdir():
+367:             if path.suffix != ".json":
+368:                 continue
+369:             record = self._read_json(path)
+370:             if record is None or record.get("key_ref") != key_ref:
+371:                 continue
+372:             if (
+373:                 record.get("schema") != _SCHEMA
+374:                 or not isinstance(record.get("namespace"), str)
+375:                 or not isinstance(record.get("observer"), str)
+376:                 or record.get("public_key") != expected_public_key
+377:             ):
+378:                 raise ValueError("published mapped binding is malformed")
+379:             slot = f"{self._slot(str(record['namespace']), str(record['observer']))}.json"
+380:             if path.name != slot:
+381:                 raise ValueError("published mapped binding is stored in the wrong slot")
+382:             pair = self._load_keypair(key_ref, require_public_file=True)
+383:             if pair.public_b64 != expected_public_key:
+384:                 raise ValueError("published mapped binding disagrees with its key object")
+385:             found = True
+386:         if not found:
+387:             raise FileNotFoundError("no completed mapped binding names this key reference")
+388: 
+389:     def _evidence(
+390:         self, request: CredentialRequest, record: dict[str, object]
+391:     ) -> CredentialBindingEvidence:
+392:         return CredentialBindingEvidence(
+393:             request=request,
+394:             key_ref=str(record["key_ref"]),
+395:             algorithm="ed25519",
+396:             public_key=str(record["public_key"]),
+397:             provenance=str(record["provenance"]),
+398:         )
+399: 
+400:     def resolve(self, request: CredentialRequest) -> ResolvedCredential | None:
+401:         """Resolve one credential without locks, mkdirs, repair, or fallback."""
+402:         if request.namespace != self.namespace:
+403:             raise CredentialBindingRefused("request-mismatch", request=request)
+404:         try:
+405:             record = self._validated_binding(request.namespace, request.observer)
+406:             if record is None:
+407:                 pending_dir = self._subdir("pending-v1", create=False)
+408:                 pending = (
+409:                     None
+410:                     if pending_dir is None
+411:                     else self._read_json(pending_dir / f"{self._slot(request.namespace, request.observer)}.json")
+412:                 )
+413:                 if pending is not None:
+414:                     raise CredentialBindingRefused("recovery-required", request=request)
+415:                 return None
+416:             pair = self._load_keypair(str(record["key_ref"]))
+417:             evidence = self._evidence(request, record)
+418:         except CredentialBindingRefused:
+419:             raise
+420:         except (OSError, ValueError) as exc:
+421:             raise CredentialBindingRefused("corrupt-binding", request=request) from exc
+422:         return ResolvedCredential(
+423:             evidence=evidence,
+424:             sign_digest=lambda digest: ed25519.sign(
+425:                 pair, digest.encode(), domain=_domain_prefix(request.domain)
+426:             ),
+427:         )
+428: 
+429:     def verify(
+430:         self, domain: SigningDomain, public_key: str, signature: str, digest: str
+431:     ) -> bool:
+432:         """Verify under the custody-owned domain prefix without persistence."""
+433:         try:
+434:             public = ed25519.public_key_from_b64(public_key)
+435:         except ValueError:
+436:             return False
+437:         return ed25519.verify(public, signature, digest.encode(), domain=_domain_prefix(domain))
+438: 
+439:     def _new_intent(
+440:         self,
+441:         observer: str,
+442:         *,
+443:         token: str,
+444:         provenance: str,
+445:         key_ref: str | None = None,
+446:         expected_public_key: str | None = None,
+447:     ) -> dict[str, object]:
+448:         _exact(observer, "observer")
+449:         _exact(token, "token")
+450:         key_ref = key_ref or uuid.uuid4().hex
+451:         self._key_dir(key_ref)
+452:         return {
+453:             "schema": _INTENT_SCHEMA,
+454:             "namespace": self.namespace,
+455:             "observer": observer,
+456:             "token": token,
+457:             "key_ref": key_ref,
+458:             "provenance": provenance,
+459:             "expected_public_key": expected_public_key,
+460:             "stage": "pending",
+461:         }
+462: 
+463:     def _pending_by_token(self, token: str) -> dict[str, object] | None:
+464:         """Find a durable token reservation while holding the provider lock."""
+465:         pending_dir = self._subdir("pending-v1", create=False)
+466:         if pending_dir is None:
+467:             return None
+468:         found: dict[str, object] | None = None
+469:         for path in pending_dir.iterdir():
+470:             if path.suffix != ".json":
+471:                 continue
+472:             record = self._read_json(path)
+473:             if record is None or record.get("token") != token:
+474:                 continue
+475:             namespace = record.get("namespace")
+476:             observer = record.get("observer")
+477:             if not isinstance(namespace, str) or not isinstance(observer, str):
+478:                 raise TypeError("mapped pending intent lacks exact slot identity")
+479:             expected_name = f"{self._slot(namespace, observer)}.json"
+480:             if path.name != expected_name:
+481:                 raise ValueError("mapped pending intent is stored in the wrong slot")
+482:             if found is not None:
+483:                 raise BindingConflict("mapped binding token owns multiple pending slots")
+484:             found = record
+485:         return found
+486: 
+487:     def _ensure_token_index(self, intent: dict[str, object]) -> None:
+488:         """Publish or validate the token index for an already durable intent."""
+489:         token = str(intent["token"])
+490:         intents = self._subdir("intents-v1", create=True)
+491:         assert intents is not None
+492:         path = intents / f"{_digest(token)}.json"
+493:         if _publish_no_clobber(path, _json_bytes(intent)):
+494:             return
+495:         existing = self._read_json(path)
+496:         if existing != intent:
+497:             raise BindingConflict("mapped binding token already names another intent")
+498: 
+499:     def _publish_completion(self, intent: dict[str, object]) -> None:
+500:         """Record a validated completed intent without deleting recovery evidence."""
+501:         complete = dict(intent)
+502:         complete["stage"] = "complete"
+503:         intents = self._subdir("intents-v1", create=True)
+504:         assert intents is not None
+505:         completion = intents / f"{_digest(str(intent['token']))}.complete.json"
+506:         if not _publish_no_clobber(completion, _json_bytes(complete)):
+507:             existing = self._read_json(completion)
+508:             if existing != complete:
+509:                 raise BindingConflict("mapped binding completion receipt conflicts with its intent")
+510: 
+511:     def _assert_published_intent(
+512:         self,
+513:         published: dict[str, object],
+514:         intent: dict[str, object],
+515:         *,
+516:         require_token_index: bool = True,
+517:     ) -> None:
+518:         """Ensure a material-valid slot still names this exact retained intent."""
+519:         for name in ("namespace", "observer", "key_ref", "provenance"):
+520:             if published.get(name) != intent.get(name):
+521:                 raise BindingConflict("published mapped binding contradicts its retained intent")
+522:         expected_public = intent.get("expected_public_key")
+523:         if expected_public is not None and published.get("public_key") != expected_public:
+524:             raise BindingConflict("published mapped binding contradicts its expected public key")
+525:         intents = self._subdir("intents-v1", create=False)
+526:         if intents is None:
+527:             if require_token_index:
+528:                 raise BindingConflict("published mapped binding has no token-index evidence")
+529:             return
+530:         indexed = self._read_json(intents / f"{_digest(str(intent['token']))}.json")
+531:         if require_token_index and indexed != intent:
+532:             raise BindingConflict("published mapped binding contradicts its token index")
+533:         completion = self._read_json(
+534:             intents / f"{_digest(str(intent['token']))}.complete.json"
+535:         )
+536:         if completion is not None:
+537:             complete = dict(intent)
+538:             complete["stage"] = "complete"
+539:             if completion != complete:
+540:                 raise BindingConflict("published mapped binding contradicts its completion receipt")
+541: 
+542:     def _intent_for(
+543:         self, observer: str, *, token: str, provenance: str, key_ref: str | None = None,
+544:         expected_public_key: str | None = None,
+545:     ) -> dict[str, object]:
+546:         intents = self._subdir("intents-v1", create=False)
+547:         token_record = (
+548:             None if intents is None else self._read_json(intents / f"{_digest(token)}.json")
+549:         )
+550:         if token_record is not None and (
+551:             token_record.get("namespace") != self.namespace
+552:             or token_record.get("observer") != observer
+553:         ):
+554:             raise BindingConflict("mapped binding token already names another intent")
+555:         pending_for_token = self._pending_by_token(token)
+556:         if pending_for_token is not None:
+557:             if token_record is not None and token_record != pending_for_token:
+558:                 raise BindingConflict("mapped binding pending slot contradicts its token index")
+559:             if (
+560:                 pending_for_token.get("namespace") != self.namespace
+561:                 or pending_for_token.get("observer") != observer
+562:             ):
+563:                 raise BindingConflict("mapped binding token already owns another pending slot")
+564:         completed = self._validated_binding(self.namespace, observer)
+565:         if completed is not None:
+566:             if pending_for_token is not None:
+567:                 # The pending marker may be the only durable token evidence
+568:                 # after interruption between its publication and token-index
+569:                 # publication. Never restore that index until the published
+570:                 # slot proves it still names this exact intent.
+571:                 self._assert_published_intent(
+572:                     completed, pending_for_token, require_token_index=False
+573:                 )
+574:                 self._ensure_token_index(pending_for_token)
+575:                 self._assert_published_intent(completed, pending_for_token)
+576:                 self._publish_completion(pending_for_token)
+577:             if (
+578:                 (expected_public_key is not None and completed["public_key"] != expected_public_key)
+579:                 or (key_ref is not None and completed["key_ref"] != key_ref)
+580:                 or (
+581:                     token_record is not None
+582:                     and (
+583:                         token_record.get("provenance") != provenance
+584:                         or token_record.get("key_ref") != completed["key_ref"]
+585:                     )
+586:                 )
+587:             ):
+588:                 raise BindingConflict("existing mapped binding has a different public key")
+589:             return {
+590:                 "completed": True,
+591:                 "key_ref": completed["key_ref"],
+592:                 "public_key": completed["public_key"],
+593:                 "provenance": completed["provenance"],
+594:                 "token": token,
+595:             }
+596:         pending_dir = self._subdir("pending-v1", create=False)
+597:         pending = (
+598:             None
+599:             if pending_dir is None
+600:             else self._read_json(
+601:                 pending_dir / f"{self._slot(self.namespace, observer)}.json"
+602:             )
+603:         )
+604:         if pending is not None:
+605:             if pending_for_token is not None and pending_for_token != pending:
+606:                 raise BindingConflict("mapped binding slot contradicts its token reservation")
+607:             if pending.get("token") != token:
+608:                 raise BindingRecoveryRequired(
+609:                     "a different durable token owns this mapped binding slot"
+610:                 )
+611:             if (
+612:                 pending.get("namespace") != self.namespace
+613:                 or pending.get("observer") != observer
+614:                 or pending.get("provenance") != provenance
+615:                 or (key_ref is not None and pending.get("key_ref") != key_ref)
+616:                 or (
+617:                     expected_public_key is not None
+618:                     and pending.get("expected_public_key") != expected_public_key
+619:                 )
+620:             ):
+621:                 raise BindingConflict("mapped binding token was reused with different intent")
+622:             self._ensure_token_index(pending)
+623:             return pending
+624:         intent = self._new_intent(
+625:             observer,
+626:             token=token,
+627:             provenance=provenance,
+628:             key_ref=key_ref,
+629:             expected_public_key=expected_public_key,
+630:         )
+631:         pending_dir = self._subdir("pending-v1", create=True)
+632:         assert pending_dir is not None
+633:         # The slot marker contains the complete intent. If a process dies before
+634:         # the token index is linked, callers which know observer/token can still
+635:         # recover coherently; no directory scan or candidate deletion occurs.
+636:         if not _publish_no_clobber(
+637:             pending_dir / f"{self._slot(self.namespace, observer)}.json", _json_bytes(intent)
+638:         ):
+639:             return self._intent_for(
+640:                 observer,
+641:                 token=token,
+642:                 provenance=provenance,
+643:                 key_ref=key_ref,
+644:                 expected_public_key=expected_public_key,
+645:             )
+646:         self._ensure_token_index(intent)
+647:         return intent
+648: 
+649:     def _pending_for_recovery(self, observer: str, token: str) -> dict[str, object]:
+650:         pending_dir = self._subdir("pending-v1", create=False)
+651:         if pending_dir is None:
+652:             raise BindingRecoveryRequired("no durable mapped binding intent exists")
+653:         pending = self._read_json(
+654:             pending_dir / f"{self._slot(self.namespace, observer)}.json"
+655:         )
+656:         if pending is None:
+657:             raise BindingRecoveryRequired("no durable mapped binding intent exists")
+658:         if (
+659:             pending.get("schema") != _INTENT_SCHEMA
+660:             or pending.get("namespace") != self.namespace
+661:             or pending.get("observer") != observer
+662:             or pending.get("token") != token
+663:             or pending.get("stage") != "pending"
+664:             or pending.get("provenance") not in {"created", "legacy-import", "existing-ref"}
+665:             or not isinstance(pending.get("key_ref"), str)
+666:         ):
+667:             raise BindingRecoveryRequired("mapped binding recovery token does not match a pending intent")
+668:         if self._pending_by_token(token) != pending:
+669:             raise BindingConflict("mapped binding token owns a contradictory pending slot")
+670:         self._key_dir(str(pending["key_ref"]))
+671:         return pending
+672: 
+673:     def _hook(self, phase: str, intent: dict[str, object]) -> None:
+674:         if self._creation_hook is not None:
+675:             self._creation_hook(phase, dict(intent))
+676: 
+677:     def _ensure_created_key(self, intent: dict[str, object]):
+678:         key_ref = str(intent["key_ref"])
+679:         keys = self._subdir("keys-v1", create=True)
+680:         assert keys is not None
+681:         key_dir = keys / key_ref
+682:         mode = _lstat_kind(key_dir)
+683:         created = False
+684:         if mode is None:
+685:             _directory(key_dir, create=True)
+686:             # A newly private directory is the only place convenience creation
+687:             # is permitted. Existing managed objects are always loaded/checked.
+688:             pair = ed25519.load_or_generate(key_dir)
+689:             created = True
+690:         else:
+691:             if not S_ISDIR(mode):
+692:                 raise ValueError("mapped custody candidate key path is not a directory")
+693:             private = key_dir / "ed25519.key"
+694:             public = key_dir / "ed25519.pub"
+695:             if _lstat_kind(private) is None:
+696:                 # This intent exclusively reserved the candidate ref. It is
+697:                 # safe to resume a crash before the private object existed.
+698:                 if _lstat_kind(public) is not None:
+699:                     raise ValueError("incomplete candidate has public evidence without private key")
+700:                 pair = ed25519.load_or_generate(key_dir)
+701:                 created = True
+702:             else:
+703:                 pair = self._load_keypair(key_ref)
+704:                 if _lstat_kind(public) is None:
+705:                     # A crash between durable private and public publication is
+706:                     # resumable only for this retained, provider-owned intent.
+707:                     _publish_no_clobber(public, (pair.public_b64 + "\n").encode(), mode=0o644)
+708:                     _fsync_directory(key_dir)
+709:                 pair = self._load_keypair(key_ref, require_public_file=True)
+710:         self._hook("key-published", intent)
+711:         return pair, created
+712: 
+713:     def _copy_key(self, source: Path, intent: dict[str, object]):
+714:         source_pair = self._load_external_key(source)
+715:         keys = self._subdir("keys-v1", create=True)
+716:         assert keys is not None
+717:         key_dir = keys / str(intent["key_ref"])
+718:         if _lstat_kind(key_dir) is None:
+719:             _directory(key_dir, create=True)
+720:             _publish_no_clobber(
+721:                 key_dir / "ed25519.key", (source / "ed25519.key").read_bytes()
+722:             )
+723:             _publish_no_clobber(
+724:                 key_dir / "ed25519.pub", (source_pair.public_b64 + "\n").encode(), mode=0o644
+725:             )
+726:             _fsync_directory(key_dir)
+727:             created = True
+728:         else:
+729:             source_pair = self._load_keypair(
+730:                 str(intent["key_ref"]), require_public_file=True
+731:             )
+732:             created = False
+733:         candidate = self._load_keypair(str(intent["key_ref"]), require_public_file=True)
+734:         if candidate.public_b64 != source_pair.public_b64:
+735:             raise BindingConflict("copied candidate disagrees with the validated source key")
+736:         self._hook("key-published", intent)
+737:         return candidate, created
+738: 
+739:     def _load_external_key(self, key_dir: Path):
+740:         mode = _lstat_kind(key_dir)
+741:         if mode is None or not S_ISDIR(mode):
+742:             raise FileNotFoundError(key_dir)
+743:         private = key_dir / "ed25519.key"
+744:         _regular(private)
+745:         pair = ed25519.load(key_dir)
+746:         public = key_dir / "ed25519.pub"
+747:         if _regular(public, required=False) and public.read_text(encoding="utf-8") != pair.public_b64 + "\n":
+748:             raise ValueError("source custody public evidence disagrees with private key")
+749:         return pair
+750: 
+751:     def _publish_binding(self, intent: dict[str, object], pair) -> tuple[dict[str, object], bool]:
+752:         expected = intent.get("expected_public_key")
+753:         if expected is not None and pair.public_b64 != expected:
+754:             raise BindingConflict("candidate key does not match expected public key")
+755:         record: dict[str, object] = {
+756:             "schema": _SCHEMA,
+757:             "namespace": self.namespace,
+758:             "observer": intent["observer"],
+759:             "key_ref": intent["key_ref"],
+760:             "algorithm": "ed25519",
+761:             "public_key": pair.public_b64,
+762:             "provenance": intent["provenance"],
+763:         }
+764:         bindings = self._subdir("bindings-v1", create=True)
+765:         assert bindings is not None
+766:         published = _publish_no_clobber(
+767:             bindings / f"{self._slot(self.namespace, str(intent['observer']))}.json", _json_bytes(record)
+768:         )
+769:         if not published:
+770:             existing = self._binding_record(self.namespace, str(intent["observer"]))
+771:             assert existing is not None
+772:             if existing["public_key"] != pair.public_b64:
+773:                 raise BindingConflict("another binding won with a different public key")
+774:             return existing, False
+775:         self._hook("binding-published", intent)
+776:         # Intent files are retained as durable recovery evidence. The marker is
+777:         # deliberately not removed automatically, avoiding unsafe cleanup races.
+778:         self._publish_completion(intent)
+779:         return record, True
+780: 
+781:     def _mutate(
+782:         self,
+783:         observer: str,
+784:         *,
+785:         token: str,
+786:         provenance: str,
+787:         key_ref: str | None = None,
+788:         expected_public_key: str | None = None,
+789:         source_key_dir: Path | None = None,
+790:         _locked: bool = False,
+791:     ) -> BindingCreationResult:
+792:         with (nullcontext() if _locked else self._mutation_lock()):
+793:             intent = self._intent_for(
+794:                 observer,
+795:                 token=token,
+796:                 provenance=provenance,
+797:                 key_ref=key_ref,
+798:                 expected_public_key=expected_public_key,
+799:             )
+800:             if intent.get("completed"):
+801:                 return BindingCreationResult(
+802:                     namespace=self.namespace,
+803:                     observer=observer,
+804:                     key_ref=str(intent["key_ref"]),
+805:                     public_key=str(intent["public_key"]),
+806:                     provenance=str(intent["provenance"]),
+807:                     token=token,
+808:                     binding_created=False,
+809:                     key_created=False,
+810:                 )
+811:             phase = "intent-published"
+812:             try:
+813:                 self._hook(phase, intent)
+814:                 if source_key_dir is None:
+815:                     phase = "key-published"
+816:                     pair, key_created = self._ensure_created_key(intent)
+817:                 else:
+818:                     phase = "key-published"
+819:                     pair, key_created = self._copy_key(source_key_dir, intent)
+820:                 phase = "binding-published"
+821:                 record, binding_created = self._publish_binding(intent, pair)
+822:             except BaseException as exc:
+823:                 if not isinstance(exc, Exception):
+824:                     raise
+825:                 raise BindingMutationIncomplete(
+826:                     namespace=self.namespace,
+827:                     observer=observer,
+828:                     token=token,
+829:                     key_ref=str(intent["key_ref"]),
+830:                     phase=phase,
+831:                 ) from exc
+832:             return BindingCreationResult(
+833:                 namespace=self.namespace,
+834:                 observer=observer,
+835:                 key_ref=str(record["key_ref"]),
+836:                 public_key=str(record["public_key"]),
+837:                 provenance=str(record["provenance"]),
+838:                 token=token,
+839:                 binding_created=binding_created,
+840:                 key_created=key_created,
+841:             )
+842: 
+843:     def create_binding(self, observer: str, *, token: str) -> BindingCreationResult:
+844:         """Create or recover one explicit mapped key binding."""
+845:         return self._mutate(observer, token=token, provenance="created")
+846: 
+847:     def recover_binding(self, observer: str, *, token: str) -> BindingCreationResult:
+848:         """Resume the exact token's durable binding intent without a new key."""
+849:         _exact(observer, "observer")
+850:         _exact(token, "token")
+851:         with self._mutation_lock():
+852:             intent = self._pending_for_recovery(observer, token)
+853:             phase = "intent-published"
+854:             try:
+855:                 # A published slot is authority over its candidate. Validate it
+856:                 # against the retained pending marker so a missing/moved key can
+857:                 # never be regenerated under an already-named reference.
+858:                 published = self._binding_record(self.namespace, observer)
+859:                 if published is not None:
+860:                     self._validated_binding(self.namespace, observer)
+861:                     self._assert_published_intent(
+862:                         published, intent, require_token_index=False
+863:                     )
+864:                     # Restore the token index only after the material-valid
+865:                     # slot proves it is the retained intent's exact binding.
+866:                     self._ensure_token_index(intent)
+867:                     self._assert_published_intent(published, intent)
+868:                     phase = "binding-published"
+869:                     self._publish_completion(intent)
+870:                     return BindingCreationResult(
+871:                         namespace=self.namespace,
+872:                         observer=observer,
+873:                         key_ref=str(published["key_ref"]),
+874:                         public_key=str(published["public_key"]),
+875:                         provenance=str(published["provenance"]),
+876:                         token=str(intent["token"]),
+877:                         binding_created=False,
+878:                         key_created=False,
+879:                     )
+880:                 self._ensure_token_index(intent)
+881:                 provenance = str(intent["provenance"])
+882:                 if provenance == "created":
+883:                     phase = "key-published"
+884:                     pair, key_created = self._ensure_created_key(intent)
+885:                 else:
+886:                     # Import and existing-reference intents have already selected a
+887:                     # durable candidate. Recovery never reopens the legacy source
+888:                     # or creates a replacement key under the reserved reference.
+889:                     key_ref = str(intent["key_ref"])
+890:                     try:
+891:                         pair = self._load_keypair(key_ref)
+892:                     except FileNotFoundError as exc:
+893:                         if provenance == "legacy-import":
+894:                             raise BindingRecoveryRequired(
+895:                                 "legacy import candidate is absent; repeat the explicit import with this token"
+896:                             ) from exc
+897:                         raise
+898:                     expected = intent.get("expected_public_key")
+899:                     if expected is not None and pair.public_b64 != expected:
+900:                         raise BindingConflict("recovery candidate disagrees with its intent")
+901:                     key_dir = self._key_dir(key_ref)
+902:                     public = key_dir / "ed25519.pub"
+903:                     if _lstat_kind(public) is None:
+904:                         if provenance != "legacy-import":
+905:                             raise BindingRecoveryRequired(
+906:                                 "existing-reference candidate lacks durable public evidence"
+907:                             )
+908:                         _publish_no_clobber(
+909:                             public, (pair.public_b64 + "\n").encode(), mode=0o644
+910:                         )
+911:                         _fsync_directory(key_dir)
+912:                     pair = self._load_keypair(key_ref, require_public_file=True)
+913:                     key_created = False
+914:                 phase = "binding-published"
+915:                 record, binding_created = self._publish_binding(intent, pair)
+916:                 return BindingCreationResult(
+917:                     namespace=self.namespace,
+918:                     observer=observer,
+919:                     key_ref=str(record["key_ref"]),
+920:                     public_key=str(record["public_key"]),
+921:                     provenance=str(record["provenance"]),
+922:                     token=token,
+923:                     binding_created=binding_created,
+924:                     key_created=key_created,
+925:                 )
+926:             except BaseException as exc:
+927:                 if not isinstance(exc, Exception):
+928:                     raise
+929:                 if isinstance(
+930:                     exc, (BindingConflict, BindingRecoveryRequired, FileNotFoundError, ValueError)
+931:                 ):
+932:                     raise
+933:                 raise BindingMutationIncomplete(
+934:                     namespace=self.namespace,
+935:                     observer=observer,
+936:                     token=token,
+937:                     key_ref=str(intent["key_ref"]),
+938:                     phase=phase,
+939:                 ) from exc
+940: 
+941:     def bind_existing_ref(
+942:         self,
+943:         observer: str,
+944:         key_ref: str,
+945:         expected_public_key: str,
+946:         *,
+947:         token: str,
+948:     ) -> BindingCreationResult:
+949:         """Deliberately reuse an already managed key in this namespace slot."""
+950:         _exact(expected_public_key, "expected_public_key")
+951:         with self._mutation_lock():
+952:             self._completed_key_reference(key_ref, expected_public_key)
+953:             return self._mutate(
+954:                 observer,
+955:                 token=token,
+956:                 provenance="existing-ref",
+957:                 key_ref=key_ref,
+958:                 expected_public_key=expected_public_key,
+959:                 source_key_dir=self._key_dir(key_ref),
+960:                 _locked=True,
+961:             )
+962: 
+963:     def import_legacy(
+964:         self, vertex_path: Path | str, observer: str, *, token: str
+965:     ) -> BindingCreationResult:
+966:         """Copy one explicitly selected legacy key after load-only validation."""
+967:         vertex = Path(vertex_path)
+968:         self_observer = _self_observer(vertex)
+969:         if observer == self_observer:
+970:             source = _self_key_dir(vertex)
+971:         else:
+972:             source = _observer_key_dir(keys_dir_for(vertex), observer)
+973:         if source is None:
+974:             raise FileNotFoundError("legacy custody key is absent")
+975:         # Validate before publishing any intent/candidate. A bad legacy .pub is
+976:         # evidence conflict, never something a mapped import repairs.
+977:         pair = self._load_external_key(source)
+978:         return self._mutate(
+979:             observer,
+980:             token=token,
+981:             provenance="legacy-import",
+982:             expected_public_key=pair.public_b64,
+983:             source_key_dir=source,
+984:         )
+
+===== libs/custody/tests/test_binding.py =====
+1: from __future__ import annotations
+2: 
+3: import threading
+4: from multiprocessing import get_context
+5: from pathlib import Path
+6: 
+7: import custody.binding as binding_module
+8: import pytest
+9: from custody.binding import (
+10:     BindingConflict,
+11:     BindingMutationIncomplete,
+12:     BindingRecoveryRequired,
+13:     MappedCredentialProvider,
+14: )
+15: from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
+16: 
+17: 
+18: @pytest.fixture(autouse=True)
+19: def isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+20:     root = tmp_path / "xdg"
+21:     monkeypatch.setenv("XDG_STATE_HOME", str(root / "state"))
+22:     monkeypatch.setenv("XDG_CONFIG_HOME", str(root / "config"))
+23:     monkeypatch.setenv("LOOPS_HOME", str(root / "loops"))
+24: 
+25: 
+26: def _request(observer: str, domain: SigningDomain = SigningDomain.FACT) -> CredentialRequest:
+27:     return CredentialRequest("example/team", observer, domain, CredentialPurpose.AUTHORSHIP)
+28: 
+29: 
+30: def _create_in_process(root: str, token: str, queue) -> None:
+31:     """Top-level target so macOS spawn exercises the POSIX file lock."""
+32:     try:
+33:         result = MappedCredentialProvider(Path(root), namespace="example/team").create_binding(
+34:             "alice", token=token
+35:         )
+36:         queue.put(("ok", result.key_ref, result.public_key))
+37:     except (BindingRecoveryRequired, ValueError) as exc:  # returned to the parent
+38:         queue.put(("error", type(exc).__name__, str(exc)))
+39: 
+40: 
+41: def test_create_resolve_is_exact_and_domain_separated(tmp_path: Path) -> None:
+42:     provider = MappedCredentialProvider(tmp_path / "bindings", namespace="example/team")
+43:     created = provider.create_binding("Alice", token="create-alice")
+44: 
+45:     fact = provider.resolve(_request("Alice", SigningDomain.FACT))
+46:     arrival = provider.resolve(_request("Alice", SigningDomain.ARRIVAL))
+47:     other_case = provider.resolve(_request("alice"))
+48: 
+49:     assert fact is not None and arrival is not None
+50:     assert fact.evidence.key_ref == arrival.evidence.key_ref == created.key_ref
+51:     assert fact.evidence.public_key == arrival.evidence.public_key == created.public_key
+52:     signature = fact.sign_digest("digest")
+53:     assert provider.verify(SigningDomain.FACT, created.public_key, signature, "digest")
+54:     assert not provider.verify(SigningDomain.ARRIVAL, created.public_key, signature, "digest")
+55:     assert other_case is None
+56: 
+57: 
+58: @pytest.mark.parametrize("observer", [".", "/", "ed25519.key", "a\0b"])
+59: def test_binding_labels_are_hashed_identity_not_path_components(
+60:     tmp_path: Path, observer: str
+61: ) -> None:
+62:     provider = MappedCredentialProvider(tmp_path / "bindings", namespace="space\0/")
+63:     created = provider.create_binding(observer, token=f"token:{observer}")
+64:     resolved = provider.resolve(
+65:         CredentialRequest(
+66:             "space\0/", observer, SigningDomain.FACT, CredentialPurpose.AUTHORSHIP
+67:         )
+68:     )
+69: 
+70:     assert resolved is not None
+71:     assert resolved.evidence.key_ref == created.key_ref
+72: 
+73: 
+74: def test_resolution_of_missing_or_bad_public_evidence_never_repairs(tmp_path: Path) -> None:
+75:     provider = MappedCredentialProvider(tmp_path / "bindings", namespace="example/team")
+76:     assert provider.resolve(_request("missing")) is None
+77:     assert not (tmp_path / "bindings").exists()
+78: 
+79:     created = provider.create_binding("alice", token="create-alice")
+80:     public = tmp_path / "bindings" / "keys-v1" / created.key_ref / "ed25519.pub"
+81:     public.write_text("not-the-private-key\n", encoding="utf-8")
+82: 
+83:     with pytest.raises(ValueError, match="corrupt-binding"):
+84:         provider.resolve(_request("alice"))
+85:     assert public.read_text(encoding="utf-8") == "not-the-private-key\n"
+86: 
+87: 
+88: def test_pending_slot_recovers_only_its_named_token(tmp_path: Path) -> None:
+89:     fired = False
+90: 
+91:     def interrupt(phase: str, _intent: dict[str, object]) -> None:
+92:         nonlocal fired
+93:         if phase == "intent-published" and not fired:
+94:             fired = True
+95:             raise RuntimeError("simulated process interruption")
+96: 
+97:     provider = MappedCredentialProvider(
+98:         tmp_path / "bindings", namespace="example/team", _creation_hook=interrupt
+99:     )
+100:     with pytest.raises(BindingMutationIncomplete) as raised:
+101:         provider.create_binding("alice", token="token-one")
+102:     assert raised.value.token == "token-one"
+103:     assert raised.value.phase == "intent-published"
+104: 
+105:     with pytest.raises(BindingRecoveryRequired):
+106:         provider.create_binding("alice", token="token-two")
+107:     recovered = provider.recover_binding("alice", token="token-one")
+108:     assert recovered.binding_created
+109:     assert provider.resolve(_request("alice")) is not None
+110: 
+111: 
+112: def test_mutation_lock_leaves_one_winner_and_no_competing_key(tmp_path: Path) -> None:
+113:     provider = MappedCredentialProvider(tmp_path / "bindings", namespace="example/team")
+114:     started = threading.Barrier(2)
+115:     outcomes: list[object] = []
+116: 
+117:     def create(token: str) -> None:
+118:         started.wait()
+119:         try:
+120:             outcomes.append(provider.create_binding("alice", token=token))
+121:         except BindingRecoveryRequired as exc:  # asserted below
+122:             outcomes.append(exc)
+123: 
+124:     first = threading.Thread(target=create, args=("one",))
+125:     second = threading.Thread(target=create, args=("two",))
+126:     first.start()
+127:     second.start()
+128:     first.join()
+129:     second.join()
+130: 
+131:     successes = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+132:     failures = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+133:     assert len(successes) == 2
+134:     assert not failures
+135:     assert len({outcome.key_ref for outcome in successes}) == 1
+136:     assert sum(outcome.binding_created for outcome in successes) == 1
+137:     assert len(list((tmp_path / "bindings" / "keys-v1").iterdir())) == 1
+138: 
+139: 
+140: def test_process_lock_converges_absent_provider_root(tmp_path: Path) -> None:
+141:     root = tmp_path / "bindings"
+142:     context = get_context("spawn")
+143:     queue = context.Queue()
+144:     processes = [
+145:         context.Process(target=_create_in_process, args=(str(root), token, queue))
+146:         for token in ("process-one", "process-two")
+147:     ]
+148:     for process in processes:
+149:         process.start()
+150:     outcomes = [queue.get(timeout=15) for _ in processes]
+151:     for process in processes:
+152:         process.join(timeout=15)
+153:         assert process.exitcode == 0
+154: 
+155:     assert [outcome[0] for outcome in outcomes] == ["ok", "ok"]
+156:     assert len({outcome[1] for outcome in outcomes}) == 1
+157:     assert len({outcome[2] for outcome in outcomes}) == 1
+158:     assert len(tuple((root / "keys-v1").iterdir())) == 1
+159: 
+160: 
+161: def test_existing_reference_can_be_bound_in_a_second_namespace(tmp_path: Path) -> None:
+162:     root = tmp_path / "bindings"
+163:     first = MappedCredentialProvider(root, namespace="one")
+164:     created = first.create_binding("alice", token="one")
+165:     second = MappedCredentialProvider(root, namespace="two")
+166: 
+167:     copied = second.bind_existing_ref(
+168:         "alice", created.key_ref, created.public_key, token="two"
+169:     )
+170:     resolved = second.resolve(
+171:         CredentialRequest("two", "alice", SigningDomain.TICK, CredentialPurpose.RECEIPT)
+172:     )
+173: 
+174:     assert copied.key_ref == created.key_ref
+175:     assert resolved is not None
+176:     assert resolved.evidence.public_key == created.public_key
+177: 
+178: 
+179: def test_recovery_refuses_published_slot_substituted_with_another_valid_key(
+180:     tmp_path: Path,
+181: ) -> None:
+182:     root = tmp_path / "bindings"
+183:     provider = MappedCredentialProvider(root, namespace="example/team")
+184:     alice = provider.create_binding("alice", token="alice-token")
+185:     bob = provider.create_binding("bob", token="bob-token")
+186:     alice_slot = root / "bindings-v1" / f"{provider._slot(provider.namespace, 'alice')}.json"
+187:     value = binding_module.json.loads(alice_slot.read_text(encoding="utf-8"))
+188:     value.update(key_ref=bob.key_ref, public_key=bob.public_key)
+189:     alice_slot.write_text(binding_module.json.dumps(value) + "\n", encoding="utf-8")
+190:     index = root / "intents-v1" / f"{binding_module._digest('alice-token')}.json"
+191:     index.unlink()
+192:     before = alice_slot.read_bytes()
+193: 
+194:     with pytest.raises(BindingConflict, match="retained intent"):
+195:         provider.create_binding("alice", token="alice-token")
+196:     with pytest.raises(BindingConflict, match="retained intent"):
+197:         provider.recover_binding("alice", token="alice-token")
+198: 
+199:     assert alice.key_ref != bob.key_ref
+200:     assert alice_slot.read_bytes() == before
+201:     assert not index.exists()
+202: 
+203: 
+204: def test_recovery_restores_index_after_pending_before_index_interruption(tmp_path: Path) -> None:
+205:     root = tmp_path / "bindings"
+206:     provider = MappedCredentialProvider(root, namespace="example/team")
+207:     publish = binding_module._publish_no_clobber
+208: 
+209:     class Interrupted(BaseException):
+210:         pass
+211: 
+212:     def interrupt_index(path: Path, *args, **kwargs):
+213:         if path.parent.name == "intents-v1":
+214:             raise Interrupted()
+215:         return publish(path, *args, **kwargs)
+216: 
+217:     binding_module._publish_no_clobber = interrupt_index
+218:     try:
+219:         with pytest.raises(Interrupted):
+220:             provider.create_binding("alice", token="one-token")
+221:     finally:
+222:         binding_module._publish_no_clobber = publish
+223: 
+224:     recovered = provider.recover_binding("alice", token="one-token")
+225:     assert recovered.observer == "alice"
+226:     assert (root / "intents-v1" / f"{binding_module._digest('one-token')}.json").exists()
+227:     with pytest.raises(BindingConflict):
+228:         provider.create_binding("bob", token="one-token")
+229:     assert len(tuple((root / "bindings-v1").glob("*.json"))) == 1
+230: 
+231: 
+232: def test_recovery_postpublication_fault_retains_typed_reconciliation_evidence(
+233:     tmp_path: Path,
+234: ) -> None:
+235:     root = tmp_path / "bindings"
+236: 
+237:     class Interrupted(BaseException):
+238:         pass
+239: 
+240:     def stop_after_key(phase: str, _intent: dict[str, object]) -> None:
+241:         if phase == "key-published":
+242:             raise Interrupted()
+243: 
+244:     initial = MappedCredentialProvider(
+245:         root, namespace="example/team", _creation_hook=stop_after_key
+246:     )
+247:     with pytest.raises(Interrupted):
+248:         initial.create_binding("alice", token="recovery-token")
+249: 
+250:     def fail_after_binding(phase: str, _intent: dict[str, object]) -> None:
+251:         if phase == "binding-published":
+252:             raise OSError("simulated durable post-publication failure")
+253: 
+254:     recovering = MappedCredentialProvider(
+255:         root, namespace="example/team", _creation_hook=fail_after_binding
+256:     )
+257:     with pytest.raises(BindingMutationIncomplete) as raised:
+258:         recovering.recover_binding("alice", token="recovery-token")
+259: 
+260:     assert raised.value.token == "recovery-token"
+261:     assert raised.value.phase == "binding-published"
+262:     assert raised.value.key_ref
+263:     assert len(tuple((root / "bindings-v1").glob("*.json"))) == 1
+
+===== libs/custody/tests/test_binding_recovery_contract.py =====
+1: """Independent persisted-binding interruption and refusal contracts."""
+2: 
+3: from hashlib import sha256
+4: from pathlib import Path
+5: 
+6: import pytest
+7: from custody import ensure_signing_key
+8: from custody.binding import MappedCredentialProvider
+9: from engine.credentials import CredentialPurpose, CredentialRequest, SigningDomain
+10: from sign import ed25519
+11: 
+12: 
+13: class Interrupted(BaseException):
+14:     pass
+15: 
+16: 
+17: @pytest.fixture(autouse=True)
+18: def _isolated_state(tmp_path, monkeypatch):
+19:     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+20:     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+21:     monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops"))
+22: 
+23: 
+24: def _fingerprints(root: Path) -> dict[str, str]:
+25:     return {
+26:         str(path.relative_to(root)): sha256(path.read_bytes()).hexdigest()
+27:         for path in root.rglob("*")
+28:         if path.is_file() and not path.is_symlink()
+29:     }
+30: 
+31: 
+32: def _request(observer="alice"):
+33:     return CredentialRequest("work", observer, SigningDomain.FACT, CredentialPurpose.AUTHORSHIP)
+34: 
+35: 
+36: def test_recovery_without_an_intent_never_creates_a_binding(tmp_path):
+37:     root = tmp_path / "mapped"
+38:     provider = MappedCredentialProvider(root, namespace="work")
+39:     with pytest.raises((ValueError, FileNotFoundError)):
+40:         provider.recover_binding("alice", token="unknown")
+41:     assert not list(root.glob("keys-v1/*/ed25519.key"))
+42:     assert not list(root.glob("bindings-v1/*.json"))
+43: 
+44: 
+45: def test_completed_binding_is_revalidated_by_creation_retry(tmp_path):
+46:     root = tmp_path / "mapped"
+47:     provider = MappedCredentialProvider(root, namespace="work")
+48:     created = provider.create_binding("alice", token="first")
+49:     public_file = root / "keys-v1" / created.key_ref / "ed25519.pub"
+50:     public_file.write_text("contradictory public evidence\n")
+51:     before = _fingerprints(root)
+52:     with pytest.raises(ValueError):
+53:         provider.create_binding("alice", token="retry")
+54:     assert _fingerprints(root) == before
+55: 
+56: 
+57: def test_token_reuse_does_not_poison_a_second_observer_slot(tmp_path):
+58:     root = tmp_path / "mapped"
+59:     provider = MappedCredentialProvider(root, namespace="work")
+60:     provider.create_binding("alice", token="one-operation")
+61:     before = _fingerprints(root)
+62:     with pytest.raises(ValueError):
+63:         provider.create_binding("bob", token="one-operation")
+64:     assert _fingerprints(root) == before
+65:     assert provider.resolve(_request("bob")) is None
+66: 
+67: 
+68: def test_import_recovery_uses_published_candidate_after_source_is_gone(tmp_path):
+69:     target = tmp_path / "legacy" / "alice.vertex"
+70:     target.parent.mkdir()
+71:     original = ensure_signing_key(target, observer="alice")
+72:     root = tmp_path / "mapped"
+73: 
+74:     def interrupt(phase, _intent):
+75:         if phase == "key-published":
+76:             raise Interrupted()
+77: 
+78:     provider = MappedCredentialProvider(root, namespace="work", _creation_hook=interrupt)
+79:     with pytest.raises(Interrupted):
+80:         provider.import_legacy(target, "alice", token="import-alice")
+81:     candidate_paths = tuple(root.glob("keys-v1/*/ed25519.key"))
+82:     assert len(candidate_paths) == 1
+83:     candidate_hash = sha256(candidate_paths[0].read_bytes()).hexdigest()
+84:     (target.parent / "keys").rename(target.parent / "keys-moved-away")
+85:     recovered = MappedCredentialProvider(root, namespace="work").recover_binding(
+86:         "alice", token="import-alice"
+87:     )
+88:     assert recovered.public_key == original.public_b64
+89:     assert sha256(candidate_paths[0].read_bytes()).hexdigest() == candidate_hash
+90:     assert len(tuple(root.glob("keys-v1/*/ed25519.key"))) == 1
+91: 
+92: 
+93: def test_recovery_retains_private_key_when_public_publication_was_interrupted(
+94:     tmp_path, monkeypatch
+95: ):
+96:     root = tmp_path / "mapped"
+97:     provider = MappedCredentialProvider(root, namespace="work")
+98:     publish_public = ed25519._publish_public
+99: 
+100:     def interrupt(_key_dir, _keypair):
+101:         raise Interrupted()
+102: 
+103:     monkeypatch.setattr(ed25519, "_publish_public", interrupt)
+104:     with pytest.raises(Interrupted):
+105:         provider.create_binding("alice", token="private-first")
+106:     private_files = tuple(root.glob("keys-v1/*/ed25519.key"))
+107:     assert len(private_files) == 1
+108:     private_hash = sha256(private_files[0].read_bytes()).hexdigest()
+109:     original_public = ed25519.load(private_files[0].parent).public_b64
+110:     monkeypatch.setattr(ed25519, "_publish_public", publish_public)
+111:     recovered = provider.recover_binding("alice", token="private-first")
+112:     assert recovered.public_key == original_public
+113:     assert sha256(private_files[0].read_bytes()).hexdigest() == private_hash
+114:     assert len(tuple(root.glob("keys-v1/*/ed25519.key"))) == 1
+115: 
+116: 
+117: def test_resolution_refuses_symlinked_intermediate_key_directory(tmp_path):
+118:     root = tmp_path / "mapped"
+119:     provider = MappedCredentialProvider(root, namespace="work")
+120:     provider.create_binding("alice", token="create")
+121:     real_keys = tmp_path / "relocated-keys"
+122:     (root / "keys-v1").rename(real_keys)
+123:     (root / "keys-v1").symlink_to(real_keys, target_is_directory=True)
+124:     before = _fingerprints(real_keys)
+125:     with pytest.raises(ValueError):
+126:         provider.resolve(_request())
+127:     assert _fingerprints(real_keys) == before
+128: 
+129: 
+130: def test_recovery_never_replaces_a_missing_key_named_by_a_published_binding(tmp_path):
+131:     root = tmp_path / "mapped"
+132:     provider = MappedCredentialProvider(root, namespace="work")
+133:     created = provider.create_binding("alice", token="published")
+134:     (root / "keys-v1" / created.key_ref).rename(tmp_path / "unavailable-original-key")
+135:     before = _fingerprints(root)
+136:     with pytest.raises((ValueError, FileNotFoundError)):
+137:         provider.recover_binding("alice", token="published")
+138:     assert _fingerprints(root) == before
+139:     assert not (root / "keys-v1" / created.key_ref).exists()
+140: 
+141: 
+142: def test_recovery_refuses_valid_key_that_contradicts_its_original_intent(tmp_path):
+143:     import json
+144: 
+145:     root = tmp_path / "mapped"
+146:     provider = MappedCredentialProvider(root, namespace="work")
+147:     provider.create_binding("alice", token="alice-token")
+148:     bob = provider.create_binding("bob", token="bob-token")
+149:     for path in (root / "bindings-v1").glob("*.json"):
+150:         record = json.loads(path.read_text())
+151:         if record["observer"] == "alice":
+152:             record.update(key_ref=bob.key_ref, public_key=bob.public_key)
+153:             path.write_text(json.dumps(record) + "\n")
+154:     before = _fingerprints(root)
+155:     with pytest.raises(ValueError):
+156:         provider.recover_binding("alice", token="alice-token")
+157:     assert _fingerprints(root) == before
+158: 
+159: 
+160: @pytest.mark.parametrize("resume", ["none", "create", "recover"])
+161: def test_token_is_reserved_even_when_its_index_publication_was_interrupted(
+162:     tmp_path, monkeypatch, resume
+163: ):
+164:     from custody import binding
+165: 
+166:     root = tmp_path / "mapped"
+167:     provider = MappedCredentialProvider(root, namespace="work")
+168:     publish = binding._publish_no_clobber
+169: 
+170:     def interrupt_index(path, *args, **kwargs):
+171:         if path.parent.name == "intents-v1":
+172:             raise Interrupted()
+173:         return publish(path, *args, **kwargs)
+174: 
+175:     monkeypatch.setattr(binding, "_publish_no_clobber", interrupt_index)
+176:     with pytest.raises(Interrupted):
+177:         provider.create_binding("alice", token="one-token")
+178:     monkeypatch.setattr(binding, "_publish_no_clobber", publish)
+179:     if resume == "create":
+180:         provider.create_binding("alice", token="one-token")
+181:     elif resume == "recover":
+182:         provider.recover_binding("alice", token="one-token")
+183:     before = _fingerprints(root)
+184:     with pytest.raises(ValueError):
+185:         provider.create_binding("bob", token="one-token")
+186:     assert _fingerprints(root) == before
+187:     assert provider.resolve(_request("bob")) is None
+
+===== libs/custody/README.md =====
+1: # custody
+2: 
+3: Loops signing composition — the store's at-rest signing format, below every writer.
+4: 
+5: Owns the `loops-tick-v1` / `loops-fact-v1` domain-separation constants, the
+6: custody-co-located `keys/` layout (per-observer nesting + flat self-observer
+7: back-compat), the signer/verifier builders, and `ensure_signing_key`. Observer
+8: names remain exact identities: a filesystem spelling collision refuses rather
+9: than borrowing another observer's key. A renamed vertex may retain a nested
+10: self key; all signer domains and `ensure_signing_key` select that one key.
+11: Identical flat and nested self copies are one self key; conflicting key material
+12: refuses until repaired. A differently spelled nested observer remains a
+13: distinct observer and is never used as the self fallback. Observer components
+14: cannot name the reserved `ed25519.key` or `ed25519.pub` custody files when
+15: mapped to directories. This is a local custody-layout restriction, not an
+16: observer label restriction in the event protocol. A self observer with such a
+17: stem uses only the flat layout.
+18: 
+19: Signer loading never creates keys. Concurrent explicit key creation publishes
+20: one complete private key; all callers load that key and derive its public file.
+21: 
+22: Any client that emits signed facts or ticks must compose identically or
+23: `sl store verify` reports breaks — that's why this is a lib, not CLI code.
+24: Depends on `sign` (loops-agnostic Ed25519 primitives) and `engine`
+25: (store-canonical declaration resolution). The engine itself never imports
+26: this — it takes signer callables by injection.
+27: 
+28: 
+29: ## Explicit mapped bindings
+30: 
+31: `MappedCredentialProvider(root, namespace=..., receipt_observer=...)` provides
+32: an opt-in alternative to locator-based custody. Exact namespace/observer
+33: strings select an opaque managed key reference recorded with its public key.
+34: All three signing domains use that binding with separate domain prefixes.
+35: Hashed filesystem slots are storage details; labels retain their exact case,
+36: Unicode spelling, and non-path characters. A binding does not authorize an
+37: Arrival claim by itself: the engine separately checks captured history.
+38: 
+39: `for_write` returns lazy configuration. `resolve` loads and validates the
+40: binding, private-derived public material, and any existing public convenience
+41: file without creating or repairing anything. Missing unbound identities can
+42: remain unsigned; malformed mappings, conflicting public material, missing
+43: referenced private keys, and filesystem aliases refuse.
+44: 
+45: Explicit mutations are `create_binding(observer, token=...)`,
+46: `import_legacy(vertex_path, observer, token=...)`, and
+47: `bind_existing_ref(observer, key_ref, expected_public_key, token=...)`.
+48: Import copies private material into managed custody and preserves the original
+49: files. Reusing a managed reference is deliberate and does not introduce its
+50: public key into an Arrival lineage. Existing bindings are not silently
+51: replaced; local rotation is a separate future operation.
+52: 
+53: Mutations use a provider-wide POSIX advisory lock, durable intents, and
+54: complete-file publication with no-clobber links. The supported filesystem must
+55: provide those lock, link, and fsync semantics. Concurrent creators converge
+56: on one binding; resolution remains read-only. There is no automatic orphan
+57: cleanup or key deletion.
+58: 
+59: Keep the operation token when a mutation is interrupted.
+60: `BindingMutationIncomplete` retains namespace, observer, token, candidate key
+61: reference, and phase; the binding may already have been published.
+62: `recover_binding(observer, token=...)` reconciles the retained intent and
+63: candidate. It never replaces a missing key referenced by a published binding.
+64: Explicit recovery may restore a missing token index from its retained intent
+65: before a later candidate-key refusal; it does not claim zero filesystem effects
+66: or create a key/binding in that case.
+67: An import interrupted before copying private material needs the original
+68: source re-presented with the same import token and expected public material;
+69: recovery cannot invent that key. A completed imported candidate can recover
+70: without the old source directory. Retrying with a different token does not
+71: bypass an unfinished operation. Creation results report the returned binding
+72: and effects of that invocation; they contain no private key material.

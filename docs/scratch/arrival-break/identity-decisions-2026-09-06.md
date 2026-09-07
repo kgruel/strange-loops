@@ -1,12 +1,16 @@
 # Arrival identity decisions — September 6, 2026
 
-Status: working architectural recommendations from the consistency pass. This
-document distinguishes existing contracts from proposed changes; it does not
-ratify a new wire format or implement a migration. Read alongside the
+Status: working architectural decisions from the consistency pass. D0/D2 now
+have an accepted opt-in implementation including the directory durability
+follow-up; later identity items remain as marked.
+This document does not ratify a new wire format or perform an automatic
+migration. Read alongside the
 [contract matrix](consistency-contract-matrix-2026-09-06.md) and
 [identity audit](consistency-audit-identity-2026-09-06.md).
 Updated after [Fable-low review and root triage](reviews/consistency-2026-09-06/primary-triage.md).
-The frozen documents reviewed by Fable are retained with that review.
+The frozen documents reviewed by Fable are retained with that review. D0/D2
+implementation and review evidence is summarized in the
+[D0/D2 report](consistency-d0-d2-2026-09-06.md).
 
 The guiding decision is to keep identity, evidence about identity, and local
 ways of finding that evidence separate. An observer can interpret several
@@ -36,7 +40,7 @@ Detailed implementation references and limitations are in the identity audit.
 
 ## D0 — Name the credential-binding scope before designing its storage
 
-**Working recommendation:** a local binding is selected by a provider-owned
+**Implemented for the opt-in mapped provider:** a local binding is selected by a provider-owned
 custody namespace and exact observer label, with explicit signing-domain
 selection. Its value is an opaque key reference and enough public evidence to
 check the requested signing claim. The custody namespace is explicit local
@@ -56,14 +60,16 @@ declaration preparation uses `keys_valid_at(observer, H.ordinal + 1)`.
 | Declaration edit | Explicit edit author and key introduced through H, valid for the proposed successor. This is not a new administrative-grant rule. |
 | Inner tick receipt signing | An explicitly selected receipt-signing capability under its established verification policy. Do not infer the signer from boundary `name` or `origin`. |
 | Outer tick custodian label | Physical genesis observer under the existing wire profile; envelope remains unsigned. This label does not make every author or inner tick signer the genesis observer. |
-| Initialization | Explicit requested founding observer, pending lineage and reserved bootstrap intent; no fabricated pre-genesis H. Founding observer and vertex name need not be equal. |
+| Initialization | The local request carries the explicit founding observer, domain and purpose. Pending lineage and reserved bootstrap intent are separate engine ceremony evidence, never provider request fields; no pre-genesis H is fabricated. Founding observer and vertex name need not be equal. |
 
-Today `CredentialProvider.for_write(vertex: Path)` cannot express this request;
-the returned callbacks expose no general public-key binding evidence. Designing
-the request and a compatibility adapter is a prerequisite to the persisted
-mapping in D2. Keep location available for ingress/legacy discovery, but do not
-use it as the new identity input. The new request type and persistence schema
-remain unimplemented; this decision defines their separation, not a wire change.
+Neutral `CredentialRequest` and public binding evidence now express this scope.
+Mapped `WriteCredentials` carry a read-only resolver and domain verifier;
+runtime/declaration/source coordinators resolve only after captured authority
+is available. The legacy `CredentialProvider.for_write(vertex: Path)` callback
+shape remains transitional, and mapped credentials are refused on legacy
+engine write paths. Location remains available for ingress/legacy discovery
+but is not the mapped identity input. This is an opt-in local custody
+implementation, not a wire change or automatic migration.
 
 ## D1 — Observer identity survives changes of key and location
 
@@ -88,28 +94,30 @@ under the same observer. Its introduction rule is additive: old keys remain
 valid under that rule. Selecting a new local signing key and revoking an old
 key are separate operations; this pass does not invent revocation semantics.
 
-**Bounded next implementation:** specify a provider request containing the
-explicit observer/domain and the relevant declared identity context. Resolve
-an opaque key reference internally. Keep FACT, ARRIVAL and tick commitments
-separate. Preserve operation-fresh credential acquisition and forbid key
-creation during reads, previews, and signer loading.
-The provider must expose enough public-key evidence for a path claiming
-authorized signing to check the binding against captured key history. An
+**Implemented D0/D2 subset:** the provider request contains the explicit
+namespace, observer, domain and purpose, and resolves an opaque key reference
+internally. Captured lineage/head/position and declared receipt keys remain a
+separate engine-owned authorization context and are not sent to the provider.
+FACT, ARRIVAL and tick commitments stay separate. Operation-fresh credential
+acquisition is preserved, and reads, previews and signer loading create no key.
+The provider exposes enough public-key evidence for the engine to check the
+binding against captured key history. An
 arbitrary signer callback or a replacement local key alone does not establish
 a valid rotation. Ordinary unsigned observations remain legal where the
-operation's policy permits them.
+operation's policy permits them. Missing receipt-observer configuration creates
+no TICK request before the signed era and refuses once a signed era requires a
+receipt.
 
 ## D2 — Preserve existing custody bindings explicitly
 
-**Recommendation:** evolve the filesystem provider toward a persisted mapping
+**Implemented as an explicit opt-in:** the filesystem provider has a persisted mapping
 from exact observer identity to opaque key references. Keep filenames private
 to that provider. This removes the need for every legal protocol label to be
 representable as an exact directory spelling.
 
-The current flat/nested resolver is a compatibility implementation, with
-deliberate refusal of ambiguous keys and filesystem aliases. Do not weaken
-those refusals to make a migration convenient. The next provider design must
-specify:
+The current flat/nested resolver remains a compatibility implementation, with
+deliberate refusal of ambiguous keys and filesystem aliases. Those refusals
+were retained. The mapped provider now specifies:
 
 1. How an existing flat key is bound to its existing self observer before a
    file rename can change the lookup convention.
@@ -120,18 +128,23 @@ specify:
 4. How explicit creation publishes one binding and one winning private key
    under concurrent creators, and how interruptions are reconciled.
 
-An encoded filename without a recorded/verifiable binding is not a complete
-migration plan. No key files or live stores are moved in this pass. Arbitrary
-label portability on a normalizing filesystem remains unimplemented.
+Bindings use hashed slots over exact strings and verified payloads rather than
+encoded identity filenames. Provider-wide mutation locking, durable per-slot
+pending intents and no-clobber publication make creation/import recoverable;
+losing candidate material is retained for explicit maintenance rather than
+deleted in a race. No live key files or stores were moved in this pass, and no
+legacy caller is auto-imported.
 
-An immediate, smaller correction precedes that design: the SDK currently
-accepts `CustodyCredentialProvider(key_dir=...)` but ignores the value.
-Recommend an explicit configuration refusal for non-`None` values until a
-consistent override is supported, rather than continuing to select default
-keys silently. This is an API compatibility change to document and test; it
-does not require a key migration. Repository call sites currently use the
-default constructor; external callers are unknown, so release notes must still
-describe this compatibility change.
+Root's final durability inspection added parent-directory fsync and reconciliation
+of linked-but-unsynced files on retry. The final imported-key correction and
+Fable-low review are accepted. These tests check sync ordering and interruptions;
+they do not claim to simulate physical power loss. See the D0/D2 report for
+frozen review evidence and final 81-test custody validation.
+
+The earlier C4 correction is also complete: the SDK rejects non-`None`
+`CustodyCredentialProvider(key_dir=...)` rather than silently ignoring it.
+The mapped provider is a separate explicit configuration surface and does not
+reinterpret that legacy argument.
 
 ## D3 — Vertex continuity is distinct from residence and declaration version
 
@@ -146,14 +159,17 @@ storeless and multi-store vertices make both substitutions inadequate.
 Current support is narrower. Historized documents supply the effective name;
 runtime ticks use that name as origin. `lang.document.diff_documents` already
 refuses post-genesis vertex renames as routine edits, and Arrival declaration
-preparation uses that function. Retain that restriction. Local custody still
-derives self from the locator stem, so moving a file can change credential
-selection even when its declared identity stays fixed. Any future semantic
+preparation uses that function. Retain that restriction. Legacy local custody
+still derives self from the locator stem, so moving a file can change
+credential selection even when its declared identity stays fixed. The opt-in
+mapped provider instead keeps its explicit namespace/observer binding stable
+across locator moves. Any future semantic
 rename also has to account for tick ownership by origin; present support is
 not a durable identity/alias mechanism.
 
 For the next bounded pass, preserve the existing semantic name and make
-credential binding independent of the locator. Treat runtime identity rename
+credential binding independent of the locator; D0/D2 now provides that opt-in
+mapped path. Treat runtime identity rename
 as an explicit continuity operation requiring a separate design. Do not
 silently translate historical origins or reinterpret a new name as an alias.
 A future durable vertex identifier needs a recorded association to existing
@@ -228,7 +244,7 @@ name establishes a distinct future tick identity but no cutoff for old facts.
 Do not substitute a declaration hash as boundary identity: unrelated or cosmetic
 edits must not reopen consumed observations. The existing post-genesis vertex
 rename refusal remains. Credential-request and persisted-binding work in D0/D2
-is separate from this boundary implementation.
+is now implemented separately from this boundary policy.
 
 ## D6 — Result identity describes evidence and actions separately
 
@@ -254,12 +270,10 @@ discard the cause.
 
 ## Order of work
 
-First align captured-basis validation, including same-height hash disagreement,
-and unchanged exception propagation; registry injection can proceed independently.
-Specify maintenance failure phase/cause evidence before broadening normalization.
-Then make ambiguous boundary execution refuse with useful evidence and design
-the D0 credential request before the explicit custody-binding provider and its
-compatibility path. Stabilize these with public SDK
-conformance before retiring the competing legacy entrypoints. Durable vertex
-IDs, boundary incarnations, revocation, and cross-lineage identity association
+Captured-basis validation, registry injection, maintenance failure evidence,
+ambiguous-boundary refusal and the opt-in D0/D2 custody binding are implemented
+and reviewed. The next roadmap work is workload conformance, explicit
+maintenance/transfer completion and adoption. C9's SDK/CLI legacy cut follows
+after those contracts stabilize. Durable vertex IDs, boundary incarnations,
+revocation, cross-lineage identity association and automatic legacy migration
 remain separately reviewable designs, not hidden additions to this pass.

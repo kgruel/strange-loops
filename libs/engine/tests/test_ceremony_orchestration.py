@@ -55,6 +55,15 @@ class Creds:
         return WriteCredentials(fact_signer=_signer)
 
 
+class MappedCreds:
+    def for_write(self, vertex: Path) -> WriteCredentials:
+        return WriteCredentials(
+            binding_namespace="space",
+            binding_resolver=lambda _request: None,
+            signature_verifier=lambda *_args: True,
+        )
+
+
 @pytest.fixture(params=["jsonl", "sqlite"])
 def world(request, tmp_path: Path):
     locator = "./x.jsonl" if request.param == "jsonl" else "./x.db"
@@ -105,6 +114,23 @@ def test_plan_exposes_genesis_shape(world):
     assert preview.changes == ()
     assert preview.proposed_text == world["base"]
     assert preview.pending_intent is None
+
+
+def test_legacy_ceremony_refuses_mapped_credentials_before_intent_or_store_write(
+    world,
+):
+    preview = plan_declaration_update(world["vertex"])
+
+    result = apply_declaration_update(
+        preview,
+        observer="obs",
+        credentials=MappedCreds(),
+    )
+
+    assert result.status == "refused"
+    assert "Arrival declaration writer" in result.reason
+    assert not intent_path_for(world["vertex"]).exists()
+    assert _resolved_docs(world) is None
 
 
 def test_genesis_plan_apply_end_to_end(world):
@@ -588,6 +614,7 @@ def test_apply_over_out_of_band_index_rows_refuses_typed_pre_intent(tmp_path):
     import dataclasses
 
     from atoms import Fact
+
     from engine.sqlite_store import SqliteStore
 
     locator = "./store/x.jsonl"

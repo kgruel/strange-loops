@@ -23,7 +23,7 @@ from lang.vertex_mutation import (
     upsert_vertex_observer,
 )
 
-from .emit import CustodyCredentialProvider
+from .emit import CustodyCredentialProvider, _refuse_legacy_mapped_credentials
 from .target import resolve_target
 from .types import (
     CeremonyFailed,
@@ -299,6 +299,7 @@ def add_kind(
     vertex_path = Path(target).resolve()
     arrival = _arrival_descriptor_for(vertex_path)
     if arrival is None:
+        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
         info = resolve_target(target)
         if info.target_type != "vertex":
             raise TargetUnsupported(f"add_kind requires a .vertex target, got {info.target_type}")
@@ -360,6 +361,7 @@ def edit_kind(
     vertex_path = Path(target).resolve()
     arrival = _arrival_descriptor_for(vertex_path)
     if arrival is None:
+        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
         info = resolve_target(target)
         if info.target_type != "vertex":
             raise TargetUnsupported(f"edit_kind requires a .vertex target, got {info.target_type}")
@@ -419,6 +421,7 @@ def remove_kind(
     vertex_path = Path(target).resolve()
     arrival = _arrival_descriptor_for(vertex_path)
     if arrival is None:
+        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
         info = resolve_target(target)
         if info.target_type != "vertex":
             raise TargetUnsupported(
@@ -496,6 +499,7 @@ def grant_observer(
     vertex_path = Path(target).resolve()
     arrival = _arrival_descriptor_for(vertex_path)
     if arrival is None:
+        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
         info = resolve_target(target)
         if info.target_type != "vertex":
             raise TargetUnsupported(
@@ -504,6 +508,18 @@ def grant_observer(
     cred_provider = credentials or CustodyCredentialProvider()
 
     if key is None:
+        mapped = getattr(cred_provider, "mapped", False)
+        if arrival is not None and not mapped:
+            # A wrapper need not expose a provider-level marker. Classify its
+            # actual write configuration before the legacy custody helper can
+            # mint a key for this requested observer.
+            from .declare import _arrival_credentials
+
+            mapped = _arrival_credentials(vertex_path, cred_provider).mapped
+        if mapped:
+            raise SdkValueError(
+                "mapped observer grants require an explicitly pre-created binding public key"
+            )
         from custody import ensure_signing_key
 
         try:
@@ -576,6 +592,7 @@ def revoke_observer(
     vertex_path = Path(target).resolve()
     arrival = _arrival_descriptor_for(vertex_path)
     if arrival is None:
+        _refuse_legacy_mapped_credentials(credentials, vertex=vertex_path)
         info = resolve_target(target)
         if info.target_type != "vertex":
             raise TargetUnsupported(

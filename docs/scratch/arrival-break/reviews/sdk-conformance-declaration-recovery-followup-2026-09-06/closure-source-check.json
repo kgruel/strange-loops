@@ -1,0 +1,13 @@
+{
+  "libs/sdk/tests/test_arrival_declaration_recovery_workload.py": true,
+  "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/correction.patch": true,
+  "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/final-findings.md": true,
+  "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/primary-triage.md": true,
+  "libs/engine/src/engine/arrival_declarations.py": true,
+  "docs/scratch/arrival-break/sdk-conformance-declaration-recovery-2026-09-06.md": true,
+  "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/validation-evidence/focused-pytest.log": true,
+  "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/validation-evidence/ruff.log": true,
+  "libs/sdk/README.md": true,
+  "libs/sdk/src/sdk/declare.py": true,
+  "libs/sdk/src/sdk/errors.py": true
+}

@@ -1,0 +1,49 @@
+--- initial/libs/sdk/tests/test_arrival_declaration_recovery_workload.py
++++ final/libs/sdk/tests/test_arrival_declaration_recovery_workload.py
+@@ -118,10 +118,12 @@
+     assert verify_target(vertex).verified_through == before_edit
+ 
+     original_apply = arrival_declarations.apply_declaration_edit
++    injected_phases: list[str] = []
+ 
+     def interrupt_after_append(registry, plan):
+         def fail(phase: str) -> None:
+             if phase == "after-append":
++                injected_phases.append(phase)
+                 raise OSError("injected declaration publication interruption")
+ 
+         return original_apply(registry, plan, failure_hook=fail)
+@@ -142,6 +144,7 @@
+     failure = interrupted.value
+     encoded_failure = failure.as_dict()
+     json.dumps(encoded_failure, allow_nan=False)
++    assert injected_phases == ["after-append"]
+     assert encoded_failure["outcome"] == "committed-incomplete"
+     assert failure.source_type == "DeclarationCommittedIncomplete"
+     assert failure.details["phase"] == "appended"
+@@ -152,7 +155,7 @@
+     }
+     durable_head = failure.details["commit"]["after"]
+     assert durable_head["lineage"] == before_edit.lineage
+-    assert durable_head["ordinal"] > before_edit.ordinal
++    assert durable_head["ordinal"] == before_edit.ordinal + 1
+     assert failure.details["head"] == durable_head
+     assert failure.details["fact_ids"]
+     intent = Path(failure.details["intent_path"])
+@@ -222,7 +225,7 @@
+         order="oldest",
+     )
+     recovered_ids = [item["id"] for item in recovered_internal.items]
+-    assert recovered_ids[: len(baseline_ids)] == baseline_ids
++    assert recovered_ids == baseline_ids + list(recovered.fact_ids)
+     assert all(recovered_ids.count(fact_id) == 1 for fact_id in recovered.fact_ids)
+     recovered_rows = [
+         item for item in recovered_internal.items if item["id"] in recovered.fact_ids
+@@ -262,6 +265,7 @@
+     )
+     assert repeated.status == "noop"
+     assert repeated.phase == "noop"
++    assert repeated.head == durable_head
+     assert repeated.commit is None
+     assert repeated.file_written is False
+     assert verify_target(vertex).as_dict()["verified_through"] == durable_head

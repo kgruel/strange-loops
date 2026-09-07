@@ -1,0 +1,8 @@
+{
+  "status": "complete",
+  "review_verdict": "ACCEPT",
+  "primary_initial_verdict": "ACCEPT",
+  "final_disposition": "ACCEPT",
+  "remaining_blockers": [],
+  "closure": "../sdk-conformance-declaration-recovery-followup-2026-09-06/primary-triage.md"
+}

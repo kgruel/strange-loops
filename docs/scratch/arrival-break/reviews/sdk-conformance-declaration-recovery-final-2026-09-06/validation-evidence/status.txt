@@ -1,0 +1,4 @@
+sdk_exit=0
+arch_exit=0
+ruff_exit=0
+diff_check_exit=0

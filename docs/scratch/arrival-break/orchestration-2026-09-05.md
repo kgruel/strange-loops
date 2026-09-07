@@ -1,3 +1,42 @@
+## September 6: declaration recovery conformance complete; source tiers next
+
+The second public SDK workload-conformance slice is complete and checkpointed
+on `arrival/finish` in `loops-wt/arrival-finish`, based on `2d4d2d0a`. No
+production change was needed. Sol implemented the isolated mapped workflow,
+Terra audited contracts/guidance, Luna validated suites, and root tightened
+semantic controls and triaged two frozen Fable 5.1 LOW reviews.
+
+The workflow starts strict: `note` refuses before declaration. A public edit
+adds that kind and deterministically interrupts after append. Its committed
+head and public intent are retained while the old cache and stale projection
+remain. Inspection refuses without repairing; another edit refuses on
+ProjectionBehind before custody entry. Public recovery, with mapped resolution
+and legacy credential acquisition poisoned, publishes the declaration without
+advancing history. It retains the original basis and exact fact IDs; fresh
+inspection and a complete internal fact list agree. Repeating the proposal is
+a no-op. A reconstructed mapped provider then signs a successful `note` write,
+and its commit, read/projection basis and bounded Full verification align.
+
+Initial and follow-up Fable-low/primary verdicts are **ACCEPT**, no blockers.
+Optional refinements added explicit hook firing, exact one-record advancement,
+complete projected fact IDs and no-op head. Final test SHA-256:
+`75260f0bdaad5a140f61bd04203934e33c7a63b0926ca87f28ae81515b8a4563`.
+Full SDK **580 passed** /21.79s; architecture **101 passed** /6.20s before only
+those assertion refinements. Final focused **49 passed** /1.28s, Ruff and
+whitespace checks pass. All test processes isolated XDG state/config and
+LOOPS_HOME. No live stores or keys were used; nothing pushed and no pending jobs.
+
+The [report](sdk-conformance-declaration-recovery-2026-09-06.md) links native
+logs and final triage. This is after-append exception conformance, not a
+process/power-loss test, every recovery phase, or restore-forward. Resume after
+the user’s compaction. **Next bounded slice:** run sources with partial failure,
+inspect persisted tiers, determine what can safely resume, using the established
+Sol/Terra/Luna and Fable-low pattern. Then captured-prefix export → restore
+forward → verify → explicit sync → read. C9 transition/retirement and larger
+maintenance/transfer/adoption work remain separate. No next slice began here.
+
+Earlier entries below preserve their status at the time of writing.
+
 ## September 6: two-observer SDK conformance checkpoint; declaration recovery next
 
 The first public SDK workload-conformance slice is complete on `arrival/finish`

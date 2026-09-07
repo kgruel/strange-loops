@@ -1,0 +1,2044 @@
+Final focused adversarial follow-up, Fable 5.1 LOW. Static only; no tools/execution/delegation. Return ACCEPT or REVISE with concrete blockers, then optional notes. Initial Fable and primary verdicts ACCEPT, no blockers. Root elected four optional assertion refinements. Assess the final test and correction diff: explicit hook firing instead of merely OSError type (incidental I/O could have same type), exact one-record count for one new kind/no keys, full recovered projection ID list, noop result head. Does it close optional feedback without brittle/false claims? Scope is deterministic public mapped SDK after-append interruption/recovery/inspection/continued strict-kind writing, not process crash/all phases/C9. Production unchanged from initial review. Include source engine recovery context, previous findings/triage, maintained report, native correction49 logs. No more broadening unless a concrete defect. Full SDK580 and architecture101 preceded assertion-only changes; final49/1.28s and Ruff passed. Reviewer must not claim own execution or that provider constructors are poisoned (only mapped resolve/legacy for_write).
+
+===== libs/sdk/tests/test_arrival_declaration_recovery_workload.py =====
+1: """Public mapped-custody conformance for interrupted declaration recovery."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import json
+6: from dataclasses import asdict
+7: from pathlib import Path
+8: 
+9: import pytest
+10: from engine import arrival_declarations
+11: from engine.arrival_contract import ProjectionBehind
+12: 
+13: from sdk import (
+14:     AdmissionFailed,
+15:     ArrivalRefusal,
+16:     CommittedIncomplete,
+17:     CustodyCredentialProvider,
+18:     MappedCredentialProvider,
+19:     edit_declaration,
+20:     emit_fact,
+21:     init_vertex,
+22:     inspect_declaration,
+23:     read_facts,
+24:     recover_declaration,
+25:     verify_target,
+26: )
+27: 
+28: 
+29: @pytest.fixture(autouse=True)
+30: def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+31:     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+32:     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+33:     monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
+34: 
+35: 
+36: def _add_note_kind(declaration: str, *, collect_limit: int = 10) -> str:
+37:     item = (
+38:         "  item {\n"
+39:         "    fold {\n"
+40:         '      items "collect" 100\n'
+41:         "    }\n"
+42:         "  }\n"
+43:     )
+44:     note = (
+45:         "  note {\n"
+46:         "    fold {\n"
+47:         f'      items "collect" {collect_limit}\n'
+48:         "    }\n"
+49:         "  }\n"
+50:     )
+51:     assert declaration.count(item) == 1
+52:     return declaration.replace(item, item + note)
+53: 
+54: 
+55: def test_mapped_declaration_recovery_restores_inspection_and_writes(
+56:     tmp_path: Path,
+57:     monkeypatch: pytest.MonkeyPatch,
+58: ) -> None:
+59:     provider = MappedCredentialProvider(
+60:         tmp_path / "custody",
+61:         namespace="recovery-tenant",
+62:         receipt_observer="alice",
+63:     )
+64:     provider.create_binding("alice", token="create-alice")
+65:     vertex = tmp_path / "workflow.vertex"
+66:     initialized = init_vertex(
+67:         vertex,
+68:         name="workflow",
+69:         store_type="arrival",
+70:         location=(tmp_path / "data" / "workflow.arrival").resolve(),
+71:         observer="alice",
+72:         strict=True,
+73:         credentials=provider,
+74:     )
+75:     assert initialized.lineage is not None
+76:     proposed = _add_note_kind(vertex.read_text(encoding="utf-8"))
+77:     original_cache = vertex.read_bytes()
+78:     baseline_inspection = inspect_declaration(vertex)
+79:     assert baseline_inspection.basis is not None
+80:     assert baseline_inspection.store == initialized.store
+81:     assert baseline_inspection.local_status == "matches-effective"
+82:     assert baseline_inspection.declared_kinds == ["item"]
+83:     baseline_basis = asdict(baseline_inspection.basis)
+84:     baseline_internal = read_facts(
+85:         vertex,
+86:         include_internal=True,
+87:         limit=20,
+88:         order="oldest",
+89:     )
+90:     baseline_ids = [item["id"] for item in baseline_internal.items]
+91:     initial_verification = verify_target(vertex)
+92:     assert initial_verification.claims == (
+93:         "grammar",
+94:         "density",
+95:         "lineage",
+96:         "hash-chain",
+97:     )
+98:     assert initial_verification.excludes == (
+99:         "signature-authorship",
+100:         "external-key-trust",
+101:         "projection",
+102:     )
+103:     before_edit = initial_verification.verified_through
+104:     assert before_edit is not None
+105:     with pytest.raises(AdmissionFailed) as undeclared:
+106:         emit_fact(
+107:             vertex,
+108:             "note",
+109:             {"text": "before declaration"},
+110:             observer="alice",
+111:             origin="recovery-workflow",
+112:             ts=9.0,
+113:             id_override="note-before-declaration",
+114:             credentials=provider,
+115:         )
+116:     assert undeclared.value.observer == "alice"
+117:     assert undeclared.value.kind == "note"
+118:     assert verify_target(vertex).verified_through == before_edit
+119: 
+120:     original_apply = arrival_declarations.apply_declaration_edit
+121:     injected_phases: list[str] = []
+122: 
+123:     def interrupt_after_append(registry, plan):
+124:         def fail(phase: str) -> None:
+125:             if phase == "after-append":
+126:                 injected_phases.append(phase)
+127:                 raise OSError("injected declaration publication interruption")
+128: 
+129:         return original_apply(registry, plan, failure_hook=fail)
+130: 
+131:     monkeypatch.setattr(
+132:         arrival_declarations,
+133:         "apply_declaration_edit",
+134:         interrupt_after_append,
+135:     )
+136:     with pytest.raises(CommittedIncomplete) as interrupted:
+137:         edit_declaration(
+138:             vertex,
+139:             proposed,
+140:             observer="alice",
+141:             credentials=provider,
+142:         )
+143: 
+144:     failure = interrupted.value
+145:     encoded_failure = failure.as_dict()
+146:     json.dumps(encoded_failure, allow_nan=False)
+147:     assert injected_phases == ["after-append"]
+148:     assert encoded_failure["outcome"] == "committed-incomplete"
+149:     assert failure.source_type == "DeclarationCommittedIncomplete"
+150:     assert failure.details["phase"] == "appended"
+151:     assert failure.details["commit"]["before"] == {
+152:         "lineage": before_edit.lineage,
+153:         "ordinal": before_edit.ordinal,
+154:         "record_hash": before_edit.record_hash,
+155:     }
+156:     durable_head = failure.details["commit"]["after"]
+157:     assert durable_head["lineage"] == before_edit.lineage
+158:     assert durable_head["ordinal"] == before_edit.ordinal + 1
+159:     assert failure.details["head"] == durable_head
+160:     assert failure.details["fact_ids"]
+161:     intent = Path(failure.details["intent_path"])
+162:     assert intent.exists()
+163:     assert vertex.read_bytes() == original_cache
+164:     assert verify_target(vertex).as_dict()["verified_through"] == durable_head
+165: 
+166:     with pytest.raises(ProjectionBehind):
+167:         inspect_declaration(vertex)
+168: 
+169:     with pytest.raises(ArrivalRefusal) as pending:
+170:         edit_declaration(
+171:             vertex,
+172:             _add_note_kind(
+173:                 vertex.read_text(encoding="utf-8"),
+174:                 collect_limit=11,
+175:             ),
+176:             observer="alice",
+177:             credentials=provider,
+178:         )
+179:     assert pending.value.source_type == "DeclarationPreparationRefused"
+180:     pending_evidence = pending.value.details["evidence"]
+181:     assert pending_evidence["phase"] == "prepare"
+182:     assert pending_evidence["effects"]["custody"] == {
+183:         "state": "not-attempted",
+184:         "attempt": "not-entered",
+185:     }
+186:     assert pending_evidence["cause"]["type"] == "ProjectionBehind"
+187:     assert pending_evidence["basis"]["captured_head"] == durable_head
+188:     assert intent.exists()
+189:     assert verify_target(vertex).as_dict()["verified_through"] == durable_head
+190: 
+191:     with monkeypatch.context() as recovery_poison:
+192:         recovery_poison.setattr(
+193:             MappedCredentialProvider,
+194:             "resolve",
+195:             lambda *_args, **_kwargs: pytest.fail(
+196:                 "declaration recovery resolved mapped signing credentials"
+197:             ),
+198:         )
+199:         recovery_poison.setattr(
+200:             CustodyCredentialProvider,
+201:             "for_write",
+202:             lambda *_args, **_kwargs: pytest.fail(
+203:                 "declaration recovery acquired legacy signing credentials"
+204:             ),
+205:         )
+206:         recovered = recover_declaration(intent)
+207:     assert recovered.status == "recovered"
+208:     assert recovered.phase == "published"
+209:     assert recovered.commit is None
+210:     assert recovered.changes is None
+211:     assert recovered.file_written is True
+212:     assert recovered.head == durable_head
+213:     assert recovered.captured_head == failure.details["commit"]["before"]
+214:     assert recovered.basis == baseline_basis
+215:     assert recovered.fact_ids == tuple(failure.details["fact_ids"])
+216:     assert not intent.exists()
+217:     assert vertex.read_text(encoding="utf-8") == proposed
+218:     assert verify_target(vertex).as_dict()["verified_through"] == durable_head
+219:     json.dumps(recovered.as_dict(), allow_nan=False)
+220: 
+221:     recovered_internal = read_facts(
+222:         vertex,
+223:         include_internal=True,
+224:         limit=20,
+225:         order="oldest",
+226:     )
+227:     recovered_ids = [item["id"] for item in recovered_internal.items]
+228:     assert recovered_ids == baseline_ids + list(recovered.fact_ids)
+229:     assert all(recovered_ids.count(fact_id) == 1 for fact_id in recovered.fact_ids)
+230:     recovered_rows = [
+231:         item for item in recovered_internal.items if item["id"] in recovered.fact_ids
+232:     ]
+233:     assert len(recovered_rows) == len(recovered.fact_ids)
+234:     note_declarations = [
+235:         item
+236:         for item in recovered_rows
+237:         if item["kind"] == "_decl.kind-defined"
+238:         and item["payload"]["subject"] == "note"
+239:     ]
+240:     assert len(note_declarations) == 1
+241: 
+242:     inspection = inspect_declaration(vertex)
+243:     assert inspection.read_path == "arrival"
+244:     assert inspection.syntax_valid is True
+245:     assert inspection.status == inspection.effective_status == "store"
+246:     assert inspection.local_status == "matches-effective"
+247:     assert inspection.declared_kinds == ["item", "note"]
+248:     assert inspection.basis is not None
+249:     assert inspection.basis.lineage == initialized.lineage
+250:     assert inspection.basis.captured_head == inspection.basis.projected_through
+251:     assert inspection.basis.captured_head.ordinal == durable_head["ordinal"]
+252:     assert inspection.basis.captured_head.record_hash == durable_head["record_hash"]
+253:     json.dumps(inspection.as_dict(), allow_nan=False)
+254: 
+255:     monkeypatch.setattr(
+256:         arrival_declarations,
+257:         "apply_declaration_edit",
+258:         original_apply,
+259:     )
+260:     repeated = edit_declaration(
+261:         vertex,
+262:         proposed,
+263:         observer="alice",
+264:         credentials=provider,
+265:     )
+266:     assert repeated.status == "noop"
+267:     assert repeated.phase == "noop"
+268:     assert repeated.head == durable_head
+269:     assert repeated.commit is None
+270:     assert repeated.file_written is False
+271:     assert verify_target(vertex).as_dict()["verified_through"] == durable_head
+272: 
+273:     reopened_provider = MappedCredentialProvider(
+274:         tmp_path / "custody",
+275:         namespace="recovery-tenant",
+276:         receipt_observer="alice",
+277:     )
+278:     continued = emit_fact(
+279:         vertex,
+280:         "note",
+281:         {"text": "after recovery"},
+282:         observer="alice",
+283:         origin="recovery-workflow",
+284:         ts=20.0,
+285:         id_override="note-after-recovery",
+286:         credentials=reopened_provider,
+287:     )
+288:     assert continued.stored is True
+289:     assert continued.signed is True
+290:     assert continued.commit is not None
+291:     assert continued.commit.before.ordinal == durable_head["ordinal"]
+292:     assert continued.commit.before.record_hash == durable_head["record_hash"]
+293:     assert continued.commit.after.lineage == initialized.lineage
+294:     assert continued.commit.after.ordinal > continued.commit.before.ordinal
+295:     assert continued.witnessed is True
+296:     assert continued.projection == "synced"
+297: 
+298:     page = read_facts(vertex, kind="note", limit=10, order="oldest")
+299:     assert page.basis is not None
+300:     assert page.basis.lineage == initialized.lineage
+301:     assert page.basis.captured_head == continued.commit.after
+302:     assert page.basis.projected_through == page.basis.captured_head
+303:     assert [(item["id"], item["observer"], item["payload"]) for item in page.items] == [
+304:         ("note-after-recovery", "alice", {"text": "after recovery"})
+305:     ]
+306:     verified = verify_target(vertex)
+307:     assert verified.captured_head == continued.commit.after
+308:     assert verified.verified_through == page.basis.captured_head
+309:     assert verified.claims == initial_verification.claims
+310:     assert verified.excludes == initial_verification.excludes
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/correction.patch =====
+1: --- initial/libs/sdk/tests/test_arrival_declaration_recovery_workload.py
+2: +++ final/libs/sdk/tests/test_arrival_declaration_recovery_workload.py
+3: @@ -118,10 +118,12 @@
+4:      assert verify_target(vertex).verified_through == before_edit
+5:  
+6:      original_apply = arrival_declarations.apply_declaration_edit
+7: +    injected_phases: list[str] = []
+8:  
+9:      def interrupt_after_append(registry, plan):
+10:          def fail(phase: str) -> None:
+11:              if phase == "after-append":
+12: +                injected_phases.append(phase)
+13:                  raise OSError("injected declaration publication interruption")
+14:  
+15:          return original_apply(registry, plan, failure_hook=fail)
+16: @@ -142,6 +144,7 @@
+17:      failure = interrupted.value
+18:      encoded_failure = failure.as_dict()
+19:      json.dumps(encoded_failure, allow_nan=False)
+20: +    assert injected_phases == ["after-append"]
+21:      assert encoded_failure["outcome"] == "committed-incomplete"
+22:      assert failure.source_type == "DeclarationCommittedIncomplete"
+23:      assert failure.details["phase"] == "appended"
+24: @@ -152,7 +155,7 @@
+25:      }
+26:      durable_head = failure.details["commit"]["after"]
+27:      assert durable_head["lineage"] == before_edit.lineage
+28: -    assert durable_head["ordinal"] > before_edit.ordinal
+29: +    assert durable_head["ordinal"] == before_edit.ordinal + 1
+30:      assert failure.details["head"] == durable_head
+31:      assert failure.details["fact_ids"]
+32:      intent = Path(failure.details["intent_path"])
+33: @@ -222,7 +225,7 @@
+34:          order="oldest",
+35:      )
+36:      recovered_ids = [item["id"] for item in recovered_internal.items]
+37: -    assert recovered_ids[: len(baseline_ids)] == baseline_ids
+38: +    assert recovered_ids == baseline_ids + list(recovered.fact_ids)
+39:      assert all(recovered_ids.count(fact_id) == 1 for fact_id in recovered.fact_ids)
+40:      recovered_rows = [
+41:          item for item in recovered_internal.items if item["id"] in recovered.fact_ids
+42: @@ -262,6 +265,7 @@
+43:      )
+44:      assert repeated.status == "noop"
+45:      assert repeated.phase == "noop"
+46: +    assert repeated.head == durable_head
+47:      assert repeated.commit is None
+48:      assert repeated.file_written is False
+49:      assert verify_target(vertex).as_dict()["verified_through"] == durable_head
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/final-findings.md =====
+1: # final — Fable review
+2: 
+3: Effort: low. Finished: 2026-09-07T01:01:38.837664+00:00.
+4: Packet SHA-256: `c35bacd0203dbd495359d6fe5f4e46010c6d0dc77b390306567578b64001b2a8`.
+5: 
+6: Static reviewer output; findings still require primary triage.
+7: 
+8: **Verdict: ACCEPT.** No blockers. The executable assertions match the engine paths they claim to cover, and the README/scratch claims stay inside what the test demonstrates.
+9: 
+10: **What holds up under static trace**
+11: 
+12: - **Interruption site is real.** The hook fires at `arrival_declarations.py:1348`, after the intent phase is durably recorded as `appended` and before `sync_projection`. The resulting `DeclarationCommittedIncomplete` carries phase, head, commit, intent path and fact IDs, all of which `errors.py:_identity_details` serializes. The test's before/after/head/intent assertions (lines 147-159) are causally tied to that site, not to a generic failure.
+13: - **Durable commit vs projection lag is separated.** Verified head advances to the durable head (line 161) while the cache bytes are unchanged (line 160), inspection refuses with `ProjectionBehind` (line 163), and the second edit refuses in `prepare` with custody `not-entered` and a `ProjectionBehind` cause (lines 176-184). That matches `_preparation_refused` and the `except Exception` arm at `arrival_declarations.py:1041`.
+14: - **No duplicate append.** The head is unchanged across recovery and the noop re-edit (lines 209, 215, 267), and the continued write's commit predecessor equals the durable head (lines 287-288). Since drafts never re-sign or re-append in `_recover_declaration_edit`, this is the correct custody-level proof.
+15: - **Original basis vs fresh basis is truthful.** `recovered.basis == baseline_basis` (line 211) pins the pre-edit basis. That only works because line 118 establishes nothing was appended between inspection and edit. The fresh basis is then separately obtained from inspection (lines 247-249), matching the README wording.
+16: - **Credential-free recovery.** `recover_declaration` accepts no credentials, and the poisoned `resolve`/`for_write` guard would fail loudly if a default provider were constructed. Subsequent authorized write uses a reconstructed provider. Fine.
+17: - **Isolation.** XDG state/config and `LOOPS_HOME` are redirected, custody root and store live under `tmp_path`, and the lock/intent sidecars sit beside the vertex in `tmp_path`.
+18: - **Docs.** README lines 251-275 and the scratch doc claim only the deterministic `after-append` hook path, no commit on recovery, original basis, and the bounded `Full` exclusions. Consistent with the code.
+19: 
+20: **Optional findings (non-blocking)**
+21: 
+22: 1. **Causal specificity of the interruption.** `phase == "appended"` is also produced if `_replace_json` at line 1346 fails for an incidental reason. Add one line to pin the cause to the injected exception:
+23:    ```python
+24:    assert failure.details["evidence"]["cause"]["type"] == "OSError"
+25:    ```
+26: 2. **Exact append record count.** Line 155 only asserts `>`. The declaration envelope is one Arrival record with no key introductions here, so `== before_edit.ordinal + 1` is a tighter identity claim.
+27: 3. **Projection-level duplication.** Line 231 counts `note` declaration facts only within `recovered_rows`, so a projection that replayed the suffix under fresh IDs would not be caught by that assertion (the head checks catch custody duplication, not projection duplication). Filter over `recovered_internal.items` instead, or add `assert recovered_ids == baseline_ids + list(recovered.fact_ids)`.
+28: 4. `repeated.head` is not asserted; `== durable_head` would close the noop path.
+29: 
+30: Test logs are treated as native evidence only; I did not execute anything.
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/primary-triage.md =====
+1: # Primary triage: declaration recovery conformance
+2: 
+3: Fable 5.1 LOW: **ACCEPT**. Primary: **ACCEPT**, no blockers.
+4: Packet SHA-256: `c35bacd0203dbd495359d6fe5f4e46010c6d0dc77b390306567578b64001b2a8`.
+5: 
+6: The deterministic public workflow correctly distinguishes committed custody
+7: from projection/cache readiness. Recovery preserves the original basis and
+8: head without signing or another append; fresh inspection and the subsequent
+9: mapped write establish the new declaration's usable state. Full verification
+10: claims remain bounded, and fixtures use isolated temporary roots.
+11: 
+12: Root elected to incorporate the four optional assertion improvements before
+13: final closure: exact hook firing, one-record ordinal advancement, the complete
+14: projected fact-ID list, and the no-op result head. The proposed OSError-type
+15: check alone would also match an incidental filesystem OSError; explicit hook
+16: firing is stronger for this fixture. The projection-list assertion is useful
+17: because existing head equality proves no custody duplication while the list
+18: also catches unexpected query rows with fresh IDs.
+19: 
+20: Reviewer wording that the poison catches provider construction is too broad:
+21: the guards intercept mapped resolution and legacy `for_write`, not constructors
+22: or every possible private key access. Maintained documentation makes the
+23: narrower claim. No production credential or recovery change is required.
+24: 
+25: Full SDK 580/21.79s and architecture 101/6.20s passed on the reviewed test;
+26: focused 49/1.13s and Ruff passed. Review was static, not independent execution.
+27: All sources matched at review launch. The post-review source check raced the
+28: optional test refinement: production, guidance and logs still match, while the
+29: test has the documented optional changes. Final focused validation is 49/1.28s
+30: and Ruff passes; a separate follow-up review covers the refined test.
+
+===== libs/engine/src/engine/arrival_declarations.py =====
+1: """Prepare, apply, and recover signed declaration edits on Arrival.
+2: 
+3: Preparation captures one attested read basis and exact signed records. Apply
+4: uses a durable intent and full-head CAS; recovery reconciles a known suffix and
+5: finishes projection/cache work without resigning or overwriting competing data.
+6: """
+7: 
+8: from __future__ import annotations
+9: 
+10: import base64
+11: import fcntl
+12: import hashlib
+13: import json
+14: import os
+15: import tempfile
+16: import time
+17: from collections.abc import Callable, Mapping, Sequence
+18: from contextlib import contextmanager, suppress
+19: from dataclasses import dataclass
+20: from pathlib import Path
+21: from typing import Any, Literal
+22: 
+23: from lang import diff_documents, parse_vertex, validate_vertex, vertex_to_documents
+24: from lang.document import DECL_OBSERVER_DEFINED, Change
+25: from ulid import ULID
+26: 
+27: from .admission import fact_commitment_hash
+28: from .arrival import (
+29:     ArrivalError,
+30:     content_commitment,
+31:     key_registry_from_records,
+32: )
+33: from .arrival_body import body_of_batch, body_of_fact_row
+34: from .arrival_boundary_continuity import (
+35:     BoundaryContinuityConflict,
+36:     analyze_boundary_continuity,
+37:     collect_verified_parameter_rows,
+38: )
+39: from .arrival_contract import (
+40:     ArrivalLedger,
+41:     ArrivalQuery,
+42:     AtomicLimitExceeded,
+43:     FactRequest,
+44:     Head,
+45:     Profile,
+46:     ProjectionBehind,
+47:     ProjectionRequirement,
+48:     ReadBasis,
+49:     RecordDraft,
+50:     StoreDescriptor,
+51:     TickRequest,
+52:     Watermark,
+53: )
+54: from .arrival_head_seam import (
+55:     Compared,
+56:     Indeterminate,
+57:     PreGenesis,
+58:     complete_projection_custody,
+59: )
+60: from .arrival_registry import BackendRegistry
+61: from .credentials import (
+62:     CapturedSigningContext,
+63:     CredentialBindingEvidence,
+64:     CredentialBindingRefused,
+65:     CredentialPurpose,
+66:     CredentialRequest,
+67:     CredentialResolutionSession,
+68:     SigningDomain,
+69:     WriteCredentials,
+70: )
+71: from .declaration import (
+72:     Unhistorized,
+73:     resolve_declaration_documents_from_snapshot,
+74:     validate_arrival_declaration_anchor,
+75:     validate_arrival_runtime_identity,
+76: )
+77: 
+78: __all__ = [
+79:     "DeclarationPreparationError",
+80:     "DeclarationPreparationRefused",
+81:     "DeclarationEditPlan",
+82:     "DeclarationEditResult",
+83:     "DeclarationApplyError",
+84:     "DeclarationStale",
+85:     "DeclarationNotApplied",
+86:     "DeclarationOutcomeUnknown",
+87:     "DeclarationUnwitnessed",
+88:     "DeclarationCommittedIncomplete",
+89:     "declaration_intent_path",
+90:     "prepare_declaration_edit",
+91:     "apply_declaration_edit",
+92:     "recover_declaration_edit",
+93: ]
+94: 
+95: 
+96: class DeclarationPreparationError(ArrivalError):
+97:     """The declaration edit could not be prepared without mutation."""
+98: 
+99: 
+100: class DeclarationPreparationRefused(DeclarationPreparationError):
+101:     """A declaration edit input or signed draft failed a preparation gate."""
+102: 
+103:     def __init__(
+104:         self,
+105:         *args: object,
+106:         coordinator_phase: str | None = None,
+107:         effects: Mapping[str, Mapping[str, str]] | None = None,
+108:         captured_head: Head | None = None,
+109:         projected_head: Head | None = None,
+110:     ) -> None:
+111:         super().__init__(*args)
+112:         self.coordinator_phase = coordinator_phase
+113:         self.effects = effects
+114:         if captured_head is not None:
+115:             self.captured_head = captured_head
+116:         if projected_head is not None:
+117:             self.projected_head = projected_head
+118: 
+119: 
+120: def _preparation_refused(
+121:     message: str,
+122:     *,
+123:     captured_head: Head | None = None,
+124:     projected_head: Head | None = None,
+125: ) -> DeclarationPreparationRefused:
+126:     return DeclarationPreparationRefused(
+127:         message,
+128:         coordinator_phase="prepare",
+129:         effects={
+130:             "custody": {"attempt": "not-entered", "state": "not-attempted"}
+131:         },
+132:         captured_head=captured_head,
+133:         projected_head=projected_head,
+134:     )
+135: 
+136: 
+137: class DeclarationApplyError(ArrivalError):
+138:     """A declaration apply or recovery operation could not complete."""
+139: 
+140: 
+141: class DeclarationStale(DeclarationApplyError):
+142:     """The captured full head or declaration cache moved before append."""
+143: 
+144: 
+145: class DeclarationNotApplied(DeclarationApplyError):
+146:     """A durable prepared intent is proven to have reached no append."""
+147: 
+148: 
+149: class DeclarationOutcomeUnknown(DeclarationApplyError):
+150:     """Append transport failed without proving whether the records landed."""
+151: 
+152:     def __init__(self, message: str, *, head: Head | None, intent_path: Path,
+153:                  fact_ids: tuple[str, ...], cause: BaseException) -> None:
+154:         super().__init__(message)
+155:         self.head = head
+156:         self.intent_path = intent_path
+157:         self.fact_ids = fact_ids
+158:         self.cause = cause
+159: 
+160: 
+161: class DeclarationUnwitnessed(DeclarationApplyError):
+162:     """Append committed, but its custody journal witness was unavailable."""
+163: 
+164:     def __init__(self, message: str, *, head: Head, commit: Any,
+165:                  intent_path: Path, fact_ids: tuple[str, ...], cause: BaseException) -> None:
+166:         super().__init__(message)
+167:         self.head = head
+168:         self.commit = commit
+169:         self.intent_path = intent_path
+170:         self.fact_ids = fact_ids
+171:         self.cause = cause
+172: 
+173: 
+174: class DeclarationCommittedIncomplete(DeclarationApplyError):
+175:     """Append is known durable, but sync/publication/cleanup remains pending."""
+176: 
+177:     def __init__(self, message: str, *, phase: str, head: Head,
+178:                  commit: Any, intent_path: Path, fact_ids: tuple[str, ...],
+179:                  cause: BaseException) -> None:
+180:         super().__init__(message)
+181:         self.phase = phase
+182:         self.head = head
+183:         self.commit = commit
+184:         self.intent_path = intent_path
+185:         self.fact_ids = fact_ids
+186:         self.cause = cause
+187: 
+188: 
+189: @dataclass(frozen=True)
+190: class DeclarationEditPlan:
+191:     """Exact, signed declaration transition prepared against one Arrival head."""
+192: 
+193:     status: Literal["planned", "noop"]
+194:     target_path: Path
+195:     descriptor: StoreDescriptor
+196:     lineage: str
+197:     basis: ReadBasis
+198:     captured_head: Head
+199:     before_documents: tuple[Mapping[str, Any], ...]
+200:     proposed_documents: tuple[Mapping[str, Any], ...]
+201:     changes: tuple[Change, ...]
+202:     authored_at: float | None
+203:     observer: str
+204:     drafts: tuple[RecordDraft, ...]
+205:     fact_ids: tuple[str, ...]
+206:     key_introductions: tuple[str, ...]
+207:     old_cache_bytes: bytes
+208:     old_cache_sha256: str
+209:     proposed_text: str
+210:     atomic_limit: int | None
+211:     exact_drafts: str
+212:     credential_bindings: tuple[CredentialBindingEvidence, ...] = ()
+213: 
+214: 
+215: @dataclass(frozen=True)
+216: class DeclarationEditResult:
+217:     """Apply/recovery outcome with exact identity and reconciliation evidence.
+218: 
+219:     ``file_written`` reports publication by this invocation. ``phase`` reports
+220:     the reconciled operation state, including an already-published cache.
+221:     """
+222: 
+223:     status: Literal[
+224:         "noop", "applied", "stale", "refused", "unknown", "unwitnessed",
+225:         "committed-incomplete", "recovered", "not-applied", "conflict",
+226:     ]
+227:     target_path: Path
+228:     descriptor: StoreDescriptor
+229:     lineage: str
+230:     basis: ReadBasis
+231:     captured_head: Head
+232:     head: Head | None
+233:     commit: Any | None
+234:     fact_ids: tuple[str, ...]
+235:     intent_path: Path | None
+236:     phase: str
+237:     file_written: bool
+238:     changes: tuple[Change, ...] | None
+239: 
+240: 
+241: def _close_quietly(handle: object | None) -> None:
+242:     if handle is None:
+243:         return
+244:     close = getattr(handle, "close", None)
+245:     if callable(close):
+246:         with suppress(Exception):
+247:             close()
+248: 
+249: 
+250: def _draft_to_dict(draft: RecordDraft) -> dict[str, Any]:
+251:     return {
+252:         "kind": draft.kind,
+253:         "authored_at": draft.authored_at,
+254:         "observer": draft.observer,
+255:         "origin": draft.origin,
+256:         "body": dict(draft.body),
+257:         "signature": draft.signature,
+258:     }
+259: 
+260: 
+261: def _exact_drafts(drafts: Sequence[RecordDraft]) -> str:
+262:     """Canonical preparation snapshot used to detect nested plan mutation."""
+263:     return json.dumps(
+264:         [_draft_to_dict(draft) for draft in drafts],
+265:         ensure_ascii=False,
+266:         sort_keys=True,
+267:         separators=(",", ":"),
+268:     )
+269: 
+270: 
+271: def declaration_intent_path(target: Path | str) -> Path:
+272:     """The exclusive durable sidecar for one declaration edit."""
+273:     target_path = Path(target).resolve()
+274:     return target_path.with_name(target_path.name + ".arrival-decl.intent")
+275: 
+276: 
+277: def _declaration_lock_path(target: Path) -> Path:
+278:     return target.with_name(target.name + ".arrival-decl.lock")
+279: 
+280: 
+281: @contextmanager
+282: def _declaration_lock(target: Path):
+283:     """Serialize apply/recovery while releasing the lock on process death."""
+284:     lock_path = _declaration_lock_path(target)
+285:     lock_path.parent.mkdir(parents=True, exist_ok=True)
+286:     with lock_path.open("a+b") as lock_fh:
+287:         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+288:         try:
+289:             yield
+290:         finally:
+291:             fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+292: 
+293: 
+294: def _head_dict(head: Head | None) -> dict[str, Any] | None:
+295:     if head is None:
+296:         return None
+297:     return {
+298:         "lineage": head.lineage,
+299:         "ordinal": head.ordinal,
+300:         "record_hash": head.record_hash,
+301:     }
+302: 
+303: 
+304: def _descriptor_dict(descriptor: StoreDescriptor) -> dict[str, Any]:
+305:     return {
+306:         "backend": descriptor.backend,
+307:         "location": descriptor.location,
+308:         "lineage": descriptor.lineage,
+309:         "role": None if descriptor.role is None else descriptor.role.value,
+310:         "query": descriptor.query,
+311:         "witness": descriptor.witness,
+312:     }
+313: 
+314: 
+315: def _descriptor_from(data: Mapping[str, Any]) -> StoreDescriptor:
+316:     role = data.get("role")
+317:     return StoreDescriptor(
+318:         backend=str(data["backend"]),
+319:         location=str(data["location"]),
+320:         lineage=data.get("lineage"),
+321:         role=None if role is None else Profile(str(role)),
+322:         query=data.get("query"),
+323:         witness=data.get("witness"),
+324:     )
+325: 
+326: 
+327: def _intent_data(plan: DeclarationEditPlan, *, phase: str) -> dict[str, Any]:
+328:     return {
+329:         "schema": "loops.engine/arrival-declaration-intent/v1",
+330:         "phase": phase,
+331:         "target": str(plan.target_path),
+332:         "descriptor": _descriptor_dict(plan.descriptor),
+333:         "lineage": plan.lineage,
+334:         "captured_head": _head_dict(plan.captured_head),
+335:         "basis": {
+336:             "lineage": plan.basis.lineage,
+337:             "captured_head": _head_dict(plan.basis.captured_head),
+338:             "projected_through": _head_dict(plan.basis.projected_through),
+339:             "view_generation": plan.basis.view_generation,
+340:         },
+341:         "observer": plan.observer,
+342:         "fact_ids": list(plan.fact_ids),
+343:         "drafts": json.loads(plan.exact_drafts),
+344:         "exact_drafts": plan.exact_drafts,
+345:         "old_cache_b64": base64.b64encode(plan.old_cache_bytes).decode("ascii"),
+346:         "old_cache_sha256": plan.old_cache_sha256,
+347:         "proposed_text": plan.proposed_text,
+348:         "key_introductions": list(plan.key_introductions),
+349:     }
+350: 
+351: 
+352: def _fsync_parent(path: Path) -> None:
+353:     try:
+354:         fd = os.open(path.parent, os.O_RDONLY)
+355:     except OSError:
+356:         raise
+357:     try:
+358:         os.fsync(fd)
+359:     finally:
+360:         os.close(fd)
+361: 
+362: 
+363: def _write_exclusive_json(path: Path, data: Mapping[str, Any]) -> None:
+364:     path.parent.mkdir(parents=True, exist_ok=True)
+365:     encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+366:     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+367:     try:
+368:         with os.fdopen(fd, "w", encoding="utf-8") as stream:
+369:             stream.write(encoded + "\n")
+370:             stream.flush()
+371:             os.fsync(stream.fileno())
+372:         _fsync_parent(path)
+373:     except BaseException:
+374:         with suppress(FileNotFoundError):
+375:             path.unlink()
+376:         raise
+377: 
+378: 
+379: def _replace_json(path: Path, data: Mapping[str, Any]) -> None:
+380:     encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+381:     fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+382:     temp = Path(raw)
+383:     try:
+384:         with os.fdopen(fd, "w", encoding="utf-8") as stream:
+385:             stream.write(encoded + "\n")
+386:             stream.flush()
+387:             os.fsync(stream.fileno())
+388:         temp.replace(path)
+389:         _fsync_parent(path)
+390:     finally:
+391:         with suppress(FileNotFoundError):
+392:             temp.unlink()
+393: 
+394: 
+395: def _read_intent(path: Path) -> dict[str, Any]:
+396:     try:
+397:         data = json.loads(path.read_text(encoding="utf-8"))
+398:     except (OSError, ValueError) as exc:
+399:         raise DeclarationApplyError(f"cannot read declaration intent {path}: {exc}") from exc
+400:     if (
+401:         not isinstance(data, dict)
+402:         or data.get("schema") != "loops.engine/arrival-declaration-intent/v1"
+403:     ):
+404:         raise DeclarationApplyError(f"malformed declaration intent: {path}")
+405:     return data
+406: 
+407: 
+408: def _drafts_from_intent(data: Mapping[str, Any]) -> tuple[RecordDraft, ...]:
+409:     return _drafts_from_exact(
+410:         data["drafts"],
+411:         str(data.get("exact_drafts", "")),
+412:     )
+413: 
+414: 
+415: def _drafts_from_exact(raw: Any, expected_exact: str) -> tuple[RecordDraft, ...]:
+416:     if not isinstance(raw, list):
+417:         raise DeclarationApplyError("declaration intent drafts are not a list")
+418:     drafts = tuple(
+419:         RecordDraft(
+420:             kind=str(item["kind"]),
+421:             authored_at=float(item["authored_at"]),
+422:             observer=str(item["observer"]),
+423:             origin=str(item["origin"]),
+424:             body=dict(item["body"]),
+425:             signature=item.get("signature"),
+426:         )
+427:         for item in raw
+428:     )
+429:     actual_exact = _exact_drafts(drafts)
+430:     if actual_exact != expected_exact:
+431:         raise DeclarationApplyError("declaration intent draft bytes do not verify")
+432:     return drafts
+433: 
+434: 
+435: def _record_matches_draft(record: Mapping[str, Any], draft: RecordDraft) -> bool:
+436:     return (
+437:         record.get("k") == draft.kind
+438:         and record.get("at") == draft.authored_at
+439:         and record.get("observer") == draft.observer
+440:         and record.get("origin") == draft.origin
+441:         and record.get("body") == dict(draft.body)
+442:         and record.get("sig") == draft.signature
+443:     )
+444: 
+445: 
+446: def _unique_sibling(path: Path, label: str) -> Path:
+447:     fd, raw = tempfile.mkstemp(prefix=f".{path.name}.{label}.", dir=path.parent)
+448:     os.close(fd)
+449:     candidate = Path(raw)
+450:     candidate.unlink()
+451:     return candidate
+452: 
+453: 
+454: def _create_cache_temp(path: Path, content: bytes) -> None:
+455:     """Create and fsync a complete proposal without replacing an existing path."""
+456:     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+457:     try:
+458:         with os.fdopen(fd, "wb") as stream:
+459:             stream.write(content)
+460:             stream.flush()
+461:             os.fsync(stream.fileno())
+462:         _fsync_parent(path)
+463:     except BaseException:
+464:         with suppress(FileNotFoundError):
+465:             path.unlink()
+466:         raise
+467: 
+468: 
+469: def _verify_cache_temp(path: Path, expected: bytes) -> None:
+470:     """Validate bytes and re-fsync a temp that survived a crash boundary."""
+471:     with path.open("rb") as stream:
+472:         if stream.read() != expected:
+473:             raise DeclarationStale(
+474:                 "prepared declaration cache temp bytes differ from the proposal"
+475:             )
+476:         os.fsync(stream.fileno())
+477:     _fsync_parent(path)
+478: 
+479: 
+480: def _publish_cache(
+481:     plan: DeclarationEditPlan,
+482:     *,
+483:     intent: Path,
+484:     intent_data: dict[str, Any],
+485:     failure_hook: Callable[[str], None] | None,
+486: ) -> None:
+487:     """Detach the verified old cache, then exclusively link a full new file."""
+488:     target = plan.target_path
+489:     temp = (
+490:         Path(intent_data["cache_temp"])
+491:         if intent_data.get("cache_temp")
+492:         else _unique_sibling(target, "cache")
+493:     )
+494:     backup = (
+495:         Path(intent_data["cache_backup"])
+496:         if intent_data.get("cache_backup")
+497:         else _unique_sibling(target, "backup")
+498:     )
+499:     intent_data["cache_temp"] = str(temp)
+500:     intent_data["cache_backup"] = str(backup)
+501:     _replace_json(intent, intent_data)
+502:     try:
+503:         proposed = plan.proposed_text.encode("utf-8")
+504:         if temp.exists():
+505:             _verify_cache_temp(temp, proposed)
+506:         else:
+507:             _create_cache_temp(temp, proposed)
+508:             if failure_hook:
+509:                 failure_hook("after-cache-temp")
+510:         if target.exists():
+511:             current = target.read_bytes()
+512:             if current != plan.old_cache_bytes:
+513:                 raise DeclarationStale(
+514:                     "declaration cache changed after preparation; refusing publication"
+515:                 )
+516:             if backup.exists():
+517:                 raise DeclarationApplyError(
+518:                     "a prior cache publication left a backup beside the live declaration"
+519:                 )
+520:             target.rename(backup)
+521:             _fsync_parent(target)
+522:         elif not backup.exists():
+523:             raise DeclarationApplyError(
+524:                 "declaration cache is absent without the verified detached backup"
+525:             )
+526:         if failure_hook:
+527:             failure_hook("after-cache-detach")
+528:         if backup.read_bytes() != plan.old_cache_bytes:
+529:             raise DeclarationApplyError(
+530:                 "detached declaration cache bytes differ from prepared evidence"
+531:             )
+532:         os.link(temp, target)
+533:         temp.unlink()
+534:         _fsync_parent(target)
+535:         if failure_hook:
+536:             failure_hook("after-cache-link")
+537:         with suppress(FileNotFoundError):
+538:             backup.unlink()
+539:         _fsync_parent(backup)
+540:     except BaseException:
+541:         raise
+542: 
+543: 
+544: def _cleanup_cache_artifacts(
+545:     plan: DeclarationEditPlan, intent_data: Mapping[str, Any]
+546: ) -> None:
+547:     """Remove only verified publication leftovers after the new cache is live."""
+548:     proposed = plan.proposed_text.encode("utf-8")
+549:     for field, expected in (
+550:         ("cache_temp", proposed),
+551:         ("cache_backup", plan.old_cache_bytes),
+552:     ):
+553:         raw = intent_data.get(field)
+554:         if not raw:
+555:             continue
+556:         path = Path(str(raw))
+557:         if not path.exists():
+558:             continue
+559:         if path.read_bytes() != expected:
+560:             raise DeclarationStale(
+561:                 f"declaration publication artifact {path} does not match its intent"
+562:             )
+563:         path.unlink()
+564:         _fsync_parent(path)
+565: 
+566: 
+567: def _plan_from_intent(
+568:     data: Mapping[str, Any], drafts: tuple[RecordDraft, ...]
+569: ) -> DeclarationEditPlan:
+570:     captured_data = data["captured_head"]
+571:     captured = Head(
+572:         lineage=str(captured_data["lineage"]),
+573:         ordinal=int(captured_data["ordinal"]),
+574:         record_hash=str(captured_data["record_hash"]),
+575:     )
+576:     old_bytes = base64.b64decode(data["old_cache_b64"], validate=True)
+577:     if hashlib.sha256(old_bytes).hexdigest() != data["old_cache_sha256"]:
+578:         raise DeclarationApplyError("declaration intent cache bytes do not verify")
+579:     basis_data = data.get("basis")
+580:     if basis_data is None:
+581:         basis = ReadBasis(
+582:             lineage=captured.lineage,
+583:             captured_head=captured,
+584:             projected_through=None,
+585:             view_generation=None,
+586:         )
+587:     else:
+588:         if not isinstance(basis_data, Mapping):
+589:             raise DeclarationApplyError("declaration intent basis is malformed")
+590:         basis_captured_data = basis_data.get("captured_head")
+591:         if not isinstance(basis_captured_data, Mapping):
+592:             raise DeclarationApplyError("declaration intent captured basis is malformed")
+593:         basis_captured = Head(
+594:             lineage=str(basis_captured_data["lineage"]),
+595:             ordinal=int(basis_captured_data["ordinal"]),
+596:             record_hash=str(basis_captured_data["record_hash"]),
+597:         )
+598:         projected_data = basis_data.get("projected_through")
+599:         projected = None
+600:         if projected_data is not None:
+601:             if not isinstance(projected_data, Mapping):
+602:                 raise DeclarationApplyError(
+603:                     "declaration intent projected basis is malformed"
+604:                 )
+605:             projected = Head(
+606:                 lineage=str(projected_data["lineage"]),
+607:                 ordinal=int(projected_data["ordinal"]),
+608:                 record_hash=str(projected_data["record_hash"]),
+609:             )
+610:         view_generation = basis_data.get("view_generation")
+611:         if view_generation is not None and not isinstance(view_generation, str):
+612:             raise DeclarationApplyError(
+613:                 "declaration intent basis view generation is malformed"
+614:             )
+615:         basis = ReadBasis(
+616:             lineage=str(basis_data["lineage"]),
+617:             captured_head=basis_captured,
+618:             projected_through=projected,
+619:             view_generation=view_generation,
+620:         )
+621:         if (
+622:             basis.lineage != captured.lineage
+623:             or basis.captured_head != captured
+624:             or basis.projected_through != captured
+625:         ):
+626:             raise DeclarationStale(
+627:                 "declaration intent basis disagrees with its CURRENT predecessor head"
+628:             )
+629:     return DeclarationEditPlan(
+630:         status="planned",
+631:         target_path=Path(data["target"]).resolve(),
+632:         descriptor=_descriptor_from(data["descriptor"]),
+633:         lineage=str(data["lineage"]),
+634:         basis=basis,
+635:         captured_head=captured,
+636:         before_documents=(),
+637:         proposed_documents=(),
+638:         changes=(),
+639:         authored_at=drafts[0].authored_at if drafts else None,
+640:         observer=str(data["observer"]),
+641:         drafts=drafts,
+642:         fact_ids=tuple(str(value) for value in data["fact_ids"]),
+643:         key_introductions=tuple(str(value) for value in data.get("key_introductions", ())),
+644:         old_cache_bytes=old_bytes,
+645:         old_cache_sha256=str(data["old_cache_sha256"]),
+646:         proposed_text=str(data["proposed_text"]),
+647:         atomic_limit=None,
+648:         exact_drafts=str(data["exact_drafts"]),
+649:     )
+650: 
+651: 
+652: def _descriptor_location(target: Path, ast: Any, descriptor: StoreDescriptor) -> str:
+653:     backend = ast.store_backend
+654:     if backend is None:
+655:         raise _preparation_refused(
+656:             "proposed declaration has no explicit store backend"
+657:         )
+658:     if descriptor.backend == "file":
+659:         if ast.store is None:
+660:             raise _preparation_refused(
+661:                 "proposed file declaration has no store location"
+662:             )
+663:         return str((target.parent / str(ast.store)).resolve())
+664:     if ast.store_location is None:
+665:         raise _preparation_refused(
+666:             "proposed non-file declaration has no opaque store location"
+667:         )
+668:     return str(ast.store_location)
+669: 
+670: 
+671: def _validate_residence(target: Path, ast: Any, descriptor: StoreDescriptor) -> None:
+672:     if descriptor.role is not Profile.AUTHORITY:
+673:         raise _preparation_refused(
+674:             "declaration edits require an Authority descriptor"
+675:         )
+676:     if descriptor.lineage is None:
+677:         raise _preparation_refused(
+678:             "declaration edit descriptor must pin a lineage"
+679:         )
+680:     backend = ast.store_backend
+681:     if (
+682:         backend is None
+683:         or backend.name != descriptor.backend
+684:         or backend.lineage != descriptor.lineage
+685:         or backend.role != Profile.AUTHORITY.value
+686:     ):
+687:         raise _preparation_refused(
+688:             "proposed declaration residence must preserve backend, lineage and authority role"
+689:         )
+690:     if _descriptor_location(target, ast, descriptor) != descriptor.location:
+691:         raise _preparation_refused(
+692:             "proposed declaration residence must preserve the descriptor location"
+693:         )
+694: 
+695: 
+696: def _key_is_well_formed(key: object) -> bool:
+697:     if not isinstance(key, str) or not key:
+698:         return False
+699:     try:
+700:         return len(base64.b64decode(key, validate=True)) == 32
+701:     except (ValueError, TypeError):
+702:         return False
+703: 
+704: 
+705: def _valid_author_keys(registry: Any, observer: str, head: Head) -> tuple[str, ...]:
+706:     return tuple(
+707:         key for key, _introduced in registry.keys_valid_at(observer, head.ordinal + 1)
+708:     )
+709: 
+710: 
+711: def _signed_with_existing_key(
+712:     *,
+713:     credentials: WriteCredentials,
+714:     signer: Callable[[str, str], str | None] | None,
+715:     verifier: Callable[[str, str, str], bool],
+716:     registry: Any,
+717:     author: str,
+718:     head: Head,
+719:     digest: str,
+720:     label: str,
+721:     domain: SigningDomain,
+722:     purpose: CredentialPurpose,
+723:     context: CapturedSigningContext,
+724:     session: CredentialResolutionSession,
+725: ) -> str:
+726:     if credentials.mapped:
+727:         request = CredentialRequest(
+728:             namespace=credentials.binding_namespace,
+729:             observer=author,
+730:             domain=domain,
+731:             purpose=purpose,
+732:         )
+733:         try:
+734:             signature = session.sign(
+735:                 credentials,
+736:                 request,
+737:                 digest,
+738:                 context=context,
+739:                 authorized_keys=context.keys_for_author(author),
+740:                 required=True,
+741:             )
+742:         except CredentialBindingRefused as exc:
+743:             raise _preparation_refused(
+744:                 f"{label} mapped credential refused: {exc}",
+745:                 captured_head=head,
+746:             ) from exc
+747:         if signature is None:  # required=True makes this unreachable
+748:             raise _preparation_refused(f"missing {label} signature")
+749:         return signature
+750:     if not callable(signer):
+751:         raise _preparation_refused(f"missing {label} signer")
+752:     keys = _valid_author_keys(registry, author, head)
+753:     if not keys:
+754:         raise _preparation_refused(
+755:             f"edit author {author!r} has no key valid at the captured Arrival head"
+756:         )
+757:     signature = signer(author, digest)
+758:     if not signature:
+759:         raise _preparation_refused(f"missing {label} signature")
+760:     if not any(verifier(key, signature, digest) for key in keys):
+761:         raise _preparation_refused(
+762:             f"{label} signature does not verify under a key valid for edit author "
+763:             f"{author!r} at the captured Arrival head"
+764:         )
+765:     return signature
+766: 
+767: 
+768: def _declaration_row(
+769:     change: Change,
+770:     *,
+771:     lineage: str,
+772:     authored_at: float,
+773:     observer: str,
+774:     credentials: WriteCredentials,
+775:     registry: Any,
+776:     captured_head: Head,
+777:     fact_verify: Callable[[str, str, str], bool],
+778:     context: CapturedSigningContext,
+779:     session: CredentialResolutionSession,
+780: ) -> tuple[str, tuple[Any, ...]]:
+781:     row_payload: dict[str, Any] = {
+782:         "lineage": lineage,
+783:         "subject": change.subject,
+784:         "change": change.annotation,
+785:     }
+786:     if change.payload is not None:
+787:         row_payload["payload"] = dict(change.payload)
+788:     payload_text = json.dumps(row_payload, ensure_ascii=False, separators=(",", ":"))
+789:     fact_id = str(ULID())
+790:     fact_digest = fact_commitment_hash(
+791:         change.kind, authored_at, observer, "", payload_text
+792:     )
+793:     inner_signature = _signed_with_existing_key(
+794:         credentials=credentials,
+795:         signer=credentials.fact_signer,
+796:         verifier=fact_verify,
+797:         registry=registry,
+798:         author=observer,
+799:         head=captured_head,
+800:         digest=fact_digest,
+801:         label="FACT",
+802:         domain=SigningDomain.FACT,
+803:         purpose=CredentialPurpose.AUTHORSHIP,
+804:         context=context,
+805:         session=session,
+806:     )
+807:     row = (
+808:         fact_id,
+809:         change.kind,
+810:         authored_at,
+811:         observer,
+812:         "",
+813:         payload_text,
+814:         inner_signature,
+815:     )
+816:     return fact_id, row
+817: 
+818: 
+819: def _key_draft(
+820:     author: str,
+821:     observer: str,
+822:     key: str,
+823:     *,
+824:     authored_at: float,
+825:     credentials: WriteCredentials,
+826:     registry: Any,
+827:     captured_head: Head,
+828:     arrival_verify: Callable[[str, str, str], bool],
+829:     context: CapturedSigningContext,
+830:     session: CredentialResolutionSession,
+831: ) -> RecordDraft:
+832:     body = {"observer": observer, "key": key}
+833:     digest = content_commitment("key", authored_at, author, "", body)
+834:     signature = _signed_with_existing_key(
+835:         credentials=credentials,
+836:         signer=credentials.arrival_signer,
+837:         verifier=arrival_verify,
+838:         registry=registry,
+839:         author=author,
+840:         head=captured_head,
+841:         digest=digest,
+842:         label="Arrival key-introduction",
+843:         domain=SigningDomain.ARRIVAL,
+844:         purpose=CredentialPurpose.KEY_INTRODUCTION,
+845:         context=context,
+846:         session=session,
+847:     )
+848:     return RecordDraft(
+849:         kind="key",
+850:         authored_at=authored_at,
+851:         observer=author,
+852:         origin="",
+853:         body=body,
+854:         signature=signature,
+855:     )
+856: 
+857: 
+858: def prepare_declaration_edit(
+859:     registry: BackendRegistry,
+860:     descriptor: StoreDescriptor,
+861:     *,
+862:     target: Path | str,
+863:     proposed_text: str,
+864:     observer: str,
+865:     credentials: WriteCredentials | None,
+866:     fact_verify: Callable[[str, str, str], bool],
+867:     arrival_verify: Callable[[str, str, str], bool],
+868:     source_cache_bytes: bytes | None = None,
+869:     require_cache_basis: bool = False,
+870: ) -> DeclarationEditPlan:
+871:     """Prepare one exact declaration transition against an attested CURRENT head.
+872: 
+873:     This function only reads and signs in memory. It creates no intent, does
+874:     not append, and does not touch the declaration cache. The registry opener
+875:     is expected to return an attested custody handle; its ``scan`` is the
+876:     structurally verified genesis-through-head sequence required by the
+877:     iterable authorship seam.
+878:     """
+879:     target_path = Path(target).resolve()
+880:     if not isinstance(proposed_text, str) or not proposed_text:
+881:         raise _preparation_refused("proposed declaration text is empty")
+882:     try:
+883:         old_cache_bytes = target_path.read_bytes()
+884:     except OSError as exc:
+885:         raise _preparation_refused(
+886:             f"cannot read declaration cache {target_path}: {exc}"
+887:         ) from exc
+888:     if source_cache_bytes is not None and old_cache_bytes != source_cache_bytes:
+889:         raise _preparation_refused(
+890:             "declaration cache changed while preparing the requested splice"
+891:         )
+892:     try:
+893:         ast = parse_vertex(proposed_text, path=target_path)
+894:         validate_vertex(ast)
+895:     except Exception as exc:
+896:         raise _preparation_refused(
+897:             f"proposed declaration is not valid Vertex grammar/semantics: {exc}"
+898:         ) from exc
+899:     validate_arrival_runtime_identity(
+900:         ast.name,
+901:         ast.loops,
+902:         refusal=_preparation_refused,
+903:     )
+904:     _validate_residence(target_path, ast, descriptor)
+905:     proposed_documents = tuple(
+906:         document.as_json() for document in vertex_to_documents(ast)
+907:     )
+908: 
+909:     ledger: ArrivalLedger | None = None
+910:     query: ArrivalQuery | None = None
+911:     snapshot: Any | None = None
+912:     atomic_limit: int | None = None
+913:     captured_head: Head | None = None
+914:     try:
+915:         ledger, query = registry.open(descriptor)
+916:         report = getattr(ledger, "opened", None)
+917:         comparison = getattr(report, "comparison", None)
+918:         if isinstance(comparison, PreGenesis):
+919:             if comparison.ledger_refusal is not None:
+920:                 raise _preparation_refused(
+921:                     f"Arrival ledger is not opened: {comparison.ledger_refusal}"
+922:                 )
+923:             raise _preparation_refused(
+924:                 "Arrival ledger has no captured head for declaration editing"
+925:             )
+926:         if isinstance(comparison, Indeterminate):
+927:             raise _preparation_refused(
+928:                 f"Arrival head attestation is indeterminate: {comparison.refusal}"
+929:             )
+930:         if not isinstance(comparison, Compared):
+931:             raise _preparation_refused(
+932:                 "registry opener did not provide a compared Arrival head"
+933:             )
+934:         captured_head = comparison.presented
+935:         snapshot = query.open_snapshot(
+936:             captured_head=captured_head,
+937:             requirement=ProjectionRequirement.CURRENT,
+938:             continuation=None,
+939:         )
+940:         validate_arrival_declaration_anchor(
+941:             snapshot.declaration_anchor, captured_head
+942:         )
+943:         facts = snapshot.facts(
+944:             FactRequest(
+945:                 limit=None,
+946:                 kind="_decl",
+947:                 include_internal=True,
+948:                 order="oldest",
+949:             )
+950:         ).items
+951:         documents = resolve_declaration_documents_from_snapshot(
+952:             snapshot.declaration_anchor, facts
+953:         )
+954:         if documents is None or isinstance(documents, Unhistorized):
+955:             raise _preparation_refused(
+956:                 "the CURRENT Arrival snapshot has no historized declaration"
+957:             )
+958:         represented = snapshot.represented
+959:         if represented is None:
+960:             raise _preparation_refused(
+961:                 "the CURRENT declaration snapshot has no matching lineage basis"
+962:             )
+963:         projected = complete_projection_custody(
+964:             ledger,
+965:             captured=captured_head,
+966:             represented=represented,
+967:             lineage_refusal=lambda message: _preparation_refused(message),
+968:             conflict_refusal=lambda message: _preparation_refused(message),
+969:         )
+970:         if projected.ordinal < captured_head.ordinal:
+971:             behind = ProjectionBehind(
+972:                 "the CURRENT declaration snapshot is behind the captured Arrival head"
+973:             )
+974:             behind.captured_head = captured_head
+975:             behind.projected_head = projected
+976:             raise behind
+977:         basis = ReadBasis(
+978:             lineage=captured_head.lineage,
+979:             captured_head=captured_head,
+980:             projected_through=projected,
+981:             view_generation=getattr(snapshot, "view_generation", None),
+982:         )
+983:         before_documents = tuple(dict(document) for document in documents)
+984:         if require_cache_basis:
+985:             try:
+986:                 local_ast = parse_vertex(
+987:                     old_cache_bytes.decode("utf-8"), path=target_path
+988:                 )
+989:                 local_documents = tuple(
+990:                     document.as_json() for document in vertex_to_documents(local_ast)
+991:                 )
+992:             except Exception as exc:
+993:                 raise _preparation_refused(
+994:                     f"current declaration cache is not valid for this splice: {exc}"
+995:                 ) from exc
+996:             if local_documents != before_documents:
+997:                 raise _preparation_refused(
+998:                     "declaration cache differs from CURRENT Arrival history; "
+999:                     "convenience mutation refused"
+1000:                 )
+1001:         changes = tuple(diff_documents(before_documents, proposed_documents))
+1002:         continuity_ticks = tuple(
+1003:             snapshot.ticks(TickRequest(since=float("-inf")))
+1004:         )
+1005:         verified_params = collect_verified_parameter_rows(
+1006:             snapshot.declaration_anchor,
+1007:             facts,
+1008:             target_documents=proposed_documents,
+1009:             base_dir=target_path.parent,
+1010:         )
+1011:         analyze_boundary_continuity(
+1012:             snapshot.declaration_anchor,
+1013:             facts,
+1014:             continuity_ticks,
+1015:             target_documents=proposed_documents,
+1016:             verified_params=verified_params,
+1017:         )
+1018:         registry_verifier = arrival_verify
+1019:         if credentials is not None and credentials.mapped:
+1020:             mapped_verifier = credentials.signature_verifier
+1021:             if mapped_verifier is None:  # guarded by WriteCredentials construction
+1022:                 raise _preparation_refused(
+1023:                     "mapped declaration credentials have no signature verifier",
+1024:                     captured_head=captured_head,
+1025:                 )
+1026:             def registry_verifier(key: str, signature: str, digest: str) -> bool:
+1027:                 return mapped_verifier(
+1028:                     SigningDomain.ARRIVAL, key, signature, digest
+1029:                 )
+1030:         key_registry, _key_evidence = key_registry_from_records(
+1031:             ledger.scan(through=captured_head), registry_verifier
+1032:         )
+1033:         atomic_limit = ledger.capabilities().max_atomic_records
+1034:     except DeclarationPreparationError:
+1035:         raise
+1036:     except BoundaryContinuityConflict as exc:
+1037:         raise _preparation_refused(
+1038:             f"boundary continuity refuses declaration preparation: {exc}",
+1039:             captured_head=captured_head,
+1040:         ) from exc
+1041:     except Exception as exc:
+1042:         raise _preparation_refused(
+1043:             f"cannot establish declaration preparation basis: {exc}",
+1044:             captured_head=captured_head,
+1045:             projected_head=getattr(exc, "projected_head", None),
+1046:         ) from exc
+1047:     finally:
+1048:         _close_quietly(snapshot)
+1049:         _close_quietly(query)
+1050:         _close_quietly(ledger)
+1051: 
+1052:     if not changes:
+1053:         return DeclarationEditPlan(
+1054:             status="noop",
+1055:             target_path=target_path,
+1056:             descriptor=descriptor,
+1057:             lineage=captured_head.lineage,
+1058:             basis=basis,
+1059:             captured_head=captured_head,
+1060:             before_documents=before_documents,
+1061:             proposed_documents=proposed_documents,
+1062:             changes=(),
+1063:             authored_at=None,
+1064:             observer=observer,
+1065:             drafts=(),
+1066:             fact_ids=(),
+1067:             key_introductions=(),
+1068:             old_cache_bytes=old_cache_bytes,
+1069:             old_cache_sha256=hashlib.sha256(old_cache_bytes).hexdigest(),
+1070:             proposed_text=proposed_text,
+1071:             atomic_limit=atomic_limit,
+1072:             exact_drafts=_exact_drafts(()),
+1073:         )
+1074: 
+1075:     if credentials is None:
+1076:         raise _preparation_refused(
+1077:             "declaration edits require fact and Arrival signers"
+1078:         )
+1079:     signing_context = CapturedSigningContext(
+1080:         captured_head=captured_head,
+1081:         author_keys=tuple(
+1082:             (
+1083:                 named_observer,
+1084:                 tuple(
+1085:                     key
+1086:                     for key, _introduced in key_registry.keys_valid_at(
+1087:                         named_observer, captured_head.ordinal + 1
+1088:                     )
+1089:                 ),
+1090:             )
+1091:             for named_observer in sorted(key_registry.introductions)
+1092:         ),
+1093:         receipt_keys=(),
+1094:     )
+1095:     credential_session = CredentialResolutionSession()
+1096:     authored_at = time.time()
+1097:     rows: list[tuple[Any, ...]] = []
+1098:     fact_ids: list[str] = []
+1099:     for change in changes:
+1100:         fact_id, row = _declaration_row(
+1101:             change,
+1102:             lineage=captured_head.lineage,
+1103:             authored_at=authored_at,
+1104:             observer=observer,
+1105:             credentials=credentials,
+1106:             registry=key_registry,
+1107:             captured_head=captured_head,
+1108:             fact_verify=fact_verify,
+1109:             context=signing_context,
+1110:             session=credential_session,
+1111:         )
+1112:         fact_ids.append(fact_id)
+1113:         rows.append(row)
+1114:     body = body_of_fact_row(rows[0]) if len(rows) == 1 else body_of_batch(rows)
+1115:     envelope_kind = "fact" if len(rows) == 1 else "batch"
+1116:     envelope_digest = content_commitment(
+1117:         envelope_kind, authored_at, observer, "", body
+1118:     )
+1119:     outer_signature = _signed_with_existing_key(
+1120:         credentials=credentials,
+1121:         signer=credentials.arrival_signer,
+1122:         verifier=arrival_verify,
+1123:         registry=key_registry,
+1124:         author=observer,
+1125:         head=captured_head,
+1126:         digest=envelope_digest,
+1127:         label="Arrival declaration envelope",
+1128:         domain=SigningDomain.ARRIVAL,
+1129:         purpose=CredentialPurpose.AUTHORSHIP,
+1130:         context=signing_context,
+1131:         session=credential_session,
+1132:     )
+1133:     declaration_draft = RecordDraft(
+1134:         kind=envelope_kind,
+1135:         authored_at=authored_at,
+1136:         observer=observer,
+1137:         origin="",
+1138:         body=body,
+1139:         signature=outer_signature,
+1140:     )
+1141: 
+1142:     proposed_keys: dict[str, str] = {}
+1143:     for document in proposed_documents:
+1144:         if document["kind"] != DECL_OBSERVER_DEFINED:
+1145:             continue
+1146:         key = document["payload"].get("key")
+1147:         if key is None:
+1148:             continue
+1149:         if not _key_is_well_formed(key):
+1150:             raise _preparation_refused(
+1151:                 f"observer {document['subject']!r} carries a malformed public key"
+1152:             )
+1153:         proposed_keys[str(document["subject"])] = str(key)
+1154:     existing_keys = {
+1155:         named_observer: {key for key, _ordinal in keys}
+1156:         for named_observer, keys in key_registry.introductions.items()
+1157:     }
+1158:     key_drafts: list[RecordDraft] = []
+1159:     for named_observer, key in proposed_keys.items():
+1160:         if key in existing_keys.get(named_observer, set()):
+1161:             continue
+1162:         key_drafts.append(
+1163:             _key_draft(
+1164:                 observer,
+1165:                 named_observer,
+1166:                 key,
+1167:                 authored_at=authored_at,
+1168:                 credentials=credentials,
+1169:                 registry=key_registry,
+1170:                 captured_head=captured_head,
+1171:                 arrival_verify=arrival_verify,
+1172:                 context=signing_context,
+1173:                 session=credential_session,
+1174:             )
+1175:         )
+1176: 
+1177:     drafts = tuple((*key_drafts, declaration_draft))
+1178:     if atomic_limit is not None and len(drafts) > atomic_limit:
+1179:         raise AtomicLimitExceeded(
+1180:             f"declaration edit needs {len(drafts)} Arrival records, but the "
+1181:             f"backend atomic limit is {atomic_limit}; refused before append"
+1182:         )
+1183:     return DeclarationEditPlan(
+1184:         status="planned",
+1185:         target_path=target_path,
+1186:         descriptor=descriptor,
+1187:         lineage=captured_head.lineage,
+1188:         basis=basis,
+1189:         captured_head=captured_head,
+1190:         before_documents=before_documents,
+1191:         proposed_documents=proposed_documents,
+1192:         changes=changes,
+1193:         authored_at=authored_at,
+1194:         observer=observer,
+1195:         drafts=drafts,
+1196:         fact_ids=tuple(fact_ids),
+1197:         key_introductions=tuple(draft.body["observer"] for draft in key_drafts),
+1198:         old_cache_bytes=old_cache_bytes,
+1199:         old_cache_sha256=hashlib.sha256(old_cache_bytes).hexdigest(),
+1200:         proposed_text=proposed_text,
+1201:         atomic_limit=atomic_limit,
+1202:         exact_drafts=_exact_drafts(drafts),
+1203:         credential_bindings=credential_session.evidence,
+1204:     )
+1205: 
+1206: 
+1207: def _result(
+1208:     plan: DeclarationEditPlan,
+1209:     *,
+1210:     status: str,
+1211:     head: Head | None,
+1212:     commit: Any | None,
+1213:     intent: Path | None,
+1214:     phase: str,
+1215:     file_written: bool,
+1216:     changes: tuple[Change, ...] | None,
+1217: ) -> DeclarationEditResult:
+1218:     return DeclarationEditResult(
+1219:         status=status, target_path=plan.target_path, descriptor=plan.descriptor,
+1220:         lineage=plan.lineage, basis=plan.basis,
+1221:         captured_head=plan.captured_head, head=head,
+1222:         commit=commit, fact_ids=plan.fact_ids, intent_path=intent,
+1223:         phase=phase, file_written=file_written, changes=changes,
+1224:     )
+1225: 
+1226: 
+1227: def _validate_plan(plan: DeclarationEditPlan) -> None:
+1228:     if plan.status not in {"planned", "noop"}:
+1229:         raise DeclarationApplyError("only a planned declaration edit can be applied")
+1230:     if _exact_drafts(plan.drafts) != plan.exact_drafts:
+1231:         raise DeclarationApplyError(
+1232:             "declaration plan drafts changed after preparation; refusing append"
+1233:         )
+1234:     if hashlib.sha256(plan.old_cache_bytes).hexdigest() != plan.old_cache_sha256:
+1235:         raise DeclarationApplyError(
+1236:             "declaration plan cache evidence changed after preparation"
+1237:         )
+1238: 
+1239: 
+1240: def _remove_intent(path: Path) -> None:
+1241:     try:
+1242:         path.unlink()
+1243:     except FileNotFoundError:
+1244:         return
+1245:     _fsync_parent(path)
+1246: 
+1247: 
+1248: def apply_declaration_edit(
+1249:     registry: BackendRegistry,
+1250:     plan: DeclarationEditPlan,
+1251:     *,
+1252:     failure_hook: Callable[[str], None] | None = None,
+1253: ) -> DeclarationEditResult:
+1254:     """Apply an edit under the target's process-safe operation lock."""
+1255:     with _declaration_lock(plan.target_path):
+1256:         return _apply_declaration_edit(
+1257:             registry, plan, failure_hook=failure_hook
+1258:         )
+1259: 
+1260: 
+1261: def _apply_declaration_edit(
+1262:     registry: BackendRegistry,
+1263:     plan: DeclarationEditPlan,
+1264:     *,
+1265:     failure_hook: Callable[[str], None] | None = None,
+1266: ) -> DeclarationEditResult:
+1267:     """Append one prepared declaration transition and publish its cache.
+1268: 
+1269:     The prepared drafts are submitted exactly once under the captured full
+1270:     head. Contract refusals are zero-prefix stale refusals; transport and
+1271:     witness failures retain the intent and their identity for recovery.
+1272:     """
+1273:     _validate_plan(plan)
+1274:     if plan.status == "noop":
+1275:         return _result(
+1276:             plan, status="noop", head=plan.captured_head, commit=None, intent=None,
+1277:             phase="noop", file_written=False, changes=plan.changes,
+1278:         )
+1279:     intent = declaration_intent_path(plan.target_path)
+1280:     try:
+1281:         if plan.target_path.read_bytes() != plan.old_cache_bytes:
+1282:             raise DeclarationStale(
+1283:                 "declaration cache changed after preparation; refusing append"
+1284:             )
+1285:     except OSError as exc:
+1286:         raise DeclarationApplyError(
+1287:             f"cannot recheck declaration cache before append: {exc}"
+1288:         ) from exc
+1289:     data = _intent_data(plan, phase="prepared")
+1290:     append_drafts = _drafts_from_exact(
+1291:         json.loads(plan.exact_drafts), plan.exact_drafts
+1292:     )
+1293:     try:
+1294:         _write_exclusive_json(intent, data)
+1295:     except FileExistsError as exc:
+1296:         raise DeclarationApplyError(
+1297:             f"unfinished declaration intent already exists: {intent}"
+1298:         ) from exc
+1299:     if failure_hook:
+1300:         try:
+1301:             failure_hook("after-intent")
+1302:         except Exception as exc:
+1303:             raise DeclarationApplyError(
+1304:                 "declaration intent was durable but append did not start"
+1305:             ) from exc
+1306: 
+1307:     ledger: Any | None = None
+1308:     query: Any | None = None
+1309:     commit: Any | None = None
+1310:     head: Head | None = None
+1311:     append_entered = False
+1312:     try:
+1313:         ledger, query = registry.open(plan.descriptor)
+1314:         try:
+1315:             append_entered = True
+1316:             commit = ledger.append(plan.captured_head, append_drafts)
+1317:         except Exception as exc:
+1318:             from .arrival_contract import ContractRefusal
+1319:             from .arrival_head_seam import NotWitnessed
+1320: 
+1321:             if isinstance(exc, ContractRefusal):
+1322:                 _remove_intent(intent)
+1323:                 raise DeclarationStale(
+1324:                     f"declaration append refused before mutation: {exc}"
+1325:                 ) from exc
+1326:             if isinstance(exc, NotWitnessed):
+1327:                 head = exc.head
+1328:                 data["phase"] = "append-unwitnessed"
+1329:                 with suppress(Exception):
+1330:                     _replace_json(intent, data)
+1331:                 raise DeclarationUnwitnessed(
+1332:                     "declaration records committed but their witness is unknown",
+1333:                     head=exc.head, commit=exc.commit, intent_path=intent,
+1334:                     fact_ids=plan.fact_ids, cause=exc,
+1335:                 ) from exc
+1336:             data["phase"] = "append-unknown"
+1337:             with suppress(Exception):
+1338:                 _replace_json(intent, data)
+1339:             raise DeclarationOutcomeUnknown(
+1340:                 "declaration append outcome is unknown; recover the intent",
+1341:                 head=None, intent_path=intent, fact_ids=plan.fact_ids, cause=exc,
+1342:             ) from exc
+1343:         head = commit.after
+1344:         try:
+1345:             data["phase"] = "appended"
+1346:             _replace_json(intent, data)
+1347:             if failure_hook:
+1348:                 failure_hook("after-append")
+1349:         except Exception as exc:
+1350:             raise DeclarationCommittedIncomplete(
+1351:                 "declaration append committed but append phase recording failed",
+1352:                 phase="appended", head=head, commit=commit, intent_path=intent,
+1353:                 fact_ids=plan.fact_ids, cause=exc,
+1354:             ) from exc
+1355:     except (DeclarationStale, DeclarationUnwitnessed, DeclarationOutcomeUnknown,
+1356:             DeclarationCommittedIncomplete):
+1357:         raise
+1358:     except Exception as exc:
+1359:         if not append_entered:
+1360:             raise DeclarationApplyError(
+1361:                 "declaration append was refused before entering the append call; "
+1362:                 "prepared intent retained for inspection",
+1363:             ) from exc
+1364:         raise DeclarationOutcomeUnknown(
+1365:             "declaration append path failed; recover the intent",
+1366:             head=head, intent_path=intent, fact_ids=plan.fact_ids, cause=exc,
+1367:         ) from exc
+1368:     finally:
+1369:         _close_quietly(query)
+1370:         _close_quietly(ledger)
+1371: 
+1372:     try:
+1373:         from .arrival_maintenance import sync_projection
+1374: 
+1375:         sync_projection(registry, plan.descriptor, through=head)
+1376:         data["phase"] = "synced"
+1377:         _replace_json(intent, data)
+1378:         if failure_hook:
+1379:             failure_hook("after-sync")
+1380:         data["phase"] = "publishing"
+1381:         _publish_cache(
+1382:             plan, intent=intent, intent_data=data, failure_hook=failure_hook
+1383:         )
+1384:         data["phase"] = "published"
+1385:         _replace_json(intent, data)
+1386:         if failure_hook:
+1387:             failure_hook("before-intent-remove")
+1388:         _remove_intent(intent)
+1389:     except Exception as exc:
+1390:         raise DeclarationCommittedIncomplete(
+1391:             "declaration append committed but a later phase failed; recover the intent",
+1392:             phase=str(data.get("phase", "appended")), head=head,
+1393:             commit=commit, intent_path=intent, fact_ids=plan.fact_ids, cause=exc,
+1394:         ) from exc
+1395:     return _result(
+1396:         plan, status="applied", head=head, commit=commit, intent=None,
+1397:         phase="published", file_written=True, changes=plan.changes,
+1398:     )
+1399: 
+1400: 
+1401: def recover_declaration_edit(
+1402:     registry: BackendRegistry,
+1403:     intent: Path | str,
+1404:     *,
+1405:     failure_hook: Callable[[str], None] | None = None,
+1406: ) -> DeclarationEditResult:
+1407:     """Recover an edit under the target's process-safe operation lock."""
+1408:     intent_path = Path(intent).resolve()
+1409:     with _declaration_lock(Path(_read_intent(intent_path)["target"])):
+1410:         return _recover_declaration_edit(
+1411:             registry, intent_path, failure_hook=failure_hook
+1412:         )
+1413: 
+1414: 
+1415: def _recover_declaration_edit(
+1416:     registry: BackendRegistry,
+1417:     intent: Path | str,
+1418:     *,
+1419:     failure_hook: Callable[[str], None] | None = None,
+1420: ) -> DeclarationEditResult:
+1421:     """Reconcile an edit intent by exact suffix membership, then finish cache."""
+1422:     intent_path = Path(intent).resolve()
+1423:     data = _read_intent(intent_path)
+1424:     drafts = _drafts_from_intent(data)
+1425:     plan = _plan_from_intent(data, drafts)
+1426:     captured = plan.captured_head
+1427:     ledger: Any | None = None
+1428:     query: Any | None = None
+1429:     try:
+1430:         ledger, query = registry.open(plan.descriptor)
+1431:         captured_at_ledger = ledger.head_at(
+1432:             Watermark(lineage=captured.lineage, ordinal=captured.ordinal)
+1433:         )
+1434:         if captured_at_ledger != captured:
+1435:             raise DeclarationStale(
+1436:                 "declaration intent predecessor head hash no longer matches"
+1437:             )
+1438:         actual = ledger.head()
+1439:         if actual == captured:
+1440:             if data.get("cache_temp") or data.get("cache_backup"):
+1441:                 raise DeclarationApplyError(
+1442:                     "unapplied declaration intent has cache publication artifacts"
+1443:                 )
+1444:             if plan.target_path.read_bytes() != plan.old_cache_bytes:
+1445:                 raise DeclarationStale(
+1446:                     "unapplied declaration intent has competing cache bytes"
+1447:                 )
+1448:             _remove_intent(intent_path)
+1449:             return _result(
+1450:                 plan, status="not-applied", head=actual, commit=None, intent=None,
+1451:                 phase="not-applied", file_written=False, changes=None,
+1452:             )
+1453:         first = captured.ordinal + 1
+1454:         for index, draft in enumerate(drafts):
+1455:             ordinal = first + index
+1456:             if actual.ordinal < ordinal or not _record_matches_draft(
+1457:                 ledger.read(ordinal), draft
+1458:             ):
+1459:                 raise DeclarationStale(
+1460:                     "declaration intent does not occupy its exact expected suffix"
+1461:                 )
+1462:     except DeclarationStale:
+1463:         raise
+1464:     except Exception as exc:
+1465:         raise DeclarationApplyError(
+1466:             f"cannot reconcile declaration intent against Arrival custody: {exc}"
+1467:         ) from exc
+1468:     finally:
+1469:         _close_quietly(query)
+1470:         _close_quietly(ledger)
+1471: 
+1472:     file_written = False
+1473:     try:
+1474:         from .arrival_maintenance import sync_projection
+1475: 
+1476:         sync_projection(registry, plan.descriptor, through=actual)
+1477:         data["phase"] = "synced"
+1478:         _replace_json(intent_path, data)
+1479:         if failure_hook:
+1480:             failure_hook("after-sync")
+1481:         if plan.target_path.exists():
+1482:             current = plan.target_path.read_bytes()
+1483:             if current == plan.proposed_text.encode("utf-8"):
+1484:                 _cleanup_cache_artifacts(plan, data)
+1485:                 data["phase"] = "published"
+1486:                 _replace_json(intent_path, data)
+1487:             elif current == plan.old_cache_bytes:
+1488:                 data["phase"] = "publishing"
+1489:                 _publish_cache(
+1490:                     plan, intent=intent_path, intent_data=data,
+1491:                     failure_hook=failure_hook,
+1492:                 )
+1493:                 file_written = True
+1494:                 data["phase"] = "published"
+1495:                 _replace_json(intent_path, data)
+1496:             else:
+1497:                 raise DeclarationStale(
+1498:                     "competing declaration cache bytes are present; refusing overwrite"
+1499:                 )
+1500:         elif data.get("cache_backup"):
+1501:             data["phase"] = "publishing"
+1502:             _publish_cache(
+1503:                 plan, intent=intent_path, intent_data=data,
+1504:                 failure_hook=failure_hook,
+1505:             )
+1506:             file_written = True
+1507:             data["phase"] = "published"
+1508:             _replace_json(intent_path, data)
+1509:         else:
+1510:             raise DeclarationApplyError(
+1511:                 "declaration cache is missing and has no detached recovery backup"
+1512:             )
+1513:         _remove_intent(intent_path)
+1514:     except Exception as exc:
+1515:         raise DeclarationCommittedIncomplete(
+1516:             "declaration custody is committed but cache recovery remains incomplete",
+1517:             phase=str(data.get("phase", "synced")), head=actual, commit=None,
+1518:             intent_path=intent_path, fact_ids=plan.fact_ids, cause=exc,
+1519:         ) from exc
+1520:     return _result(
+1521:         plan, status="recovered", head=actual, commit=None, intent=None,
+1522:         phase="published", file_written=file_written, changes=None,
+1523:     )
+
+===== docs/scratch/arrival-break/sdk-conformance-declaration-recovery-2026-09-06.md =====
+1: # Public SDK conformance: interrupted declaration recovery
+2: 
+3: Status: implementation and native validation complete; final review pending on `arrival/finish`, based
+4: on checkpoint `2d4d2d0a`. This is the second bounded workload-conformance slice
+5: preceding C9 transition and legacy retirement.
+6: 
+7: ## Contract under test
+8: 
+9: A mapped public SDK declaration edit is interrupted after its append commits
+10: and before projection synchronization and descriptor cache publication. The
+11: SDK must preserve the committed outcome and recovery coordinates. Recovery
+12: reconciles the retained edit against history, finishes publication without
+13: appending the proposal again, and permits inspection and subsequent authorized
+14: writing against the resulting declaration.
+15: 
+16: The recovery result retains the original edit's captured basis. Its final head
+17: describes the reconciled history; it does not manufacture an original `Commit`
+18: or a fresh read basis. Public inspection and fact reads separately establish
+19: the current effective declaration and projected prefix. Prefix verification
+20: checks grammar, density, lineage and the hash chain; it does not establish
+21: signature authorship, external key trust or projection agreement.
+22: 
+23: ## Scope
+24: 
+25: Sol owns the executable workflow; Terra independently audits the contracts and
+26: updates SDK guidance; Luna checks the resulting suite; root integrates the
+27: evidence and triages a frozen Fable 5.1 LOW review. All validation processes
+28: isolate XDG state/config and `LOOPS_HOME`; fixtures use disposable stores and
+29: mapped keys. No live migration or legacy retirement is involved.
+30: 
+31: The public SDK intentionally has no interruption argument. The test injects
+32: the engine's existing `after-append` failure hook beneath `edit_declaration`;
+33: the edit, recovery, inspection and continued write remain public SDK calls.
+34: This is a deterministic exception-boundary test, not a process-kill, power-loss
+35: or multi-machine durability test. The locator stays at its original path with
+36: an absolute store location throughout recovery.
+37: 
+38: Existing declaration tests complement this workflow with pre-append/not-applied
+39: recovery, cache-publication interruptions, competing-cache refusal and exact
+40: suffix/predecessor validation. This slice does not replace those tests or claim
+41: all recovery phases. Recovery is distinct from restore-forward, which belongs
+42: to the upcoming transfer workload.
+43: 
+44: ## Executable evidence
+45: 
+46: The [workflow](../../../libs/sdk/tests/test_arrival_declaration_recovery_workload.py)
+47: initializes a strict declaration with mapped Alice credentials. A `note` fact
+48: refuses before the new kind is declared. The interrupted public edit retains
+49: its before/after head, phase, declaration fact IDs and public intent path.
+50: Prefix verification reaches that durable head while the descriptor still has
+51: its original bytes. Inspection refuses on the stale projection; another edit
+52: reports a preparation refusal with a `ProjectionBehind` cause and custody
+53: not entered. Neither operation advances the verified head.
+54: 
+55: Recovery runs with mapped resolution and legacy credential acquisition poisoned.
+56: It retains the original captured basis and declaration fact IDs, reports no
+57: original commit or changes, and publishes the proposed descriptor. The head
+58: stays unchanged across recovery. An internal fact read checks the baseline
+59: identities and the new `note` declaration fact exactly once. Fresh inspection
+60: reports matching local/effective declarations and current projection evidence.
+61: Repeating the recovered proposal is a no-op. A reconstructed mapped provider
+62: then emits a signed `note` fact; its commit predecessor, public read basis,
+63: projected prefix and final verification agree. SDK outcome and inspection
+64: serialization are also checked.
+65: 
+66: ## Validation and review
+67: 
+68: Focused declaration, mapped credential and new workload tests: **49 passed**
+69: in 1.13 seconds. Full SDK: **580 passed** in 21.79 seconds. Architecture:
+70: **101 passed** in 6.20 seconds. Scoped Ruff and whitespace checks pass.
+71: Initial Fable-low and primary verdicts: **ACCEPT**, no blockers. Four optional
+72: assertion refinements pin the injected hook, exact one-record advancement,
+73: complete recovered fact-ID list and no-op head. Final focused validation after
+74: those test-only changes: **49 passed** /1.28s, Ruff and whitespace checks pass.
+75: The full suites precede only those assertion changes. Follow-up review is
+76: pending. No production files changed.
+77: 
+78: ## Next
+79: 
+80: Run sources with partial failure, inspect persisted tiers, and establish what
+81: can safely resume. Follow with captured-prefix export, restore-forward,
+82: verification, explicit sync and read. C9 transition and retirement remain ahead.
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/validation-evidence/focused-pytest.log =====
+1: .................................................                        [100%]
+2: 49 passed in 1.28s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/validation-evidence/ruff.log =====
+1: All checks passed!

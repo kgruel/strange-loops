@@ -1,0 +1,14 @@
+{
+  "instruction": "Final focused adversarial follow-up, Fable 5.1 LOW. Static only; no tools/execution/delegation. Return ACCEPT or REVISE with concrete blockers, then optional notes. Initial Fable and primary verdicts ACCEPT, no blockers. Root elected four optional assertion refinements. Assess the final test and correction diff: explicit hook firing instead of merely OSError type (incidental I/O could have same type), exact one-record count for one new kind/no keys, full recovered projection ID list, noop result head. Does it close optional feedback without brittle/false claims? Scope is deterministic public mapped SDK after-append interruption/recovery/inspection/continued strict-kind writing, not process crash/all phases/C9. Production unchanged from initial review. Include source engine recovery context, previous findings/triage, maintained report, native correction49 logs. No more broadening unless a concrete defect. Full SDK580 and architecture101 preceded assertion-only changes; final49/1.28s and Ruff passed. Reviewer must not claim own execution or that provider constructors are poisoned (only mapped resolve/legacy for_write).",
+  "sources": [
+    "libs/sdk/tests/test_arrival_declaration_recovery_workload.py",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/correction.patch",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/final-findings.md",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/primary-triage.md",
+    "libs/engine/src/engine/arrival_declarations.py",
+    "docs/scratch/arrival-break/sdk-conformance-declaration-recovery-2026-09-06.md",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/validation-evidence/focused-pytest.log",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/validation-evidence/ruff.log"
+  ],
+  "patch": false
+}

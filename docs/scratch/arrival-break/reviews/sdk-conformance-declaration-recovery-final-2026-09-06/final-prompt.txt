@@ -1,0 +1,4255 @@
+You are the final adversarial reviewer for a bounded SDK workload-conformance slice. Use Fable 5.1 LOW. Static review only; no tools, execution, delegation or modifications. Return ACCEPT or REVISE, blockers with source locations/concrete false positives and smallest corrections, then optional findings. Do not infer validation you did not run.
+Baseline 2d4d2d0a. User-approved scope: mapped public declaration edit interrupted after durable append, recover using public intent, inspect, continue authorized writing. This is deterministic failure-hook integration coverage, not process-crash/durability proof or all recovery phases. No production change intended. Existing tests cover preappend/not-applied, cache-detach/publication failures, competing cache, and exact suffix validation.
+Assess executable assertions for causal specificity, durable commit vs cache/projection lag, no duplicate append, exact declaration fact identity, truthful original recovery basis vs fresh read basis, credential-free recovery vs authorized subsequent write, isolated fixtures, and docs claim boundaries. Full prefix verification does not verify signatures/key trust/projection consistency; explicit evidence comparisons and existing mapped signing tests are complementary. Do not demand C9 retirement or unrelated API expansion. Test logs are native execution evidence, not reviewer execution.
+
+
+===== libs/sdk/tests/test_arrival_declaration_recovery_workload.py =====
+1: """Public mapped-custody conformance for interrupted declaration recovery."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import json
+6: from dataclasses import asdict
+7: from pathlib import Path
+8: 
+9: import pytest
+10: from engine import arrival_declarations
+11: from engine.arrival_contract import ProjectionBehind
+12: 
+13: from sdk import (
+14:     AdmissionFailed,
+15:     ArrivalRefusal,
+16:     CommittedIncomplete,
+17:     CustodyCredentialProvider,
+18:     MappedCredentialProvider,
+19:     edit_declaration,
+20:     emit_fact,
+21:     init_vertex,
+22:     inspect_declaration,
+23:     read_facts,
+24:     recover_declaration,
+25:     verify_target,
+26: )
+27: 
+28: 
+29: @pytest.fixture(autouse=True)
+30: def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+31:     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+32:     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+33:     monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
+34: 
+35: 
+36: def _add_note_kind(declaration: str, *, collect_limit: int = 10) -> str:
+37:     item = (
+38:         "  item {\n"
+39:         "    fold {\n"
+40:         '      items "collect" 100\n'
+41:         "    }\n"
+42:         "  }\n"
+43:     )
+44:     note = (
+45:         "  note {\n"
+46:         "    fold {\n"
+47:         f'      items "collect" {collect_limit}\n'
+48:         "    }\n"
+49:         "  }\n"
+50:     )
+51:     assert declaration.count(item) == 1
+52:     return declaration.replace(item, item + note)
+53: 
+54: 
+55: def test_mapped_declaration_recovery_restores_inspection_and_writes(
+56:     tmp_path: Path,
+57:     monkeypatch: pytest.MonkeyPatch,
+58: ) -> None:
+59:     provider = MappedCredentialProvider(
+60:         tmp_path / "custody",
+61:         namespace="recovery-tenant",
+62:         receipt_observer="alice",
+63:     )
+64:     provider.create_binding("alice", token="create-alice")
+65:     vertex = tmp_path / "workflow.vertex"
+66:     initialized = init_vertex(
+67:         vertex,
+68:         name="workflow",
+69:         store_type="arrival",
+70:         location=(tmp_path / "data" / "workflow.arrival").resolve(),
+71:         observer="alice",
+72:         strict=True,
+73:         credentials=provider,
+74:     )
+75:     assert initialized.lineage is not None
+76:     proposed = _add_note_kind(vertex.read_text(encoding="utf-8"))
+77:     original_cache = vertex.read_bytes()
+78:     baseline_inspection = inspect_declaration(vertex)
+79:     assert baseline_inspection.basis is not None
+80:     assert baseline_inspection.store == initialized.store
+81:     assert baseline_inspection.local_status == "matches-effective"
+82:     assert baseline_inspection.declared_kinds == ["item"]
+83:     baseline_basis = asdict(baseline_inspection.basis)
+84:     baseline_internal = read_facts(
+85:         vertex,
+86:         include_internal=True,
+87:         limit=20,
+88:         order="oldest",
+89:     )
+90:     baseline_ids = [item["id"] for item in baseline_internal.items]
+91:     initial_verification = verify_target(vertex)
+92:     assert initial_verification.claims == (
+93:         "grammar",
+94:         "density",
+95:         "lineage",
+96:         "hash-chain",
+97:     )
+98:     assert initial_verification.excludes == (
+99:         "signature-authorship",
+100:         "external-key-trust",
+101:         "projection",
+102:     )
+103:     before_edit = initial_verification.verified_through
+104:     assert before_edit is not None
+105:     with pytest.raises(AdmissionFailed) as undeclared:
+106:         emit_fact(
+107:             vertex,
+108:             "note",
+109:             {"text": "before declaration"},
+110:             observer="alice",
+111:             origin="recovery-workflow",
+112:             ts=9.0,
+113:             id_override="note-before-declaration",
+114:             credentials=provider,
+115:         )
+116:     assert undeclared.value.observer == "alice"
+117:     assert undeclared.value.kind == "note"
+118:     assert verify_target(vertex).verified_through == before_edit
+119: 
+120:     original_apply = arrival_declarations.apply_declaration_edit
+121: 
+122:     def interrupt_after_append(registry, plan):
+123:         def fail(phase: str) -> None:
+124:             if phase == "after-append":
+125:                 raise OSError("injected declaration publication interruption")
+126: 
+127:         return original_apply(registry, plan, failure_hook=fail)
+128: 
+129:     monkeypatch.setattr(
+130:         arrival_declarations,
+131:         "apply_declaration_edit",
+132:         interrupt_after_append,
+133:     )
+134:     with pytest.raises(CommittedIncomplete) as interrupted:
+135:         edit_declaration(
+136:             vertex,
+137:             proposed,
+138:             observer="alice",
+139:             credentials=provider,
+140:         )
+141: 
+142:     failure = interrupted.value
+143:     encoded_failure = failure.as_dict()
+144:     json.dumps(encoded_failure, allow_nan=False)
+145:     assert encoded_failure["outcome"] == "committed-incomplete"
+146:     assert failure.source_type == "DeclarationCommittedIncomplete"
+147:     assert failure.details["phase"] == "appended"
+148:     assert failure.details["commit"]["before"] == {
+149:         "lineage": before_edit.lineage,
+150:         "ordinal": before_edit.ordinal,
+151:         "record_hash": before_edit.record_hash,
+152:     }
+153:     durable_head = failure.details["commit"]["after"]
+154:     assert durable_head["lineage"] == before_edit.lineage
+155:     assert durable_head["ordinal"] > before_edit.ordinal
+156:     assert failure.details["head"] == durable_head
+157:     assert failure.details["fact_ids"]
+158:     intent = Path(failure.details["intent_path"])
+159:     assert intent.exists()
+160:     assert vertex.read_bytes() == original_cache
+161:     assert verify_target(vertex).as_dict()["verified_through"] == durable_head
+162: 
+163:     with pytest.raises(ProjectionBehind):
+164:         inspect_declaration(vertex)
+165: 
+166:     with pytest.raises(ArrivalRefusal) as pending:
+167:         edit_declaration(
+168:             vertex,
+169:             _add_note_kind(
+170:                 vertex.read_text(encoding="utf-8"),
+171:                 collect_limit=11,
+172:             ),
+173:             observer="alice",
+174:             credentials=provider,
+175:         )
+176:     assert pending.value.source_type == "DeclarationPreparationRefused"
+177:     pending_evidence = pending.value.details["evidence"]
+178:     assert pending_evidence["phase"] == "prepare"
+179:     assert pending_evidence["effects"]["custody"] == {
+180:         "state": "not-attempted",
+181:         "attempt": "not-entered",
+182:     }
+183:     assert pending_evidence["cause"]["type"] == "ProjectionBehind"
+184:     assert pending_evidence["basis"]["captured_head"] == durable_head
+185:     assert intent.exists()
+186:     assert verify_target(vertex).as_dict()["verified_through"] == durable_head
+187: 
+188:     with monkeypatch.context() as recovery_poison:
+189:         recovery_poison.setattr(
+190:             MappedCredentialProvider,
+191:             "resolve",
+192:             lambda *_args, **_kwargs: pytest.fail(
+193:                 "declaration recovery resolved mapped signing credentials"
+194:             ),
+195:         )
+196:         recovery_poison.setattr(
+197:             CustodyCredentialProvider,
+198:             "for_write",
+199:             lambda *_args, **_kwargs: pytest.fail(
+200:                 "declaration recovery acquired legacy signing credentials"
+201:             ),
+202:         )
+203:         recovered = recover_declaration(intent)
+204:     assert recovered.status == "recovered"
+205:     assert recovered.phase == "published"
+206:     assert recovered.commit is None
+207:     assert recovered.changes is None
+208:     assert recovered.file_written is True
+209:     assert recovered.head == durable_head
+210:     assert recovered.captured_head == failure.details["commit"]["before"]
+211:     assert recovered.basis == baseline_basis
+212:     assert recovered.fact_ids == tuple(failure.details["fact_ids"])
+213:     assert not intent.exists()
+214:     assert vertex.read_text(encoding="utf-8") == proposed
+215:     assert verify_target(vertex).as_dict()["verified_through"] == durable_head
+216:     json.dumps(recovered.as_dict(), allow_nan=False)
+217: 
+218:     recovered_internal = read_facts(
+219:         vertex,
+220:         include_internal=True,
+221:         limit=20,
+222:         order="oldest",
+223:     )
+224:     recovered_ids = [item["id"] for item in recovered_internal.items]
+225:     assert recovered_ids[: len(baseline_ids)] == baseline_ids
+226:     assert all(recovered_ids.count(fact_id) == 1 for fact_id in recovered.fact_ids)
+227:     recovered_rows = [
+228:         item for item in recovered_internal.items if item["id"] in recovered.fact_ids
+229:     ]
+230:     assert len(recovered_rows) == len(recovered.fact_ids)
+231:     note_declarations = [
+232:         item
+233:         for item in recovered_rows
+234:         if item["kind"] == "_decl.kind-defined"
+235:         and item["payload"]["subject"] == "note"
+236:     ]
+237:     assert len(note_declarations) == 1
+238: 
+239:     inspection = inspect_declaration(vertex)
+240:     assert inspection.read_path == "arrival"
+241:     assert inspection.syntax_valid is True
+242:     assert inspection.status == inspection.effective_status == "store"
+243:     assert inspection.local_status == "matches-effective"
+244:     assert inspection.declared_kinds == ["item", "note"]
+245:     assert inspection.basis is not None
+246:     assert inspection.basis.lineage == initialized.lineage
+247:     assert inspection.basis.captured_head == inspection.basis.projected_through
+248:     assert inspection.basis.captured_head.ordinal == durable_head["ordinal"]
+249:     assert inspection.basis.captured_head.record_hash == durable_head["record_hash"]
+250:     json.dumps(inspection.as_dict(), allow_nan=False)
+251: 
+252:     monkeypatch.setattr(
+253:         arrival_declarations,
+254:         "apply_declaration_edit",
+255:         original_apply,
+256:     )
+257:     repeated = edit_declaration(
+258:         vertex,
+259:         proposed,
+260:         observer="alice",
+261:         credentials=provider,
+262:     )
+263:     assert repeated.status == "noop"
+264:     assert repeated.phase == "noop"
+265:     assert repeated.commit is None
+266:     assert repeated.file_written is False
+267:     assert verify_target(vertex).as_dict()["verified_through"] == durable_head
+268: 
+269:     reopened_provider = MappedCredentialProvider(
+270:         tmp_path / "custody",
+271:         namespace="recovery-tenant",
+272:         receipt_observer="alice",
+273:     )
+274:     continued = emit_fact(
+275:         vertex,
+276:         "note",
+277:         {"text": "after recovery"},
+278:         observer="alice",
+279:         origin="recovery-workflow",
+280:         ts=20.0,
+281:         id_override="note-after-recovery",
+282:         credentials=reopened_provider,
+283:     )
+284:     assert continued.stored is True
+285:     assert continued.signed is True
+286:     assert continued.commit is not None
+287:     assert continued.commit.before.ordinal == durable_head["ordinal"]
+288:     assert continued.commit.before.record_hash == durable_head["record_hash"]
+289:     assert continued.commit.after.lineage == initialized.lineage
+290:     assert continued.commit.after.ordinal > continued.commit.before.ordinal
+291:     assert continued.witnessed is True
+292:     assert continued.projection == "synced"
+293: 
+294:     page = read_facts(vertex, kind="note", limit=10, order="oldest")
+295:     assert page.basis is not None
+296:     assert page.basis.lineage == initialized.lineage
+297:     assert page.basis.captured_head == continued.commit.after
+298:     assert page.basis.projected_through == page.basis.captured_head
+299:     assert [(item["id"], item["observer"], item["payload"]) for item in page.items] == [
+300:         ("note-after-recovery", "alice", {"text": "after recovery"})
+301:     ]
+302:     verified = verify_target(vertex)
+303:     assert verified.captured_head == continued.commit.after
+304:     assert verified.verified_through == page.basis.captured_head
+305:     assert verified.claims == initial_verification.claims
+306:     assert verified.excludes == initial_verification.excludes
+
+===== libs/sdk/README.md =====
+1: # sdk — Loops Apex Composition Library
+2: 
+3: `sdk` is the headless composition layer uniting `engine`, `custody`, `lang`, `store`, `atoms`, and `sign` into unified, typed operations. It serves as the single foundation for presentation layers (`apps/loops`, TUI, external agents, Python scripts) without leaking presentation logic into the core substrate.
+4: 
+5: ---
+6: 
+7: ## Architectural Guarantees
+8: 
+9: - **Zero Presentation Logic**: Returns pure typed dataclasses; never formats terminal escape codes or parses CLI flags.
+10: - **Descriptor-First Arrival Reads**: An explicitly declared backend and instance role select the adapter; store locations remain opaque to the SDK.
+11: - **Visible Legacy Boundary**: Bare `.jsonl`/SQLite inputs remain transitional and every read result labels its path as `legacy` with `basis=None`.
+12: - **Witness-Axis Honesty**: Fact listing and pagination use append-order cursors (`WitnessPosition`) ensuring deterministic, non-lossy walks.
+13: - **Declared Admission & Attestation**: Fact emission enforces declared observer and kind admission policies, signing with operation-fresh custody keys.
+14: - **AST-Verified Ceremonies**: Declarative vertex modifications are verified against the language grammar and executed via transactional plan/apply ceremonies.
+15: 
+16: ---
+17: 
+18: ## API Reference
+19: 
+20: ### 1. Target Resolution & Discovery
+21: 
+22: ```python
+23: from sdk import resolve_arrival_target, resolve_target, discover_targets, TargetInfo
+24: 
+25: # Supported Arrival target: the descriptor carries backend, opaque location,
+26: # optional lineage pin, and mandatory instance role.
+27: arrival = resolve_arrival_target("path/to/target.vertex")
+28: # -> ArrivalTarget(store=StoreDescriptorInfo(backend='file', location='...', role='replica'))
+29: 
+30: # Single target probe
+31: info = resolve_target("path/to/target.vertex")
+32: # -> TargetInfo(target_type='vertex', canonical_mode='sqlite', canonical_path=..., index_path=..., exists=True, ...)
+33: 
+34: # Multi-target workspace discovery
+35: targets = discover_targets(".", recursive=True)
+36: ```
+37: 
+38: - **`resolve_target(target: Path | str) -> TargetInfo`**:
+39:   Transitional filesystem probe for legacy targets. Raises `TargetNotFound` or `TargetUnsupported`.
+40: - **`resolve_arrival_target(target: Path | str) -> ArrivalTarget`**:
+41:   Parses an explicit vertex descriptor without probing or normalizing its backend-owned location. It refuses suffix inference and an omitted instance role.
+42: - **`discover_targets(root_path=".", *, recursive=True, include_bare=True) -> list[TargetInfo]`**:
+43:   Discovers all Loops vertices and bare stores in a directory tree.
+44: 
+45: ---
+46: 
+47: ### 2. Read Operations
+48: 
+49: ```python
+50: from sdk import (
+51:     read_summary,
+52:     read_facts,
+53:     read_state,
+54:     read_ticks,
+55:     read_fact_by_id,
+56:     search_facts,
+57:     resolve_entity,
+58:     read_timeline,
+59:     sync_target,
+60: )
+61: 
+62: # Target statistical summary & kind inventory
+63: summary = read_summary("target.vertex")
+64: # -> ReadSummary(read_path='arrival', basis=ReadBasis(...), store=StoreDescriptorInfo(...), ...)
+65: 
+66: # Bounded, cursor-bearing fact pagination
+67: page = read_facts("target.vertex", limit=10, order="newest")
+68: # -> FactPageResult(items=[...], next_cursor=..., truncated=True, order='newest')
+69: 
+70: # Arrival continuations are process-local capabilities. Pass next_cursor back
+71: # to read_facts() directly; as_dict() reports has_continuation=True and redacts
+72: # the engine value instead of emitting an unprotected wire token.
+73: 
+74: # Folded vertex state
+75: state = read_state("target.vertex", kind="note")
+76: # -> FoldStateResult(vertex_name='target', sections={'note': {'count': 10, 'items': [...]}})
+77: 
+78: # Full-text search across observation payloads
+79: search_res = search_facts("target.vertex", query="refactor auth", limit=10)
+80: # -> SearchResult(query='refactor auth', matches=[...], total_matches=1)
+81: 
+82: # Domain entity fold-key resolution
+83: fact_id = resolve_entity("target.vertex", kind="task", key="task_id", value="T-100")
+84: 
+85: # Interleaved chronological timeline (facts + ticks)
+86: timeline = read_timeline("target.vertex", limit=50)
+87: 
+88: # Explicit projection synchronization. Arrival sync first attests custody and
+89: # catches a missing or behind projection up through the captured head.
+90: sync_res = sync_target("target.vertex")
+91: # -> SyncResult(read_path='arrival', captured_head=..., target=...,
+92: #               projected_before=..., projected_after=..., changed=True, ...)
+93: 
+94: # Tick records
+95: ticks = read_ticks("target.vertex", name="default")
+96: for tick in ticks.items:
+97:     print(tick["name"])
+98: 
+99: # Fact lookup by full ID or prefix
+100: lookup = read_fact_by_id("target.vertex", "01M01...")
+101: fact = lookup.fact
+102: ```
+103: 
+104: `read_summary`, `read_facts`, `read_state`, `read_ticks`, and
+105: `read_fact_by_id` always return typed result models. Descriptor-first results
+106: carry the custody head and represented projection prefix in `basis`; legacy
+107: results carry `read_path="legacy"` and `basis=None`. Descriptor reads require a
+108: current projection and never materialize, repair, or catch it up. Search,
+109: entity resolution, and timelines carry the same captured basis. Aggregate
+110: state, summary and timeline results retain per-occurrence member bases rather
+111: than inventing one shared head. `sync_target` is the
+112: explicit maintenance boundary: it may catch up a missing or behind Arrival
+113: projection, while inconsistent existing state and rebuild requests refuse.
+114: 
+115: Arrival read operations, including `resolve_entity`, `read_timeline`, and
+116: `inspect_declaration`, accept an optional keyword-only `registry=` for custom
+117: `engine.arrival_registry.BackendRegistry` instances. Omission selects the
+118: built-in backends. A supplied registry handles every supported root and member
+119: Arrival open; unknown backends refuse without fallback, and non-file locations reach
+120: the named adapter unchanged. Timeline reuses its captured root when the
+121: effective declaration selects aggregation. Entity resolution and declaration
+122: inspection retain their current Arrival aggregate restrictions.
+123: Legacy targets keep their existing behavior and do not consult the registry.
+124: 
+125: `export_target("target.vertex", "snapshot.jsonl")` writes an exact captured
+126: wire prefix and returns its manifest, selected/captured heads and byte count.
+127: It refuses to replace an existing output. A late source failure publishes no
+128: partial artifact; a directory-sync failure after publication raises
+129: `ExportPublicationError` with `published=True` and the complete artifact's
+130: identity. Export requires no current query projection. Import and replication
+131: are still pending their explicit initialization/restoration boundary.
+132: 
+133: ---
+134: 
+135: ### 3. Fact Emission
+136: 
+137: ```python
+138: from sdk import BatchEmitResult, EmitReceipt, emit_batch, emit_fact, preview_emission
+139: from atoms import Fact
+140: 
+141: # Emitting by kind and payload
+142: receipt = emit_fact(
+143:     "target.vertex",
+144:     kind_or_fact="note",
+145:     payload={"title": "Meeting Notes", "body": "Discussed SDK API"},
+146:     observer="alice",
+147: )
+148: # Descriptor-first Arrival receipts carry the captured head, durable Commit,
+149: # witness state, and post-commit projection status.
+150: 
+151: # Or preflight dry-run simulation
+152: preview = preview_emission("target.vertex", "note", {"title": "Test"}, observer="alice")
+153: 
+154: # A descriptor-first batch is planned from one snapshot and uses one append.
+155: batch = emit_batch(
+156:     "target.vertex",
+157:     [fact, ("note", {"title": "Batch item"})],
+158:     observer="alice",
+159: )
+160: for receipt in batch.items:
+161:     print(receipt.id, receipt.stored)
+162: print(batch.commit, batch.atomicity, batch.projection)
+163: ```
+164: 
+165: - **`emit_fact(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, id_override=None, credentials=None, admit_undeclared=False, dry_run=False, registry=None) -> EmitReceipt`**:
+166:   Emits a fact (or `Fact` atom) under declared admission rules. Descriptor-first Arrival writes prepare from one CURRENT snapshot, append once against its captured full head, witness the commit, then explicitly synchronize the projection. Bypassing strict kind admission requires `admit_undeclared=True`. Deterministic IDs can be specified with `id_override`. `dry_run=True` simulates emission without storage.
+167: - **`preview_emission(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, admit_undeclared=False, credentials=None, registry=None) -> EmitPreviewResult`**:
+168:   Simulates emission against declared policies, checking fold key requirements without disk side effects. Arrival policy and fold metadata come from the same bounded effective declaration used for planning; a missing projection refuses without materializing it.
+169: - **`emit_batch(target, facts, *, observer=None, origin="", credentials=None, admit_undeclared=False, registry=None) -> BatchEmitResult`**:
+170:   Normalizes every item before resolving the target. A descriptor-first Arrival batch derives all per-item admission decisions from one current snapshot, appends the packed records under one head comparison, witnesses one shared commit, and explicitly synchronizes the projection. Each mapping item may set its own boolean `admit_undeclared`; duplicate receipts retain `stored=False`. Empty input is an explicit zero-write result. Legacy targets return the same wrapper with `atomic=False`, `atomicity="legacy-sequential"`, and no invented shared commit; `LegacyBatchPartialFailure` retains receipts if that sequential loop stops after an observable prefix.
+171: 
+172: `CustodyCredentialProvider()` and `CustodyCredentialProvider(key_dir=None)` use
+173: the existing custody resolver. A non-`None` `key_dir` now raises
+174: `SdkValueError` during construction because directory overrides were previously
+175: accepted but ignored. This applies before either Arrival or legacy operations
+176: can use the provider. Callers that need another credential source can continue
+177: to supply a custom `CredentialProvider`; that interface does not itself create
+178: an observer mapping or register public keys.
+179: 
+180: For an explicit persisted namespace, use `MappedCredentialProvider` with an
+181: Arrival target. Prepare the binding separately from initializing the store:
+182: 
+183: ```python
+184: from pathlib import Path
+185: from sdk import MappedCredentialProvider, init_vertex, emit_fact
+186: 
+187: credentials = MappedCredentialProvider(
+188:     Path("/absolute/path/to/private-custody"),
+189:     namespace="personal",
+190:     receipt_observer="alice",  # explicit local receipt-signing selection
+191: )
+192: binding = credentials.create_binding("alice", token="bootstrap-alice-1")
+193: init_vertex(
+194:     Path("observations.vertex"), store_type="arrival", observer="alice",
+195:     credentials=credentials,
+196: )
+197: emit_fact(
+198:     Path("observations.vertex"), "item", {"value": 1},
+199:     observer="alice", credentials=credentials,
+200: )
+201: ```
+202: 
+203: Mapped selection uses the exact namespace and observer, independently of the
+204: vertex filename or lineage. The engine checks author keys against verified
+205: history through captured H, for use after H, and verifies each signature in its
+206: own domain. Receipt signing uses the explicitly selected local observer and
+207: the effective declaration's current receipt-key policy; the unsigned outer tick
+208: still names the physical genesis custodian. Omitting `receipt_observer` permits
+209: unsigned ticks before the signed-tick era, and refuses a required signed tick.
+210: A missing author binding may remain unsigned where the existing policy allows;
+211: a contradictory or unauthorized binding refuses before append.
+212: 
+213: Mapped initialization only loads a pre-created binding. For another observer,
+214: prepare its binding and pass `key=binding.public_key` to `grant_observer` with
+215: the existing author's credentials. Mapped `grant_observer(key=None)` refuses
+216: before creating keys. Recovery of an existing Arrival initialization intent
+217: signs nothing and does not require private custody to remain available.
+218: Mapped providers are supported on Arrival targets; legacy writers explicitly
+219: refuse them. The default `CustodyCredentialProvider` remains unchanged.
+220: 
+221: The runnable [two-observer mapped workload](tests/test_arrival_mapped_workload.py)
+222: shows the complete public lifecycle: create Alice and Bob bindings under one
+223: persisted provider root and exact namespace; initialize with Alice; grant Bob
+224: using Bob's pre-created public key; then emit with both authors. For a locator
+225: move that keeps the same physical file-backed store, initialize with an
+226: **absolute** `location` and move only the `.vertex` file while retaining its
+227: store clause, lineage, and role. Recreate `MappedCredentialProvider` with the
+228: same provider root, namespace, and receipt observer before continuing work.
+229: The absolute store location keeps the same store residence, while
+230: mapped key selection comes only from the provider namespace and exact observer
+231: label; neither the vertex filename nor its new directory chooses a key.
+232: 
+233: After relocation, `verify_target(relocated_vertex)` provides a `Full`
+234: verification of the captured prefix's grammar, dense ordinals, lineage, and
+235: record-hash chain. It does not establish projection agreement, signature
+236: authorship, key trust, or the identity of an observer across lineages. The
+237: mapped workload exercises public writes with captured authorization; the
+238: [mapped signing tests](tests/test_arrival_mapped_credentials.py) separately
+239: verify domain-specific signatures and key-history behavior.
+240: 
+241: `import_legacy(vertex_path, observer, token=...)` explicitly copies a verified
+242: legacy key into managed storage without changing the original. It preserves
+243: flat/nested ambiguity and alias refusals. After import, locator moves do not
+244: change mapped selection. No read, preview, or signer load imports or creates a
+245: binding. `bind_existing_ref(observer, key_ref, expected_public_key, token=...)`
+246: permits deliberate reuse of a completed managed key in another namespace;
+247: equal observer labels alone never select another namespace's key.
+248: See [custody binding recovery](../custody/README.md#explicit-mapped-bindings)
+249: for interruption handling and filesystem scope.
+250: 
+251: ### Recovering an interrupted mapped declaration edit
+252: 
+253: An edit can raise `CommittedIncomplete` after its declaration records are
+254: durable but before projection synchronization or local cache publication
+255: finishes. Its public `details["intent_path"]` identifies the retained recovery
+256: intent. Use it before deciding whether to retry the proposal:
+257: 
+258: ```python
+259: from sdk import CommittedIncomplete, edit_declaration, recover_declaration
+260: 
+261: try:
+262:     edit_declaration(vertex, proposal, observer="alice", credentials=credentials)
+263: except CommittedIncomplete as outcome:
+264:     recovered = recover_declaration(outcome.details["intent_path"])
+265: ```
+266: 
+267: Recovery reconciles the exact retained suffix, synchronizes the projection,
+268: and publishes the retained declaration bytes without re-signing or appending
+269: the proposal again. A recovery result has no original `Commit`; its basis is
+270: the original captured edit basis. Follow it with `inspect_declaration(vertex)`
+271: to obtain a fresh effective-declaration/read basis, and use
+272: `verify_target(vertex)` when the bounded `Full` hash-chain claim is needed.
+273: The [mapped declaration recovery workload](tests/test_arrival_declaration_recovery_workload.py)
+274: uses a deterministic injected `after-append` interruption beneath the public
+275: SDK edit call; it is not a process-kill or crash-survival test.
+276: 
+277: Supported Arrival execution reserves the vertex name from its loop names.
+278: Every exact name collision refuses, including passive loops, reset/carry loops,
+279: and count- or event-triggered boundaries. The runtime also adds an implicit
+280: `cite` loop, so a vertex named `cite` cannot execute under this restriction.
+281: Runtime capture checks the historized effective declaration and expanded
+282: template loop names before hydration and planning; editing only the local cache
+283: cannot bypass it. New and proposed declarations check their declared loops and
+284: the implicit `cite` loop. The SDK initializer also refuses the name `item`,
+285: because its scaffold declares an `item` loop, before creating custody keys.
+286: External template sources are expanded and checked at runtime; declaration
+287: editing does not load them solely to enforce this rule.
+288: 
+289: This is an Arrival execution compatibility restriction. Existing histories
+290: remain available through evidence reads, declaration inspection and export.
+291: A collision-free declaration can be appended to correct an ambiguous current
+292: declaration; prior facts and ticks retain their original names and bytes.
+293: This does not establish which role an already-recorded ambiguous tick had;
+294: historical boundary continuity remains a separate limitation.
+295: Legacy runtime behavior and the wire format retain their existing rules.
+296: 
+297: ---
+298: 
+299: ### 4. Arrival Source Execution
+300: 
+301: ```python
+302: from sdk import run_sources
+303: 
+304: result = await run_sources("target.vertex", observer="alice", force=False)
+305: for tier in result.tiers:
+306:     print(tier.outcome, tier.commit, tier.fact_ids, tier.tick_ids)
+307: ```
+308: 
+309: - **`await run_sources(target, *, observer, force=False, credentials=None, registry=None, collector_factory=None, dispatcher=None, evaluated_at=None) -> SourceRunResult`**:
+310:   Captures a CURRENT Arrival Authority before collection, fixes cadence and dependency tiers, and commits each collected tier with one exact-head batch append plus explicit projection synchronization. The lifecycle observer is always explicit. Existing custody keys are loaded when present; the operation never creates keys.
+311: 
+312:   A source error after yielding observations returns `status="error"` after its error lifecycle fact becomes durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
+313: 
+314:   Coordinator failures during ID allocation, lifecycle construction, or otherwise successful collector cleanup return an incomplete result with terminal category `collection-failed`. `terminal.details.collection` contains the current tier's basis, `custody="not-attempted"`, completed siblings, and paired partial observations from failed or cancelled siblings. Incomplete attempts have no lifecycle fact; prior tiers keep their commits. These partial observations live in terminal evidence, not `known_uncommitted`, which describes a fully collected tier. Owned iterators and distinct iterable owners receive `aclose()` when available; caller cancellation propagates after sibling cleanup. Closing a collector does not undo its external effects or guarantee subprocess termination.
+315: 
+316: ### 5. Declaration, Scaffolding & Ceremonies
+317: 
+318: ```python
+319: from sdk import (
+320:     init_vertex,
+321:     inspect_declaration,
+322:     add_kind,
+323:     edit_kind,
+324:     remove_kind,
+325:     grant_observer,
+326:     revoke_observer,
+327:     plan_kind_mutation,
+328:     recover_ceremony,
+329: )
+330: from lang.ast import LoopDef, FoldDecl, FoldCollect
+331: 
+332: # Scaffold a new vertex declaration
+333: init_res = init_vertex("target.vertex", name="my_app", store_type="sqlite")
+334: 
+335: # Deep structural inspection & syntax validation
+336: info = inspect_declaration("target.vertex")
+337: 
+338: # Plan declaration update (dry-run diff)
+339: plan = plan_kind_mutation("target.vertex", "add", "todo")
+340: 
+341: # Add new loop kind with default 'items collect 100'
+342: result = add_kind("target.vertex", "todo", observer="admin")
+343: 
+344: # Edit existing kind definition
+345: result = edit_kind(
+346:     "target.vertex",
+347:     "note",
+348:     LoopDef(folds=(FoldDecl("items", FoldCollect(50)),)),
+349:     observer="admin",
+350: )
+351: 
+352: # Remove kind definition
+353: result = remove_kind("target.vertex", "deprecated_kind", observer="admin")
+354: 
+355: # Manage observer admission grants
+356: grant_observer("target.vertex", "alice", grants=["todo", "note"], observer="admin")
+357: revoke_observer("target.vertex", "alice", observer="admin")
+358: 
+359: # Recover interrupted ceremony
+360: recovery = recover_ceremony("target.vertex.intent")
+361: ```
+362: 
+363: ---
+364: 
+365: ## Result Models
+366: 
+367: All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
+368: 
+369: Arrival fact and tick items include receipt-order coordinates. Legacy items
+370: retain their established serialized fields; use `read_path`, `basis`, and
+371: `store` on the enclosing result to identify the source and read boundary.
+372: 
+373: | Model | Schema | Purpose |
+374: | :--- | :--- | :--- |
+375: | **`ArrivalTarget`** | `loops.sdk/arrival-target/v1` | Vertex path plus its serializable explicit store descriptor. |
+376: | **`InitVertexResult`** | `loops.sdk/init-vertex/v1` | Outcome of vertex scaffolding operation. |
+377: | **`DeclarationInspectionResult`** | `loops.sdk/declaration-inspection/v1` | Deep structural inspection of a `.vertex` file. |
+378: | **`DeclarationPlanResult`** | `loops.sdk/declaration-plan/v1` | Dry-run preview of a proposed declaration update. |
+379: | **`ReadSummary`** | `loops.sdk/read-summary/v2` | Basis-bearing inventory of facts, ticks, and kinds. |
+380: | **`FactPageResult`** | `loops.sdk/facts-page/v2` | Basis-bearing bounded page with continuation metadata. |
+381: | **`FactLookupResult`** | `loops.sdk/fact-lookup/v1` | Basis-bearing exact/prefix lookup; a miss retains its basis. |
+382: | **`TickReadResult`** | `loops.sdk/tick-read/v1` | Basis-bearing chronological tick records. |
+383: | **`FoldStateResult`** | `loops.sdk/fold-state/v2` | State folded from facts and declarations in one bounded snapshot. |
+384: | **`SearchResult`** | `loops.sdk/search-result/v1` | Full-text search matches, snippets, and rankings. |
+385: | **`TimelineResult`** | `loops.sdk/timeline-result/v1` | Interleaved chronological stream of facts and tick seals. |
+386: | **`SyncResult`** | `loops.sdk/sync-result/v2` | Legacy index status or Arrival captured/target/before/after projection basis. |
+387: | **`EmitReceipt`** | `loops.sdk/emit-receipt/v2` | Legacy receipt fields plus Arrival store, captured head, commit, witness, and projection outcome. |
+388: | **`SourceRunResult`** | `loops.sdk/source-run/v1` | Captured cadence, collected bodies, tier commits, and interrupted projection/dispatch evidence. |
+389: | **`EmitPreviewResult`** | `loops.sdk/emit-preview/v2` | Preflight admission/fold result with descriptor and captured-head provenance. |
+390: | **`KindMutationResult`** | `loops.sdk/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |
+391: 
+392: ---
+393: 
+394: ## Exception Taxonomy
+395: 
+396: ```mermaid
+397: graph TD
+398:     SdkError --> TargetError
+399:     TargetError --> TargetNotFound
+400:     TargetError --> TargetUnsupported
+401:     TargetError --> TargetNotWritable
+402:     SdkError --> AdmissionFailed
+403:     SdkError --> EmissionFailed
+404:     SdkError --> SdkValueError
+405:     SdkValueError --> InvalidEmissionRequest
+406:     EmissionFailed --> InvalidEmissionRequest
+407:     EmissionFailed --> CommittedEmissionError
+408:     SdkError --> CeremonyFailed
+409: ```
+410: 
+411: - **`SdkError`**: Base class for all high-level SDK exceptions.
+412: - **`SdkValueError`**: Base class for SDK parameter and validation errors (inherits from `ValueError`).
+413: - **`TargetNotFound`**: Target path does not exist on disk.
+414: - **`TargetUnsupported`**: Path exists but is not a recognized Loops artifact.
+415: - **`TargetNotWritable`**: Target or derived index cannot be written to.
+416: - **`AdmissionFailed`**: Declared admission policy (strict kinds or observer grants) refused the operation.
+417: - **`EmissionFailed`**: Fact emission failed prior to committing.
+418: - **`InvalidEmissionRequest`**: Invalid emission parameters (missing required observer or invalid shape).
+419: - **`CommittedEmissionError`**: Fact was written to storage, but a post-commit task failed (carries `.fact_id`).
+420: - **`CeremonyFailed`**: Declaration update AST generation or ceremony apply was refused.
+421: 
+422: Descriptor-first reads also surface engine contract refusals (for example, a
+423: missing or behind projection or an invalid continuation) and declaration
+424: resolution errors. These keep the adapter's evidence-bearing refusal intact.
+425: 
+426: Arrival `sync_target` and `sync_search_index` normalize maintenance failures as
+427: `ProjectionOutcomeUnknown`. Their optional `details.evidence` object uses
+428: `loops.sdk/evidence/v1`: it records the coordinator phase, resource effects,
+429: available head/coverage coordinates, and up to two explicit causal exceptions.
+430: Search failures before the build call report derived state as
+431: `not-entered`/`not-attempted`; failures after entering build or projection
+432: catch-up report `entered`/`unknown`. A nested refusal does not prove that an
+433: adapter left derived state unchanged. Existing error outcomes, source types,
+434: and operation-specific `details.phase` remain intact. Cause messages are capped
+435: at 512 characters; record bodies and implicit exception context are excluded.
+436: Declaration preparation refusals carry preparation evidence without claiming a
+437: custody append. Cancellation and process-control exceptions propagate unchanged.
+438: 
+439: ## Restore an existing exact copy
+440: 
+441: ```python
+442: from sdk import restore_forward
+443: 
+444: restored = restore_forward("source.vertex", "replica.vertex")
+445: print(restored.before, restored.after)
+446: ```
+447: 
+448: Both vertices require explicit Arrival descriptors. The receiver must already
+449: be an exact prefix of the verified source. Restoration appends the complete
+450: missing suffix atomically through at least the witnessed head, preserving its
+451: declared role. `restored.commit` is an actual receipt, or `None` when the exact
+452: selected head is already present. Projection catch-up remains explicit.
+453: 
+454: Ordinary opening still refuses rollback. `CommittedOutcomeUnknown` retains
+455: before/target heads when a replication receipt was lost;
+456: `CommittedIncomplete` retains the commit if later witnessing or comparison
+457: failed. Empty receiver installation is a separate, pending import operation.
+
+===== docs/scratch/arrival-break/sdk-conformance-declaration-recovery-2026-09-06.md =====
+1: # Public SDK conformance: interrupted declaration recovery
+2: 
+3: Status: implementation and native validation complete; final review pending on `arrival/finish`, based
+4: on checkpoint `2d4d2d0a`. This is the second bounded workload-conformance slice
+5: preceding C9 transition and legacy retirement.
+6: 
+7: ## Contract under test
+8: 
+9: A mapped public SDK declaration edit is interrupted after its append commits
+10: and before projection synchronization and descriptor cache publication. The
+11: SDK must preserve the committed outcome and recovery coordinates. Recovery
+12: reconciles the retained edit against history, finishes publication without
+13: appending the proposal again, and permits inspection and subsequent authorized
+14: writing against the resulting declaration.
+15: 
+16: The recovery result retains the original edit's captured basis. Its final head
+17: describes the reconciled history; it does not manufacture an original `Commit`
+18: or a fresh read basis. Public inspection and fact reads separately establish
+19: the current effective declaration and projected prefix. Prefix verification
+20: checks grammar, density, lineage and the hash chain; it does not establish
+21: signature authorship, external key trust or projection agreement.
+22: 
+23: ## Scope
+24: 
+25: Sol owns the executable workflow; Terra independently audits the contracts and
+26: updates SDK guidance; Luna checks the resulting suite; root integrates the
+27: evidence and triages a frozen Fable 5.1 LOW review. All validation processes
+28: isolate XDG state/config and `LOOPS_HOME`; fixtures use disposable stores and
+29: mapped keys. No live migration or legacy retirement is involved.
+30: 
+31: The public SDK intentionally has no interruption argument. The test injects
+32: the engine's existing `after-append` failure hook beneath `edit_declaration`;
+33: the edit, recovery, inspection and continued write remain public SDK calls.
+34: This is a deterministic exception-boundary test, not a process-kill, power-loss
+35: or multi-machine durability test. The locator stays at its original path with
+36: an absolute store location throughout recovery.
+37: 
+38: Existing declaration tests complement this workflow with pre-append/not-applied
+39: recovery, cache-publication interruptions, competing-cache refusal and exact
+40: suffix/predecessor validation. This slice does not replace those tests or claim
+41: all recovery phases. Recovery is distinct from restore-forward, which belongs
+42: to the upcoming transfer workload.
+43: 
+44: ## Executable evidence
+45: 
+46: The [workflow](../../../libs/sdk/tests/test_arrival_declaration_recovery_workload.py)
+47: initializes a strict declaration with mapped Alice credentials. A `note` fact
+48: refuses before the new kind is declared. The interrupted public edit retains
+49: its before/after head, phase, declaration fact IDs and public intent path.
+50: Prefix verification reaches that durable head while the descriptor still has
+51: its original bytes. Inspection refuses on the stale projection; another edit
+52: reports a preparation refusal with a `ProjectionBehind` cause and custody
+53: not entered. Neither operation advances the verified head.
+54: 
+55: Recovery runs with mapped resolution and legacy credential acquisition poisoned.
+56: It retains the original captured basis and declaration fact IDs, reports no
+57: original commit or changes, and publishes the proposed descriptor. The head
+58: stays unchanged across recovery. An internal fact read checks the baseline
+59: identities and the new `note` declaration fact exactly once. Fresh inspection
+60: reports matching local/effective declarations and current projection evidence.
+61: Repeating the recovered proposal is a no-op. A reconstructed mapped provider
+62: then emits a signed `note` fact; its commit predecessor, public read basis,
+63: projected prefix and final verification agree. SDK outcome and inspection
+64: serialization are also checked.
+65: 
+66: ## Validation and review
+67: 
+68: Focused declaration, mapped credential and new workload tests: **49 passed**
+69: in 1.13 seconds. Full SDK: **580 passed** in 21.79 seconds. Architecture:
+70: **101 passed** in 6.20 seconds. Scoped Ruff and whitespace checks pass.
+71: Frozen Fable-low review is pending. No production files changed.
+72: 
+73: ## Next
+74: 
+75: Run sources with partial failure, inspect persisted tiers, and establish what
+76: can safely resume. Follow with captured-prefix export, restore-forward,
+77: verification, explicit sync and read. C9 transition and retirement remain ahead.
+
+===== libs/engine/src/engine/arrival_declarations.py =====
+1: """Prepare, apply, and recover signed declaration edits on Arrival.
+2: 
+3: Preparation captures one attested read basis and exact signed records. Apply
+4: uses a durable intent and full-head CAS; recovery reconciles a known suffix and
+5: finishes projection/cache work without resigning or overwriting competing data.
+6: """
+7: 
+8: from __future__ import annotations
+9: 
+10: import base64
+11: import fcntl
+12: import hashlib
+13: import json
+14: import os
+15: import tempfile
+16: import time
+17: from collections.abc import Callable, Mapping, Sequence
+18: from contextlib import contextmanager, suppress
+19: from dataclasses import dataclass
+20: from pathlib import Path
+21: from typing import Any, Literal
+22: 
+23: from lang import diff_documents, parse_vertex, validate_vertex, vertex_to_documents
+24: from lang.document import DECL_OBSERVER_DEFINED, Change
+25: from ulid import ULID
+26: 
+27: from .admission import fact_commitment_hash
+28: from .arrival import (
+29:     ArrivalError,
+30:     content_commitment,
+31:     key_registry_from_records,
+32: )
+33: from .arrival_body import body_of_batch, body_of_fact_row
+34: from .arrival_boundary_continuity import (
+35:     BoundaryContinuityConflict,
+36:     analyze_boundary_continuity,
+37:     collect_verified_parameter_rows,
+38: )
+39: from .arrival_contract import (
+40:     ArrivalLedger,
+41:     ArrivalQuery,
+42:     AtomicLimitExceeded,
+43:     FactRequest,
+44:     Head,
+45:     Profile,
+46:     ProjectionBehind,
+47:     ProjectionRequirement,
+48:     ReadBasis,
+49:     RecordDraft,
+50:     StoreDescriptor,
+51:     TickRequest,
+52:     Watermark,
+53: )
+54: from .arrival_head_seam import (
+55:     Compared,
+56:     Indeterminate,
+57:     PreGenesis,
+58:     complete_projection_custody,
+59: )
+60: from .arrival_registry import BackendRegistry
+61: from .credentials import (
+62:     CapturedSigningContext,
+63:     CredentialBindingEvidence,
+64:     CredentialBindingRefused,
+65:     CredentialPurpose,
+66:     CredentialRequest,
+67:     CredentialResolutionSession,
+68:     SigningDomain,
+69:     WriteCredentials,
+70: )
+71: from .declaration import (
+72:     Unhistorized,
+73:     resolve_declaration_documents_from_snapshot,
+74:     validate_arrival_declaration_anchor,
+75:     validate_arrival_runtime_identity,
+76: )
+77: 
+78: __all__ = [
+79:     "DeclarationPreparationError",
+80:     "DeclarationPreparationRefused",
+81:     "DeclarationEditPlan",
+82:     "DeclarationEditResult",
+83:     "DeclarationApplyError",
+84:     "DeclarationStale",
+85:     "DeclarationNotApplied",
+86:     "DeclarationOutcomeUnknown",
+87:     "DeclarationUnwitnessed",
+88:     "DeclarationCommittedIncomplete",
+89:     "declaration_intent_path",
+90:     "prepare_declaration_edit",
+91:     "apply_declaration_edit",
+92:     "recover_declaration_edit",
+93: ]
+94: 
+95: 
+96: class DeclarationPreparationError(ArrivalError):
+97:     """The declaration edit could not be prepared without mutation."""
+98: 
+99: 
+100: class DeclarationPreparationRefused(DeclarationPreparationError):
+101:     """A declaration edit input or signed draft failed a preparation gate."""
+102: 
+103:     def __init__(
+104:         self,
+105:         *args: object,
+106:         coordinator_phase: str | None = None,
+107:         effects: Mapping[str, Mapping[str, str]] | None = None,
+108:         captured_head: Head | None = None,
+109:         projected_head: Head | None = None,
+110:     ) -> None:
+111:         super().__init__(*args)
+112:         self.coordinator_phase = coordinator_phase
+113:         self.effects = effects
+114:         if captured_head is not None:
+115:             self.captured_head = captured_head
+116:         if projected_head is not None:
+117:             self.projected_head = projected_head
+118: 
+119: 
+120: def _preparation_refused(
+121:     message: str,
+122:     *,
+123:     captured_head: Head | None = None,
+124:     projected_head: Head | None = None,
+125: ) -> DeclarationPreparationRefused:
+126:     return DeclarationPreparationRefused(
+127:         message,
+128:         coordinator_phase="prepare",
+129:         effects={
+130:             "custody": {"attempt": "not-entered", "state": "not-attempted"}
+131:         },
+132:         captured_head=captured_head,
+133:         projected_head=projected_head,
+134:     )
+135: 
+136: 
+137: class DeclarationApplyError(ArrivalError):
+138:     """A declaration apply or recovery operation could not complete."""
+139: 
+140: 
+141: class DeclarationStale(DeclarationApplyError):
+142:     """The captured full head or declaration cache moved before append."""
+143: 
+144: 
+145: class DeclarationNotApplied(DeclarationApplyError):
+146:     """A durable prepared intent is proven to have reached no append."""
+147: 
+148: 
+149: class DeclarationOutcomeUnknown(DeclarationApplyError):
+150:     """Append transport failed without proving whether the records landed."""
+151: 
+152:     def __init__(self, message: str, *, head: Head | None, intent_path: Path,
+153:                  fact_ids: tuple[str, ...], cause: BaseException) -> None:
+154:         super().__init__(message)
+155:         self.head = head
+156:         self.intent_path = intent_path
+157:         self.fact_ids = fact_ids
+158:         self.cause = cause
+159: 
+160: 
+161: class DeclarationUnwitnessed(DeclarationApplyError):
+162:     """Append committed, but its custody journal witness was unavailable."""
+163: 
+164:     def __init__(self, message: str, *, head: Head, commit: Any,
+165:                  intent_path: Path, fact_ids: tuple[str, ...], cause: BaseException) -> None:
+166:         super().__init__(message)
+167:         self.head = head
+168:         self.commit = commit
+169:         self.intent_path = intent_path
+170:         self.fact_ids = fact_ids
+171:         self.cause = cause
+172: 
+173: 
+174: class DeclarationCommittedIncomplete(DeclarationApplyError):
+175:     """Append is known durable, but sync/publication/cleanup remains pending."""
+176: 
+177:     def __init__(self, message: str, *, phase: str, head: Head,
+178:                  commit: Any, intent_path: Path, fact_ids: tuple[str, ...],
+179:                  cause: BaseException) -> None:
+180:         super().__init__(message)
+181:         self.phase = phase
+182:         self.head = head
+183:         self.commit = commit
+184:         self.intent_path = intent_path
+185:         self.fact_ids = fact_ids
+186:         self.cause = cause
+187: 
+188: 
+189: @dataclass(frozen=True)
+190: class DeclarationEditPlan:
+191:     """Exact, signed declaration transition prepared against one Arrival head."""
+192: 
+193:     status: Literal["planned", "noop"]
+194:     target_path: Path
+195:     descriptor: StoreDescriptor
+196:     lineage: str
+197:     basis: ReadBasis
+198:     captured_head: Head
+199:     before_documents: tuple[Mapping[str, Any], ...]
+200:     proposed_documents: tuple[Mapping[str, Any], ...]
+201:     changes: tuple[Change, ...]
+202:     authored_at: float | None
+203:     observer: str
+204:     drafts: tuple[RecordDraft, ...]
+205:     fact_ids: tuple[str, ...]
+206:     key_introductions: tuple[str, ...]
+207:     old_cache_bytes: bytes
+208:     old_cache_sha256: str
+209:     proposed_text: str
+210:     atomic_limit: int | None
+211:     exact_drafts: str
+212:     credential_bindings: tuple[CredentialBindingEvidence, ...] = ()
+213: 
+214: 
+215: @dataclass(frozen=True)
+216: class DeclarationEditResult:
+217:     """Apply/recovery outcome with exact identity and reconciliation evidence.
+218: 
+219:     ``file_written`` reports publication by this invocation. ``phase`` reports
+220:     the reconciled operation state, including an already-published cache.
+221:     """
+222: 
+223:     status: Literal[
+224:         "noop", "applied", "stale", "refused", "unknown", "unwitnessed",
+225:         "committed-incomplete", "recovered", "not-applied", "conflict",
+226:     ]
+227:     target_path: Path
+228:     descriptor: StoreDescriptor
+229:     lineage: str
+230:     basis: ReadBasis
+231:     captured_head: Head
+232:     head: Head | None
+233:     commit: Any | None
+234:     fact_ids: tuple[str, ...]
+235:     intent_path: Path | None
+236:     phase: str
+237:     file_written: bool
+238:     changes: tuple[Change, ...] | None
+239: 
+240: 
+241: def _close_quietly(handle: object | None) -> None:
+242:     if handle is None:
+243:         return
+244:     close = getattr(handle, "close", None)
+245:     if callable(close):
+246:         with suppress(Exception):
+247:             close()
+248: 
+249: 
+250: def _draft_to_dict(draft: RecordDraft) -> dict[str, Any]:
+251:     return {
+252:         "kind": draft.kind,
+253:         "authored_at": draft.authored_at,
+254:         "observer": draft.observer,
+255:         "origin": draft.origin,
+256:         "body": dict(draft.body),
+257:         "signature": draft.signature,
+258:     }
+259: 
+260: 
+261: def _exact_drafts(drafts: Sequence[RecordDraft]) -> str:
+262:     """Canonical preparation snapshot used to detect nested plan mutation."""
+263:     return json.dumps(
+264:         [_draft_to_dict(draft) for draft in drafts],
+265:         ensure_ascii=False,
+266:         sort_keys=True,
+267:         separators=(",", ":"),
+268:     )
+269: 
+270: 
+271: def declaration_intent_path(target: Path | str) -> Path:
+272:     """The exclusive durable sidecar for one declaration edit."""
+273:     target_path = Path(target).resolve()
+274:     return target_path.with_name(target_path.name + ".arrival-decl.intent")
+275: 
+276: 
+277: def _declaration_lock_path(target: Path) -> Path:
+278:     return target.with_name(target.name + ".arrival-decl.lock")
+279: 
+280: 
+281: @contextmanager
+282: def _declaration_lock(target: Path):
+283:     """Serialize apply/recovery while releasing the lock on process death."""
+284:     lock_path = _declaration_lock_path(target)
+285:     lock_path.parent.mkdir(parents=True, exist_ok=True)
+286:     with lock_path.open("a+b") as lock_fh:
+287:         fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+288:         try:
+289:             yield
+290:         finally:
+291:             fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+292: 
+293: 
+294: def _head_dict(head: Head | None) -> dict[str, Any] | None:
+295:     if head is None:
+296:         return None
+297:     return {
+298:         "lineage": head.lineage,
+299:         "ordinal": head.ordinal,
+300:         "record_hash": head.record_hash,
+301:     }
+302: 
+303: 
+304: def _descriptor_dict(descriptor: StoreDescriptor) -> dict[str, Any]:
+305:     return {
+306:         "backend": descriptor.backend,
+307:         "location": descriptor.location,
+308:         "lineage": descriptor.lineage,
+309:         "role": None if descriptor.role is None else descriptor.role.value,
+310:         "query": descriptor.query,
+311:         "witness": descriptor.witness,
+312:     }
+313: 
+314: 
+315: def _descriptor_from(data: Mapping[str, Any]) -> StoreDescriptor:
+316:     role = data.get("role")
+317:     return StoreDescriptor(
+318:         backend=str(data["backend"]),
+319:         location=str(data["location"]),
+320:         lineage=data.get("lineage"),
+321:         role=None if role is None else Profile(str(role)),
+322:         query=data.get("query"),
+323:         witness=data.get("witness"),
+324:     )
+325: 
+326: 
+327: def _intent_data(plan: DeclarationEditPlan, *, phase: str) -> dict[str, Any]:
+328:     return {
+329:         "schema": "loops.engine/arrival-declaration-intent/v1",
+330:         "phase": phase,
+331:         "target": str(plan.target_path),
+332:         "descriptor": _descriptor_dict(plan.descriptor),
+333:         "lineage": plan.lineage,
+334:         "captured_head": _head_dict(plan.captured_head),
+335:         "basis": {
+336:             "lineage": plan.basis.lineage,
+337:             "captured_head": _head_dict(plan.basis.captured_head),
+338:             "projected_through": _head_dict(plan.basis.projected_through),
+339:             "view_generation": plan.basis.view_generation,
+340:         },
+341:         "observer": plan.observer,
+342:         "fact_ids": list(plan.fact_ids),
+343:         "drafts": json.loads(plan.exact_drafts),
+344:         "exact_drafts": plan.exact_drafts,
+345:         "old_cache_b64": base64.b64encode(plan.old_cache_bytes).decode("ascii"),
+346:         "old_cache_sha256": plan.old_cache_sha256,
+347:         "proposed_text": plan.proposed_text,
+348:         "key_introductions": list(plan.key_introductions),
+349:     }
+350: 
+351: 
+352: def _fsync_parent(path: Path) -> None:
+353:     try:
+354:         fd = os.open(path.parent, os.O_RDONLY)
+355:     except OSError:
+356:         raise
+357:     try:
+358:         os.fsync(fd)
+359:     finally:
+360:         os.close(fd)
+361: 
+362: 
+363: def _write_exclusive_json(path: Path, data: Mapping[str, Any]) -> None:
+364:     path.parent.mkdir(parents=True, exist_ok=True)
+365:     encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+366:     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+367:     try:
+368:         with os.fdopen(fd, "w", encoding="utf-8") as stream:
+369:             stream.write(encoded + "\n")
+370:             stream.flush()
+371:             os.fsync(stream.fileno())
+372:         _fsync_parent(path)
+373:     except BaseException:
+374:         with suppress(FileNotFoundError):
+375:             path.unlink()
+376:         raise
+377: 
+378: 
+379: def _replace_json(path: Path, data: Mapping[str, Any]) -> None:
+380:     encoded = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+381:     fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+382:     temp = Path(raw)
+383:     try:
+384:         with os.fdopen(fd, "w", encoding="utf-8") as stream:
+385:             stream.write(encoded + "\n")
+386:             stream.flush()
+387:             os.fsync(stream.fileno())
+388:         temp.replace(path)
+389:         _fsync_parent(path)
+390:     finally:
+391:         with suppress(FileNotFoundError):
+392:             temp.unlink()
+393: 
+394: 
+395: def _read_intent(path: Path) -> dict[str, Any]:
+396:     try:
+397:         data = json.loads(path.read_text(encoding="utf-8"))
+398:     except (OSError, ValueError) as exc:
+399:         raise DeclarationApplyError(f"cannot read declaration intent {path}: {exc}") from exc
+400:     if (
+401:         not isinstance(data, dict)
+402:         or data.get("schema") != "loops.engine/arrival-declaration-intent/v1"
+403:     ):
+404:         raise DeclarationApplyError(f"malformed declaration intent: {path}")
+405:     return data
+406: 
+407: 
+408: def _drafts_from_intent(data: Mapping[str, Any]) -> tuple[RecordDraft, ...]:
+409:     return _drafts_from_exact(
+410:         data["drafts"],
+411:         str(data.get("exact_drafts", "")),
+412:     )
+413: 
+414: 
+415: def _drafts_from_exact(raw: Any, expected_exact: str) -> tuple[RecordDraft, ...]:
+416:     if not isinstance(raw, list):
+417:         raise DeclarationApplyError("declaration intent drafts are not a list")
+418:     drafts = tuple(
+419:         RecordDraft(
+420:             kind=str(item["kind"]),
+421:             authored_at=float(item["authored_at"]),
+422:             observer=str(item["observer"]),
+423:             origin=str(item["origin"]),
+424:             body=dict(item["body"]),
+425:             signature=item.get("signature"),
+426:         )
+427:         for item in raw
+428:     )
+429:     actual_exact = _exact_drafts(drafts)
+430:     if actual_exact != expected_exact:
+431:         raise DeclarationApplyError("declaration intent draft bytes do not verify")
+432:     return drafts
+433: 
+434: 
+435: def _record_matches_draft(record: Mapping[str, Any], draft: RecordDraft) -> bool:
+436:     return (
+437:         record.get("k") == draft.kind
+438:         and record.get("at") == draft.authored_at
+439:         and record.get("observer") == draft.observer
+440:         and record.get("origin") == draft.origin
+441:         and record.get("body") == dict(draft.body)
+442:         and record.get("sig") == draft.signature
+443:     )
+444: 
+445: 
+446: def _unique_sibling(path: Path, label: str) -> Path:
+447:     fd, raw = tempfile.mkstemp(prefix=f".{path.name}.{label}.", dir=path.parent)
+448:     os.close(fd)
+449:     candidate = Path(raw)
+450:     candidate.unlink()
+451:     return candidate
+452: 
+453: 
+454: def _create_cache_temp(path: Path, content: bytes) -> None:
+455:     """Create and fsync a complete proposal without replacing an existing path."""
+456:     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+457:     try:
+458:         with os.fdopen(fd, "wb") as stream:
+459:             stream.write(content)
+460:             stream.flush()
+461:             os.fsync(stream.fileno())
+462:         _fsync_parent(path)
+463:     except BaseException:
+464:         with suppress(FileNotFoundError):
+465:             path.unlink()
+466:         raise
+467: 
+468: 
+469: def _verify_cache_temp(path: Path, expected: bytes) -> None:
+470:     """Validate bytes and re-fsync a temp that survived a crash boundary."""
+471:     with path.open("rb") as stream:
+472:         if stream.read() != expected:
+473:             raise DeclarationStale(
+474:                 "prepared declaration cache temp bytes differ from the proposal"
+475:             )
+476:         os.fsync(stream.fileno())
+477:     _fsync_parent(path)
+478: 
+479: 
+480: def _publish_cache(
+481:     plan: DeclarationEditPlan,
+482:     *,
+483:     intent: Path,
+484:     intent_data: dict[str, Any],
+485:     failure_hook: Callable[[str], None] | None,
+486: ) -> None:
+487:     """Detach the verified old cache, then exclusively link a full new file."""
+488:     target = plan.target_path
+489:     temp = (
+490:         Path(intent_data["cache_temp"])
+491:         if intent_data.get("cache_temp")
+492:         else _unique_sibling(target, "cache")
+493:     )
+494:     backup = (
+495:         Path(intent_data["cache_backup"])
+496:         if intent_data.get("cache_backup")
+497:         else _unique_sibling(target, "backup")
+498:     )
+499:     intent_data["cache_temp"] = str(temp)
+500:     intent_data["cache_backup"] = str(backup)
+501:     _replace_json(intent, intent_data)
+502:     try:
+503:         proposed = plan.proposed_text.encode("utf-8")
+504:         if temp.exists():
+505:             _verify_cache_temp(temp, proposed)
+506:         else:
+507:             _create_cache_temp(temp, proposed)
+508:             if failure_hook:
+509:                 failure_hook("after-cache-temp")
+510:         if target.exists():
+511:             current = target.read_bytes()
+512:             if current != plan.old_cache_bytes:
+513:                 raise DeclarationStale(
+514:                     "declaration cache changed after preparation; refusing publication"
+515:                 )
+516:             if backup.exists():
+517:                 raise DeclarationApplyError(
+518:                     "a prior cache publication left a backup beside the live declaration"
+519:                 )
+520:             target.rename(backup)
+521:             _fsync_parent(target)
+522:         elif not backup.exists():
+523:             raise DeclarationApplyError(
+524:                 "declaration cache is absent without the verified detached backup"
+525:             )
+526:         if failure_hook:
+527:             failure_hook("after-cache-detach")
+528:         if backup.read_bytes() != plan.old_cache_bytes:
+529:             raise DeclarationApplyError(
+530:                 "detached declaration cache bytes differ from prepared evidence"
+531:             )
+532:         os.link(temp, target)
+533:         temp.unlink()
+534:         _fsync_parent(target)
+535:         if failure_hook:
+536:             failure_hook("after-cache-link")
+537:         with suppress(FileNotFoundError):
+538:             backup.unlink()
+539:         _fsync_parent(backup)
+540:     except BaseException:
+541:         raise
+542: 
+543: 
+544: def _cleanup_cache_artifacts(
+545:     plan: DeclarationEditPlan, intent_data: Mapping[str, Any]
+546: ) -> None:
+547:     """Remove only verified publication leftovers after the new cache is live."""
+548:     proposed = plan.proposed_text.encode("utf-8")
+549:     for field, expected in (
+550:         ("cache_temp", proposed),
+551:         ("cache_backup", plan.old_cache_bytes),
+552:     ):
+553:         raw = intent_data.get(field)
+554:         if not raw:
+555:             continue
+556:         path = Path(str(raw))
+557:         if not path.exists():
+558:             continue
+559:         if path.read_bytes() != expected:
+560:             raise DeclarationStale(
+561:                 f"declaration publication artifact {path} does not match its intent"
+562:             )
+563:         path.unlink()
+564:         _fsync_parent(path)
+565: 
+566: 
+567: def _plan_from_intent(
+568:     data: Mapping[str, Any], drafts: tuple[RecordDraft, ...]
+569: ) -> DeclarationEditPlan:
+570:     captured_data = data["captured_head"]
+571:     captured = Head(
+572:         lineage=str(captured_data["lineage"]),
+573:         ordinal=int(captured_data["ordinal"]),
+574:         record_hash=str(captured_data["record_hash"]),
+575:     )
+576:     old_bytes = base64.b64decode(data["old_cache_b64"], validate=True)
+577:     if hashlib.sha256(old_bytes).hexdigest() != data["old_cache_sha256"]:
+578:         raise DeclarationApplyError("declaration intent cache bytes do not verify")
+579:     basis_data = data.get("basis")
+580:     if basis_data is None:
+581:         basis = ReadBasis(
+582:             lineage=captured.lineage,
+583:             captured_head=captured,
+584:             projected_through=None,
+585:             view_generation=None,
+586:         )
+587:     else:
+588:         if not isinstance(basis_data, Mapping):
+589:             raise DeclarationApplyError("declaration intent basis is malformed")
+590:         basis_captured_data = basis_data.get("captured_head")
+591:         if not isinstance(basis_captured_data, Mapping):
+592:             raise DeclarationApplyError("declaration intent captured basis is malformed")
+593:         basis_captured = Head(
+594:             lineage=str(basis_captured_data["lineage"]),
+595:             ordinal=int(basis_captured_data["ordinal"]),
+596:             record_hash=str(basis_captured_data["record_hash"]),
+597:         )
+598:         projected_data = basis_data.get("projected_through")
+599:         projected = None
+600:         if projected_data is not None:
+601:             if not isinstance(projected_data, Mapping):
+602:                 raise DeclarationApplyError(
+603:                     "declaration intent projected basis is malformed"
+604:                 )
+605:             projected = Head(
+606:                 lineage=str(projected_data["lineage"]),
+607:                 ordinal=int(projected_data["ordinal"]),
+608:                 record_hash=str(projected_data["record_hash"]),
+609:             )
+610:         view_generation = basis_data.get("view_generation")
+611:         if view_generation is not None and not isinstance(view_generation, str):
+612:             raise DeclarationApplyError(
+613:                 "declaration intent basis view generation is malformed"
+614:             )
+615:         basis = ReadBasis(
+616:             lineage=str(basis_data["lineage"]),
+617:             captured_head=basis_captured,
+618:             projected_through=projected,
+619:             view_generation=view_generation,
+620:         )
+621:         if (
+622:             basis.lineage != captured.lineage
+623:             or basis.captured_head != captured
+624:             or basis.projected_through != captured
+625:         ):
+626:             raise DeclarationStale(
+627:                 "declaration intent basis disagrees with its CURRENT predecessor head"
+628:             )
+629:     return DeclarationEditPlan(
+630:         status="planned",
+631:         target_path=Path(data["target"]).resolve(),
+632:         descriptor=_descriptor_from(data["descriptor"]),
+633:         lineage=str(data["lineage"]),
+634:         basis=basis,
+635:         captured_head=captured,
+636:         before_documents=(),
+637:         proposed_documents=(),
+638:         changes=(),
+639:         authored_at=drafts[0].authored_at if drafts else None,
+640:         observer=str(data["observer"]),
+641:         drafts=drafts,
+642:         fact_ids=tuple(str(value) for value in data["fact_ids"]),
+643:         key_introductions=tuple(str(value) for value in data.get("key_introductions", ())),
+644:         old_cache_bytes=old_bytes,
+645:         old_cache_sha256=str(data["old_cache_sha256"]),
+646:         proposed_text=str(data["proposed_text"]),
+647:         atomic_limit=None,
+648:         exact_drafts=str(data["exact_drafts"]),
+649:     )
+650: 
+651: 
+652: def _descriptor_location(target: Path, ast: Any, descriptor: StoreDescriptor) -> str:
+653:     backend = ast.store_backend
+654:     if backend is None:
+655:         raise _preparation_refused(
+656:             "proposed declaration has no explicit store backend"
+657:         )
+658:     if descriptor.backend == "file":
+659:         if ast.store is None:
+660:             raise _preparation_refused(
+661:                 "proposed file declaration has no store location"
+662:             )
+663:         return str((target.parent / str(ast.store)).resolve())
+664:     if ast.store_location is None:
+665:         raise _preparation_refused(
+666:             "proposed non-file declaration has no opaque store location"
+667:         )
+668:     return str(ast.store_location)
+669: 
+670: 
+671: def _validate_residence(target: Path, ast: Any, descriptor: StoreDescriptor) -> None:
+672:     if descriptor.role is not Profile.AUTHORITY:
+673:         raise _preparation_refused(
+674:             "declaration edits require an Authority descriptor"
+675:         )
+676:     if descriptor.lineage is None:
+677:         raise _preparation_refused(
+678:             "declaration edit descriptor must pin a lineage"
+679:         )
+680:     backend = ast.store_backend
+681:     if (
+682:         backend is None
+683:         or backend.name != descriptor.backend
+684:         or backend.lineage != descriptor.lineage
+685:         or backend.role != Profile.AUTHORITY.value
+686:     ):
+687:         raise _preparation_refused(
+688:             "proposed declaration residence must preserve backend, lineage and authority role"
+689:         )
+690:     if _descriptor_location(target, ast, descriptor) != descriptor.location:
+691:         raise _preparation_refused(
+692:             "proposed declaration residence must preserve the descriptor location"
+693:         )
+694: 
+695: 
+696: def _key_is_well_formed(key: object) -> bool:
+697:     if not isinstance(key, str) or not key:
+698:         return False
+699:     try:
+700:         return len(base64.b64decode(key, validate=True)) == 32
+701:     except (ValueError, TypeError):
+702:         return False
+703: 
+704: 
+705: def _valid_author_keys(registry: Any, observer: str, head: Head) -> tuple[str, ...]:
+706:     return tuple(
+707:         key for key, _introduced in registry.keys_valid_at(observer, head.ordinal + 1)
+708:     )
+709: 
+710: 
+711: def _signed_with_existing_key(
+712:     *,
+713:     credentials: WriteCredentials,
+714:     signer: Callable[[str, str], str | None] | None,
+715:     verifier: Callable[[str, str, str], bool],
+716:     registry: Any,
+717:     author: str,
+718:     head: Head,
+719:     digest: str,
+720:     label: str,
+721:     domain: SigningDomain,
+722:     purpose: CredentialPurpose,
+723:     context: CapturedSigningContext,
+724:     session: CredentialResolutionSession,
+725: ) -> str:
+726:     if credentials.mapped:
+727:         request = CredentialRequest(
+728:             namespace=credentials.binding_namespace,
+729:             observer=author,
+730:             domain=domain,
+731:             purpose=purpose,
+732:         )
+733:         try:
+734:             signature = session.sign(
+735:                 credentials,
+736:                 request,
+737:                 digest,
+738:                 context=context,
+739:                 authorized_keys=context.keys_for_author(author),
+740:                 required=True,
+741:             )
+742:         except CredentialBindingRefused as exc:
+743:             raise _preparation_refused(
+744:                 f"{label} mapped credential refused: {exc}",
+745:                 captured_head=head,
+746:             ) from exc
+747:         if signature is None:  # required=True makes this unreachable
+748:             raise _preparation_refused(f"missing {label} signature")
+749:         return signature
+750:     if not callable(signer):
+751:         raise _preparation_refused(f"missing {label} signer")
+752:     keys = _valid_author_keys(registry, author, head)
+753:     if not keys:
+754:         raise _preparation_refused(
+755:             f"edit author {author!r} has no key valid at the captured Arrival head"
+756:         )
+757:     signature = signer(author, digest)
+758:     if not signature:
+759:         raise _preparation_refused(f"missing {label} signature")
+760:     if not any(verifier(key, signature, digest) for key in keys):
+761:         raise _preparation_refused(
+762:             f"{label} signature does not verify under a key valid for edit author "
+763:             f"{author!r} at the captured Arrival head"
+764:         )
+765:     return signature
+766: 
+767: 
+768: def _declaration_row(
+769:     change: Change,
+770:     *,
+771:     lineage: str,
+772:     authored_at: float,
+773:     observer: str,
+774:     credentials: WriteCredentials,
+775:     registry: Any,
+776:     captured_head: Head,
+777:     fact_verify: Callable[[str, str, str], bool],
+778:     context: CapturedSigningContext,
+779:     session: CredentialResolutionSession,
+780: ) -> tuple[str, tuple[Any, ...]]:
+781:     row_payload: dict[str, Any] = {
+782:         "lineage": lineage,
+783:         "subject": change.subject,
+784:         "change": change.annotation,
+785:     }
+786:     if change.payload is not None:
+787:         row_payload["payload"] = dict(change.payload)
+788:     payload_text = json.dumps(row_payload, ensure_ascii=False, separators=(",", ":"))
+789:     fact_id = str(ULID())
+790:     fact_digest = fact_commitment_hash(
+791:         change.kind, authored_at, observer, "", payload_text
+792:     )
+793:     inner_signature = _signed_with_existing_key(
+794:         credentials=credentials,
+795:         signer=credentials.fact_signer,
+796:         verifier=fact_verify,
+797:         registry=registry,
+798:         author=observer,
+799:         head=captured_head,
+800:         digest=fact_digest,
+801:         label="FACT",
+802:         domain=SigningDomain.FACT,
+803:         purpose=CredentialPurpose.AUTHORSHIP,
+804:         context=context,
+805:         session=session,
+806:     )
+807:     row = (
+808:         fact_id,
+809:         change.kind,
+810:         authored_at,
+811:         observer,
+812:         "",
+813:         payload_text,
+814:         inner_signature,
+815:     )
+816:     return fact_id, row
+817: 
+818: 
+819: def _key_draft(
+820:     author: str,
+821:     observer: str,
+822:     key: str,
+823:     *,
+824:     authored_at: float,
+825:     credentials: WriteCredentials,
+826:     registry: Any,
+827:     captured_head: Head,
+828:     arrival_verify: Callable[[str, str, str], bool],
+829:     context: CapturedSigningContext,
+830:     session: CredentialResolutionSession,
+831: ) -> RecordDraft:
+832:     body = {"observer": observer, "key": key}
+833:     digest = content_commitment("key", authored_at, author, "", body)
+834:     signature = _signed_with_existing_key(
+835:         credentials=credentials,
+836:         signer=credentials.arrival_signer,
+837:         verifier=arrival_verify,
+838:         registry=registry,
+839:         author=author,
+840:         head=captured_head,
+841:         digest=digest,
+842:         label="Arrival key-introduction",
+843:         domain=SigningDomain.ARRIVAL,
+844:         purpose=CredentialPurpose.KEY_INTRODUCTION,
+845:         context=context,
+846:         session=session,
+847:     )
+848:     return RecordDraft(
+849:         kind="key",
+850:         authored_at=authored_at,
+851:         observer=author,
+852:         origin="",
+853:         body=body,
+854:         signature=signature,
+855:     )
+856: 
+857: 
+858: def prepare_declaration_edit(
+859:     registry: BackendRegistry,
+860:     descriptor: StoreDescriptor,
+861:     *,
+862:     target: Path | str,
+863:     proposed_text: str,
+864:     observer: str,
+865:     credentials: WriteCredentials | None,
+866:     fact_verify: Callable[[str, str, str], bool],
+867:     arrival_verify: Callable[[str, str, str], bool],
+868:     source_cache_bytes: bytes | None = None,
+869:     require_cache_basis: bool = False,
+870: ) -> DeclarationEditPlan:
+871:     """Prepare one exact declaration transition against an attested CURRENT head.
+872: 
+873:     This function only reads and signs in memory. It creates no intent, does
+874:     not append, and does not touch the declaration cache. The registry opener
+875:     is expected to return an attested custody handle; its ``scan`` is the
+876:     structurally verified genesis-through-head sequence required by the
+877:     iterable authorship seam.
+878:     """
+879:     target_path = Path(target).resolve()
+880:     if not isinstance(proposed_text, str) or not proposed_text:
+881:         raise _preparation_refused("proposed declaration text is empty")
+882:     try:
+883:         old_cache_bytes = target_path.read_bytes()
+884:     except OSError as exc:
+885:         raise _preparation_refused(
+886:             f"cannot read declaration cache {target_path}: {exc}"
+887:         ) from exc
+888:     if source_cache_bytes is not None and old_cache_bytes != source_cache_bytes:
+889:         raise _preparation_refused(
+890:             "declaration cache changed while preparing the requested splice"
+891:         )
+892:     try:
+893:         ast = parse_vertex(proposed_text, path=target_path)
+894:         validate_vertex(ast)
+895:     except Exception as exc:
+896:         raise _preparation_refused(
+897:             f"proposed declaration is not valid Vertex grammar/semantics: {exc}"
+898:         ) from exc
+899:     validate_arrival_runtime_identity(
+900:         ast.name,
+901:         ast.loops,
+902:         refusal=_preparation_refused,
+903:     )
+904:     _validate_residence(target_path, ast, descriptor)
+905:     proposed_documents = tuple(
+906:         document.as_json() for document in vertex_to_documents(ast)
+907:     )
+908: 
+909:     ledger: ArrivalLedger | None = None
+910:     query: ArrivalQuery | None = None
+911:     snapshot: Any | None = None
+912:     atomic_limit: int | None = None
+913:     captured_head: Head | None = None
+914:     try:
+915:         ledger, query = registry.open(descriptor)
+916:         report = getattr(ledger, "opened", None)
+917:         comparison = getattr(report, "comparison", None)
+918:         if isinstance(comparison, PreGenesis):
+919:             if comparison.ledger_refusal is not None:
+920:                 raise _preparation_refused(
+921:                     f"Arrival ledger is not opened: {comparison.ledger_refusal}"
+922:                 )
+923:             raise _preparation_refused(
+924:                 "Arrival ledger has no captured head for declaration editing"
+925:             )
+926:         if isinstance(comparison, Indeterminate):
+927:             raise _preparation_refused(
+928:                 f"Arrival head attestation is indeterminate: {comparison.refusal}"
+929:             )
+930:         if not isinstance(comparison, Compared):
+931:             raise _preparation_refused(
+932:                 "registry opener did not provide a compared Arrival head"
+933:             )
+934:         captured_head = comparison.presented
+935:         snapshot = query.open_snapshot(
+936:             captured_head=captured_head,
+937:             requirement=ProjectionRequirement.CURRENT,
+938:             continuation=None,
+939:         )
+940:         validate_arrival_declaration_anchor(
+941:             snapshot.declaration_anchor, captured_head
+942:         )
+943:         facts = snapshot.facts(
+944:             FactRequest(
+945:                 limit=None,
+946:                 kind="_decl",
+947:                 include_internal=True,
+948:                 order="oldest",
+949:             )
+950:         ).items
+951:         documents = resolve_declaration_documents_from_snapshot(
+952:             snapshot.declaration_anchor, facts
+953:         )
+954:         if documents is None or isinstance(documents, Unhistorized):
+955:             raise _preparation_refused(
+956:                 "the CURRENT Arrival snapshot has no historized declaration"
+957:             )
+958:         represented = snapshot.represented
+959:         if represented is None:
+960:             raise _preparation_refused(
+961:                 "the CURRENT declaration snapshot has no matching lineage basis"
+962:             )
+963:         projected = complete_projection_custody(
+964:             ledger,
+965:             captured=captured_head,
+966:             represented=represented,
+967:             lineage_refusal=lambda message: _preparation_refused(message),
+968:             conflict_refusal=lambda message: _preparation_refused(message),
+969:         )
+970:         if projected.ordinal < captured_head.ordinal:
+971:             behind = ProjectionBehind(
+972:                 "the CURRENT declaration snapshot is behind the captured Arrival head"
+973:             )
+974:             behind.captured_head = captured_head
+975:             behind.projected_head = projected
+976:             raise behind
+977:         basis = ReadBasis(
+978:             lineage=captured_head.lineage,
+979:             captured_head=captured_head,
+980:             projected_through=projected,
+981:             view_generation=getattr(snapshot, "view_generation", None),
+982:         )
+983:         before_documents = tuple(dict(document) for document in documents)
+984:         if require_cache_basis:
+985:             try:
+986:                 local_ast = parse_vertex(
+987:                     old_cache_bytes.decode("utf-8"), path=target_path
+988:                 )
+989:                 local_documents = tuple(
+990:                     document.as_json() for document in vertex_to_documents(local_ast)
+991:                 )
+992:             except Exception as exc:
+993:                 raise _preparation_refused(
+994:                     f"current declaration cache is not valid for this splice: {exc}"
+995:                 ) from exc
+996:             if local_documents != before_documents:
+997:                 raise _preparation_refused(
+998:                     "declaration cache differs from CURRENT Arrival history; "
+999:                     "convenience mutation refused"
+1000:                 )
+1001:         changes = tuple(diff_documents(before_documents, proposed_documents))
+1002:         continuity_ticks = tuple(
+1003:             snapshot.ticks(TickRequest(since=float("-inf")))
+1004:         )
+1005:         verified_params = collect_verified_parameter_rows(
+1006:             snapshot.declaration_anchor,
+1007:             facts,
+1008:             target_documents=proposed_documents,
+1009:             base_dir=target_path.parent,
+1010:         )
+1011:         analyze_boundary_continuity(
+1012:             snapshot.declaration_anchor,
+1013:             facts,
+1014:             continuity_ticks,
+1015:             target_documents=proposed_documents,
+1016:             verified_params=verified_params,
+1017:         )
+1018:         registry_verifier = arrival_verify
+1019:         if credentials is not None and credentials.mapped:
+1020:             mapped_verifier = credentials.signature_verifier
+1021:             if mapped_verifier is None:  # guarded by WriteCredentials construction
+1022:                 raise _preparation_refused(
+1023:                     "mapped declaration credentials have no signature verifier",
+1024:                     captured_head=captured_head,
+1025:                 )
+1026:             def registry_verifier(key: str, signature: str, digest: str) -> bool:
+1027:                 return mapped_verifier(
+1028:                     SigningDomain.ARRIVAL, key, signature, digest
+1029:                 )
+1030:         key_registry, _key_evidence = key_registry_from_records(
+1031:             ledger.scan(through=captured_head), registry_verifier
+1032:         )
+1033:         atomic_limit = ledger.capabilities().max_atomic_records
+1034:     except DeclarationPreparationError:
+1035:         raise
+1036:     except BoundaryContinuityConflict as exc:
+1037:         raise _preparation_refused(
+1038:             f"boundary continuity refuses declaration preparation: {exc}",
+1039:             captured_head=captured_head,
+1040:         ) from exc
+1041:     except Exception as exc:
+1042:         raise _preparation_refused(
+1043:             f"cannot establish declaration preparation basis: {exc}",
+1044:             captured_head=captured_head,
+1045:             projected_head=getattr(exc, "projected_head", None),
+1046:         ) from exc
+1047:     finally:
+1048:         _close_quietly(snapshot)
+1049:         _close_quietly(query)
+1050:         _close_quietly(ledger)
+1051: 
+1052:     if not changes:
+1053:         return DeclarationEditPlan(
+1054:             status="noop",
+1055:             target_path=target_path,
+1056:             descriptor=descriptor,
+1057:             lineage=captured_head.lineage,
+1058:             basis=basis,
+1059:             captured_head=captured_head,
+1060:             before_documents=before_documents,
+1061:             proposed_documents=proposed_documents,
+1062:             changes=(),
+1063:             authored_at=None,
+1064:             observer=observer,
+1065:             drafts=(),
+1066:             fact_ids=(),
+1067:             key_introductions=(),
+1068:             old_cache_bytes=old_cache_bytes,
+1069:             old_cache_sha256=hashlib.sha256(old_cache_bytes).hexdigest(),
+1070:             proposed_text=proposed_text,
+1071:             atomic_limit=atomic_limit,
+1072:             exact_drafts=_exact_drafts(()),
+1073:         )
+1074: 
+1075:     if credentials is None:
+1076:         raise _preparation_refused(
+1077:             "declaration edits require fact and Arrival signers"
+1078:         )
+1079:     signing_context = CapturedSigningContext(
+1080:         captured_head=captured_head,
+1081:         author_keys=tuple(
+1082:             (
+1083:                 named_observer,
+1084:                 tuple(
+1085:                     key
+1086:                     for key, _introduced in key_registry.keys_valid_at(
+1087:                         named_observer, captured_head.ordinal + 1
+1088:                     )
+1089:                 ),
+1090:             )
+1091:             for named_observer in sorted(key_registry.introductions)
+1092:         ),
+1093:         receipt_keys=(),
+1094:     )
+1095:     credential_session = CredentialResolutionSession()
+1096:     authored_at = time.time()
+1097:     rows: list[tuple[Any, ...]] = []
+1098:     fact_ids: list[str] = []
+1099:     for change in changes:
+1100:         fact_id, row = _declaration_row(
+1101:             change,
+1102:             lineage=captured_head.lineage,
+1103:             authored_at=authored_at,
+1104:             observer=observer,
+1105:             credentials=credentials,
+1106:             registry=key_registry,
+1107:             captured_head=captured_head,
+1108:             fact_verify=fact_verify,
+1109:             context=signing_context,
+1110:             session=credential_session,
+1111:         )
+1112:         fact_ids.append(fact_id)
+1113:         rows.append(row)
+1114:     body = body_of_fact_row(rows[0]) if len(rows) == 1 else body_of_batch(rows)
+1115:     envelope_kind = "fact" if len(rows) == 1 else "batch"
+1116:     envelope_digest = content_commitment(
+1117:         envelope_kind, authored_at, observer, "", body
+1118:     )
+1119:     outer_signature = _signed_with_existing_key(
+1120:         credentials=credentials,
+1121:         signer=credentials.arrival_signer,
+1122:         verifier=arrival_verify,
+1123:         registry=key_registry,
+1124:         author=observer,
+1125:         head=captured_head,
+1126:         digest=envelope_digest,
+1127:         label="Arrival declaration envelope",
+1128:         domain=SigningDomain.ARRIVAL,
+1129:         purpose=CredentialPurpose.AUTHORSHIP,
+1130:         context=signing_context,
+1131:         session=credential_session,
+1132:     )
+1133:     declaration_draft = RecordDraft(
+1134:         kind=envelope_kind,
+1135:         authored_at=authored_at,
+1136:         observer=observer,
+1137:         origin="",
+1138:         body=body,
+1139:         signature=outer_signature,
+1140:     )
+1141: 
+1142:     proposed_keys: dict[str, str] = {}
+1143:     for document in proposed_documents:
+1144:         if document["kind"] != DECL_OBSERVER_DEFINED:
+1145:             continue
+1146:         key = document["payload"].get("key")
+1147:         if key is None:
+1148:             continue
+1149:         if not _key_is_well_formed(key):
+1150:             raise _preparation_refused(
+1151:                 f"observer {document['subject']!r} carries a malformed public key"
+1152:             )
+1153:         proposed_keys[str(document["subject"])] = str(key)
+1154:     existing_keys = {
+1155:         named_observer: {key for key, _ordinal in keys}
+1156:         for named_observer, keys in key_registry.introductions.items()
+1157:     }
+1158:     key_drafts: list[RecordDraft] = []
+1159:     for named_observer, key in proposed_keys.items():
+1160:         if key in existing_keys.get(named_observer, set()):
+1161:             continue
+1162:         key_drafts.append(
+1163:             _key_draft(
+1164:                 observer,
+1165:                 named_observer,
+1166:                 key,
+1167:                 authored_at=authored_at,
+1168:                 credentials=credentials,
+1169:                 registry=key_registry,
+1170:                 captured_head=captured_head,
+1171:                 arrival_verify=arrival_verify,
+1172:                 context=signing_context,
+1173:                 session=credential_session,
+1174:             )
+1175:         )
+1176: 
+1177:     drafts = tuple((*key_drafts, declaration_draft))
+1178:     if atomic_limit is not None and len(drafts) > atomic_limit:
+1179:         raise AtomicLimitExceeded(
+1180:             f"declaration edit needs {len(drafts)} Arrival records, but the "
+1181:             f"backend atomic limit is {atomic_limit}; refused before append"
+1182:         )
+1183:     return DeclarationEditPlan(
+1184:         status="planned",
+1185:         target_path=target_path,
+1186:         descriptor=descriptor,
+1187:         lineage=captured_head.lineage,
+1188:         basis=basis,
+1189:         captured_head=captured_head,
+1190:         before_documents=before_documents,
+1191:         proposed_documents=proposed_documents,
+1192:         changes=changes,
+1193:         authored_at=authored_at,
+1194:         observer=observer,
+1195:         drafts=drafts,
+1196:         fact_ids=tuple(fact_ids),
+1197:         key_introductions=tuple(draft.body["observer"] for draft in key_drafts),
+1198:         old_cache_bytes=old_cache_bytes,
+1199:         old_cache_sha256=hashlib.sha256(old_cache_bytes).hexdigest(),
+1200:         proposed_text=proposed_text,
+1201:         atomic_limit=atomic_limit,
+1202:         exact_drafts=_exact_drafts(drafts),
+1203:         credential_bindings=credential_session.evidence,
+1204:     )
+1205: 
+1206: 
+1207: def _result(
+1208:     plan: DeclarationEditPlan,
+1209:     *,
+1210:     status: str,
+1211:     head: Head | None,
+1212:     commit: Any | None,
+1213:     intent: Path | None,
+1214:     phase: str,
+1215:     file_written: bool,
+1216:     changes: tuple[Change, ...] | None,
+1217: ) -> DeclarationEditResult:
+1218:     return DeclarationEditResult(
+1219:         status=status, target_path=plan.target_path, descriptor=plan.descriptor,
+1220:         lineage=plan.lineage, basis=plan.basis,
+1221:         captured_head=plan.captured_head, head=head,
+1222:         commit=commit, fact_ids=plan.fact_ids, intent_path=intent,
+1223:         phase=phase, file_written=file_written, changes=changes,
+1224:     )
+1225: 
+1226: 
+1227: def _validate_plan(plan: DeclarationEditPlan) -> None:
+1228:     if plan.status not in {"planned", "noop"}:
+1229:         raise DeclarationApplyError("only a planned declaration edit can be applied")
+1230:     if _exact_drafts(plan.drafts) != plan.exact_drafts:
+1231:         raise DeclarationApplyError(
+1232:             "declaration plan drafts changed after preparation; refusing append"
+1233:         )
+1234:     if hashlib.sha256(plan.old_cache_bytes).hexdigest() != plan.old_cache_sha256:
+1235:         raise DeclarationApplyError(
+1236:             "declaration plan cache evidence changed after preparation"
+1237:         )
+1238: 
+1239: 
+1240: def _remove_intent(path: Path) -> None:
+1241:     try:
+1242:         path.unlink()
+1243:     except FileNotFoundError:
+1244:         return
+1245:     _fsync_parent(path)
+1246: 
+1247: 
+1248: def apply_declaration_edit(
+1249:     registry: BackendRegistry,
+1250:     plan: DeclarationEditPlan,
+1251:     *,
+1252:     failure_hook: Callable[[str], None] | None = None,
+1253: ) -> DeclarationEditResult:
+1254:     """Apply an edit under the target's process-safe operation lock."""
+1255:     with _declaration_lock(plan.target_path):
+1256:         return _apply_declaration_edit(
+1257:             registry, plan, failure_hook=failure_hook
+1258:         )
+1259: 
+1260: 
+1261: def _apply_declaration_edit(
+1262:     registry: BackendRegistry,
+1263:     plan: DeclarationEditPlan,
+1264:     *,
+1265:     failure_hook: Callable[[str], None] | None = None,
+1266: ) -> DeclarationEditResult:
+1267:     """Append one prepared declaration transition and publish its cache.
+1268: 
+1269:     The prepared drafts are submitted exactly once under the captured full
+1270:     head. Contract refusals are zero-prefix stale refusals; transport and
+1271:     witness failures retain the intent and their identity for recovery.
+1272:     """
+1273:     _validate_plan(plan)
+1274:     if plan.status == "noop":
+1275:         return _result(
+1276:             plan, status="noop", head=plan.captured_head, commit=None, intent=None,
+1277:             phase="noop", file_written=False, changes=plan.changes,
+1278:         )
+1279:     intent = declaration_intent_path(plan.target_path)
+1280:     try:
+1281:         if plan.target_path.read_bytes() != plan.old_cache_bytes:
+1282:             raise DeclarationStale(
+1283:                 "declaration cache changed after preparation; refusing append"
+1284:             )
+1285:     except OSError as exc:
+1286:         raise DeclarationApplyError(
+1287:             f"cannot recheck declaration cache before append: {exc}"
+1288:         ) from exc
+1289:     data = _intent_data(plan, phase="prepared")
+1290:     append_drafts = _drafts_from_exact(
+1291:         json.loads(plan.exact_drafts), plan.exact_drafts
+1292:     )
+1293:     try:
+1294:         _write_exclusive_json(intent, data)
+1295:     except FileExistsError as exc:
+1296:         raise DeclarationApplyError(
+1297:             f"unfinished declaration intent already exists: {intent}"
+1298:         ) from exc
+1299:     if failure_hook:
+1300:         try:
+1301:             failure_hook("after-intent")
+1302:         except Exception as exc:
+1303:             raise DeclarationApplyError(
+1304:                 "declaration intent was durable but append did not start"
+1305:             ) from exc
+1306: 
+1307:     ledger: Any | None = None
+1308:     query: Any | None = None
+1309:     commit: Any | None = None
+1310:     head: Head | None = None
+1311:     append_entered = False
+1312:     try:
+1313:         ledger, query = registry.open(plan.descriptor)
+1314:         try:
+1315:             append_entered = True
+1316:             commit = ledger.append(plan.captured_head, append_drafts)
+1317:         except Exception as exc:
+1318:             from .arrival_contract import ContractRefusal
+1319:             from .arrival_head_seam import NotWitnessed
+1320: 
+1321:             if isinstance(exc, ContractRefusal):
+1322:                 _remove_intent(intent)
+1323:                 raise DeclarationStale(
+1324:                     f"declaration append refused before mutation: {exc}"
+1325:                 ) from exc
+1326:             if isinstance(exc, NotWitnessed):
+1327:                 head = exc.head
+1328:                 data["phase"] = "append-unwitnessed"
+1329:                 with suppress(Exception):
+1330:                     _replace_json(intent, data)
+1331:                 raise DeclarationUnwitnessed(
+1332:                     "declaration records committed but their witness is unknown",
+1333:                     head=exc.head, commit=exc.commit, intent_path=intent,
+1334:                     fact_ids=plan.fact_ids, cause=exc,
+1335:                 ) from exc
+1336:             data["phase"] = "append-unknown"
+1337:             with suppress(Exception):
+1338:                 _replace_json(intent, data)
+1339:             raise DeclarationOutcomeUnknown(
+1340:                 "declaration append outcome is unknown; recover the intent",
+1341:                 head=None, intent_path=intent, fact_ids=plan.fact_ids, cause=exc,
+1342:             ) from exc
+1343:         head = commit.after
+1344:         try:
+1345:             data["phase"] = "appended"
+1346:             _replace_json(intent, data)
+1347:             if failure_hook:
+1348:                 failure_hook("after-append")
+1349:         except Exception as exc:
+1350:             raise DeclarationCommittedIncomplete(
+1351:                 "declaration append committed but append phase recording failed",
+1352:                 phase="appended", head=head, commit=commit, intent_path=intent,
+1353:                 fact_ids=plan.fact_ids, cause=exc,
+1354:             ) from exc
+1355:     except (DeclarationStale, DeclarationUnwitnessed, DeclarationOutcomeUnknown,
+1356:             DeclarationCommittedIncomplete):
+1357:         raise
+1358:     except Exception as exc:
+1359:         if not append_entered:
+1360:             raise DeclarationApplyError(
+1361:                 "declaration append was refused before entering the append call; "
+1362:                 "prepared intent retained for inspection",
+1363:             ) from exc
+1364:         raise DeclarationOutcomeUnknown(
+1365:             "declaration append path failed; recover the intent",
+1366:             head=head, intent_path=intent, fact_ids=plan.fact_ids, cause=exc,
+1367:         ) from exc
+1368:     finally:
+1369:         _close_quietly(query)
+1370:         _close_quietly(ledger)
+1371: 
+1372:     try:
+1373:         from .arrival_maintenance import sync_projection
+1374: 
+1375:         sync_projection(registry, plan.descriptor, through=head)
+1376:         data["phase"] = "synced"
+1377:         _replace_json(intent, data)
+1378:         if failure_hook:
+1379:             failure_hook("after-sync")
+1380:         data["phase"] = "publishing"
+1381:         _publish_cache(
+1382:             plan, intent=intent, intent_data=data, failure_hook=failure_hook
+1383:         )
+1384:         data["phase"] = "published"
+1385:         _replace_json(intent, data)
+1386:         if failure_hook:
+1387:             failure_hook("before-intent-remove")
+1388:         _remove_intent(intent)
+1389:     except Exception as exc:
+1390:         raise DeclarationCommittedIncomplete(
+1391:             "declaration append committed but a later phase failed; recover the intent",
+1392:             phase=str(data.get("phase", "appended")), head=head,
+1393:             commit=commit, intent_path=intent, fact_ids=plan.fact_ids, cause=exc,
+1394:         ) from exc
+1395:     return _result(
+1396:         plan, status="applied", head=head, commit=commit, intent=None,
+1397:         phase="published", file_written=True, changes=plan.changes,
+1398:     )
+1399: 
+1400: 
+1401: def recover_declaration_edit(
+1402:     registry: BackendRegistry,
+1403:     intent: Path | str,
+1404:     *,
+1405:     failure_hook: Callable[[str], None] | None = None,
+1406: ) -> DeclarationEditResult:
+1407:     """Recover an edit under the target's process-safe operation lock."""
+1408:     intent_path = Path(intent).resolve()
+1409:     with _declaration_lock(Path(_read_intent(intent_path)["target"])):
+1410:         return _recover_declaration_edit(
+1411:             registry, intent_path, failure_hook=failure_hook
+1412:         )
+1413: 
+1414: 
+1415: def _recover_declaration_edit(
+1416:     registry: BackendRegistry,
+1417:     intent: Path | str,
+1418:     *,
+1419:     failure_hook: Callable[[str], None] | None = None,
+1420: ) -> DeclarationEditResult:
+1421:     """Reconcile an edit intent by exact suffix membership, then finish cache."""
+1422:     intent_path = Path(intent).resolve()
+1423:     data = _read_intent(intent_path)
+1424:     drafts = _drafts_from_intent(data)
+1425:     plan = _plan_from_intent(data, drafts)
+1426:     captured = plan.captured_head
+1427:     ledger: Any | None = None
+1428:     query: Any | None = None
+1429:     try:
+1430:         ledger, query = registry.open(plan.descriptor)
+1431:         captured_at_ledger = ledger.head_at(
+1432:             Watermark(lineage=captured.lineage, ordinal=captured.ordinal)
+1433:         )
+1434:         if captured_at_ledger != captured:
+1435:             raise DeclarationStale(
+1436:                 "declaration intent predecessor head hash no longer matches"
+1437:             )
+1438:         actual = ledger.head()
+1439:         if actual == captured:
+1440:             if data.get("cache_temp") or data.get("cache_backup"):
+1441:                 raise DeclarationApplyError(
+1442:                     "unapplied declaration intent has cache publication artifacts"
+1443:                 )
+1444:             if plan.target_path.read_bytes() != plan.old_cache_bytes:
+1445:                 raise DeclarationStale(
+1446:                     "unapplied declaration intent has competing cache bytes"
+1447:                 )
+1448:             _remove_intent(intent_path)
+1449:             return _result(
+1450:                 plan, status="not-applied", head=actual, commit=None, intent=None,
+1451:                 phase="not-applied", file_written=False, changes=None,
+1452:             )
+1453:         first = captured.ordinal + 1
+1454:         for index, draft in enumerate(drafts):
+1455:             ordinal = first + index
+1456:             if actual.ordinal < ordinal or not _record_matches_draft(
+1457:                 ledger.read(ordinal), draft
+1458:             ):
+1459:                 raise DeclarationStale(
+1460:                     "declaration intent does not occupy its exact expected suffix"
+1461:                 )
+1462:     except DeclarationStale:
+1463:         raise
+1464:     except Exception as exc:
+1465:         raise DeclarationApplyError(
+1466:             f"cannot reconcile declaration intent against Arrival custody: {exc}"
+1467:         ) from exc
+1468:     finally:
+1469:         _close_quietly(query)
+1470:         _close_quietly(ledger)
+1471: 
+1472:     file_written = False
+1473:     try:
+1474:         from .arrival_maintenance import sync_projection
+1475: 
+1476:         sync_projection(registry, plan.descriptor, through=actual)
+1477:         data["phase"] = "synced"
+1478:         _replace_json(intent_path, data)
+1479:         if failure_hook:
+1480:             failure_hook("after-sync")
+1481:         if plan.target_path.exists():
+1482:             current = plan.target_path.read_bytes()
+1483:             if current == plan.proposed_text.encode("utf-8"):
+1484:                 _cleanup_cache_artifacts(plan, data)
+1485:                 data["phase"] = "published"
+1486:                 _replace_json(intent_path, data)
+1487:             elif current == plan.old_cache_bytes:
+1488:                 data["phase"] = "publishing"
+1489:                 _publish_cache(
+1490:                     plan, intent=intent_path, intent_data=data,
+1491:                     failure_hook=failure_hook,
+1492:                 )
+1493:                 file_written = True
+1494:                 data["phase"] = "published"
+1495:                 _replace_json(intent_path, data)
+1496:             else:
+1497:                 raise DeclarationStale(
+1498:                     "competing declaration cache bytes are present; refusing overwrite"
+1499:                 )
+1500:         elif data.get("cache_backup"):
+1501:             data["phase"] = "publishing"
+1502:             _publish_cache(
+1503:                 plan, intent=intent_path, intent_data=data,
+1504:                 failure_hook=failure_hook,
+1505:             )
+1506:             file_written = True
+1507:             data["phase"] = "published"
+1508:             _replace_json(intent_path, data)
+1509:         else:
+1510:             raise DeclarationApplyError(
+1511:                 "declaration cache is missing and has no detached recovery backup"
+1512:             )
+1513:         _remove_intent(intent_path)
+1514:     except Exception as exc:
+1515:         raise DeclarationCommittedIncomplete(
+1516:             "declaration custody is committed but cache recovery remains incomplete",
+1517:             phase=str(data.get("phase", "synced")), head=actual, commit=None,
+1518:             intent_path=intent_path, fact_ids=plan.fact_ids, cause=exc,
+1519:         ) from exc
+1520:     return _result(
+1521:         plan, status="recovered", head=actual, commit=None, intent=None,
+1522:         phase="published", file_written=file_written, changes=None,
+1523:     )
+
+===== libs/sdk/src/sdk/declare.py =====
+1: """Declaration inspection and vertex scaffolding operations."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import hashlib
+6: import json
+7: from dataclasses import asdict, dataclass, fields
+8: from pathlib import Path
+9: from typing import Any
+10: 
+11: from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
+12: from engine.arrival_contract import Commit
+13: from engine.arrival_registry import BackendRegistry
+14: from engine.credentials import CredentialProvider, WriteCredentials
+15: from engine.declaration import load_declaration_status
+16: from engine.probe import probe_target
+17: from lang.loader import parse_vertex_file
+18: 
+19: from .types import (
+20:     DeclarationInspectionResult,
+21:     DeclarationPlanResult,
+22:     InitVertexResult,
+23:     KindMutationResult,
+24:     SdkValueError,
+25:     StoreDescriptorInfo,
+26:     TargetError,
+27:     TargetNotFound,
+28:     TargetUnsupported,
+29:     _commit_dict,
+30: )
+31: 
+32: __all__ = [
+33:     "init_vertex", "inspect_declaration", "edit_declaration",
+34:     "recover_declaration", "DeclarationEditResult",
+35:     "DeclarationPreviewResult",
+36: ]
+37: 
+38: 
+39: @dataclass(frozen=True)
+40: class DeclarationEditResult(KindMutationResult):
+41:     """Serializable public outcome for descriptor-backed declaration edits.
+42: 
+43:     ``file_written`` means this call published the cache. ``phase`` describes
+44:     the reconciled state, which can already be published when recovery starts.
+45:     """
+46: 
+47:     schema: str = "loops.sdk/declaration-edit/v2"
+48:     read_path: str = "arrival"
+49:     target_path: str = ""
+50:     store: StoreDescriptorInfo | None = None
+51:     basis: dict[str, Any] | None = None
+52:     lineage: str | None = None
+53:     captured_head: dict[str, Any] | None = None
+54:     head: dict[str, Any] | None = None
+55:     commit: Commit | None = None
+56:     fact_ids: tuple[str, ...] = ()
+57:     intent_path: str | None = None
+58:     phase: str = ""
+59:     file_written: bool = False
+60:     changes: list[dict[str, Any]] | None = None
+61: 
+62:     def as_dict(self) -> dict[str, Any]:
+63:         result = {item.name: getattr(self, item.name) for item in fields(self)}
+64:         result["store"] = None if self.store is None else asdict(self.store)
+65:         result["fact_ids"] = list(self.fact_ids)
+66:         result["commit"] = _commit_dict(self.commit)
+67:         return result
+68: 
+69: 
+70: @dataclass(frozen=True)
+71: class DeclarationPreviewResult(DeclarationPlanResult):
+72:     """v2 semantic preview carrying the explicit Arrival read basis."""
+73: 
+74:     schema: str = "loops.sdk/declaration-preview/v2"
+75:     read_path: str = "arrival"
+76:     store: StoreDescriptorInfo | None = None
+77:     basis: dict[str, Any] | None = None
+78:     lineage: str | None = None
+79:     captured_head: dict[str, Any] | None = None
+80: 
+81:     def as_dict(self) -> dict[str, Any]:
+82:         return asdict(self)
+83: 
+84: 
+85: def _head_dict(head: Any) -> dict[str, Any] | None:
+86:     if head is None:
+87:         return None
+88:     return {
+89:         "lineage": head.lineage,
+90:         "ordinal": head.ordinal,
+91:         "record_hash": head.record_hash,
+92:     }
+93: 
+94: 
+95: def _change_dict(change: Any) -> dict[str, Any] | str:
+96:     if hasattr(change, "as_dict"):
+97:         return change.as_dict()
+98:     if hasattr(change, "_asdict"):
+99:         return dict(change._asdict())
+100:     return str(change)
+101: 
+102: 
+103: def _arrival_result(result: Any) -> DeclarationEditResult:
+104:     commit = result.commit
+105:     changes = (
+106:         None
+107:         if result.changes is None
+108:         else [_change_dict(change) for change in result.changes]
+109:     )
+110:     return DeclarationEditResult(
+111:         status=result.status,
+112:         mode="arrival-edit",
+113:         vertex_path=str(result.target_path),
+114:         target_path=str(result.target_path),
+115:         store=StoreDescriptorInfo.from_descriptor(result.descriptor),
+116:         basis=asdict(result.basis),
+117:         lineage=result.lineage,
+118:         captured_head=_head_dict(result.captured_head),
+119:         head=_head_dict(result.head),
+120:         commit=commit,
+121:         fact_ids=tuple(result.fact_ids),
+122:         intent_path=None if result.intent_path is None else str(result.intent_path),
+123:         phase=result.phase,
+124:         file_written=result.file_written,
+125:         changes=changes,
+126:     )
+127: 
+128: 
+129: def _arrival_credentials(
+130:     vertex_path: Path, credentials: CredentialProvider | WriteCredentials | None
+131: ) -> WriteCredentials:
+132:     if credentials is None:
+133:         from .emit import CustodyCredentialProvider
+134: 
+135:         credentials = CustodyCredentialProvider()
+136:     if isinstance(credentials, WriteCredentials):
+137:         return credentials
+138:     provider = getattr(credentials, "for_write", None)
+139:     if not callable(provider):
+140:         raise SdkValueError("Arrival declaration edits require a write credential provider")
+141:     supplied = provider(vertex_path)
+142:     if not isinstance(supplied, WriteCredentials):
+143:         raise SdkValueError("credential provider did not return WriteCredentials")
+144:     return supplied
+145: 
+146: 
+147: def _arrival_verifiers():
+148:     from sign import ed25519
+149: 
+150:     def verify(domain: str, key: str, signature: str, digest: str) -> bool:
+151:         try:
+152:             public = ed25519.public_key_from_b64(key)
+153:         except ValueError:
+154:             return False
+155:         return ed25519.verify(public, signature, digest.encode(), domain=domain)
+156: 
+157:     return (
+158:         lambda key, signature, digest: verify(FACT_DOMAIN, key, signature, digest),
+159:         lambda key, signature, digest: verify(ARRIVAL_DOMAIN, key, signature, digest),
+160:     )
+161: 
+162: 
+163: def edit_declaration(
+164:     target: Path | str,
+165:     proposed_text: str,
+166:     *,
+167:     observer: str,
+168:     credentials: CredentialProvider | WriteCredentials | None = None,
+169:     registry: BackendRegistry | None = None,
+170: ) -> DeclarationEditResult:
+171:     """Prepare and apply one signed edit against an explicit Arrival descriptor.
+172: 
+173:     The descriptor is parsed before any legacy target probe. The engine owns
+174:     the attested CURRENT basis, signed draft construction, full-head append,
+175:     durable intent, projection sync, and cache recovery protocol.
+176:     """
+177:     return _edit_arrival_declaration(
+178:         target,
+179:         proposed_text,
+180:         observer=observer,
+181:         credentials=credentials,
+182:         registry=registry,
+183:     )
+184: 
+185: 
+186: def _edit_arrival_declaration(
+187:     target: Path | str,
+188:     proposed_text: str,
+189:     *,
+190:     observer: str,
+191:     credentials: CredentialProvider | WriteCredentials | None,
+192:     registry: BackendRegistry | None,
+193:     source_cache_bytes: bytes | None = None,
+194:     require_cache_basis: bool = False,
+195: ) -> DeclarationEditResult:
+196:     from engine.arrival_declarations import (
+197:         apply_declaration_edit,
+198:         prepare_declaration_edit,
+199:     )
+200: 
+201:     from .errors import normalize_exception
+202:     from .target import _arrival_descriptor
+203: 
+204:     vertex_path = Path(target).resolve()
+205:     resolved = _arrival_descriptor(vertex_path)
+206:     if resolved is None:
+207:         raise TargetUnsupported(
+208:             f"edit_declaration requires an explicit Arrival .vertex target: {vertex_path}"
+209:         )
+210:     _path, _ast, descriptor = resolved
+211:     active_registry = (
+212:         registry if registry is not None else BackendRegistry.with_builtin_backends()
+213:     )
+214:     write_credentials = _arrival_credentials(vertex_path, credentials)
+215:     fact_verify, arrival_verify = _arrival_verifiers()
+216:     try:
+217:         plan = prepare_declaration_edit(
+218:             active_registry,
+219:             descriptor,
+220:             target=vertex_path,
+221:             proposed_text=proposed_text,
+222:             observer=observer,
+223:             credentials=write_credentials,
+224:             fact_verify=fact_verify,
+225:             arrival_verify=arrival_verify,
+226:             source_cache_bytes=source_cache_bytes,
+227:             require_cache_basis=require_cache_basis,
+228:         )
+229:         result = apply_declaration_edit(active_registry, plan)
+230:     except Exception as exc:
+231:         normalized = normalize_exception(exc)
+232:         if normalized is exc:
+233:             raise
+234:         raise normalized from exc
+235:     return _arrival_result(result)
+236: 
+237: 
+238: def recover_declaration(
+239:     intent: Path | str,
+240:     *,
+241:     registry: BackendRegistry | None = None,
+242: ) -> DeclarationEditResult:
+243:     """Recover one interrupted explicit Arrival declaration edit."""
+244:     from engine.arrival_declarations import recover_declaration_edit
+245: 
+246:     from .errors import normalize_exception
+247: 
+248:     active_registry = (
+249:         registry if registry is not None else BackendRegistry.with_builtin_backends()
+250:     )
+251:     try:
+252:         result = recover_declaration_edit(active_registry, intent)
+253:     except Exception as exc:
+254:         normalized = normalize_exception(exc)
+255:         if normalized is exc:
+256:             raise
+257:         raise normalized from exc
+258:     return _arrival_result(result)
+259: 
+260: 
+261: def _kdl_quote(value: str, *, field: str) -> str:
+262:     """Encode one generated single-line KDL string value safely."""
+263:     if any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+264:         raise SdkValueError(f"{field} contains KDL control characters")
+265:     return json.dumps(value, ensure_ascii=False)
+266: 
+267: 
+268: def init_vertex(
+269:     target: Path | str,
+270:     *,
+271:     name: str | None = None,
+272:     store_type: str = "sqlite",
+273:     store_path: str | Path | None = None,
+274:     is_root: bool = False,
+275:     observer: str | None = None,
+276:     strict: bool = False,
+277:     overwrite: bool = False,
+278:     backend: str | None = None,
+279:     location: str | Path | None = None,
+280:     documents: list[dict] | None = None,
+281:     signer=None,
+282:     fact_signer=None,
+283:     public_key: str | None = None,
+284:     credentials: CredentialProvider | None = None,
+285:     recover: bool = False,
+286:     registry: BackendRegistry | None = None,
+287: ) -> InitVertexResult:
+288:     """Scaffold a new Loops .vertex declaration file.
+289: 
+290:     Parameters:
+291:         target: Target .vertex file path to create.
+292:         name: Name of the vertex (defaults to target file stem).
+293:         store_type: Backing store format ('sqlite' or 'jsonl').
+294:         store_path: Custom store path (defaults to .loops/data/<name>.db or .jsonl).
+295:         is_root: If True, scaffolds an aggregate root discovery vertex.
+296:         observer: Initial observer identity to register.
+297:         strict: If True, declares 'strict true'.
+298:         overwrite: If True, overwrites existing file.
+299: 
+300:     Returns:
+301:         InitVertexResult detailing the created vertex file and storage paths.
+302:     """
+303:     vertex_path = Path(target).resolve()
+304: 
+305:     # Arrival initialization is an explicit extension of this existing SDK
+306:     # operation.  Keeping the legacy arm below preserves callers that ask for
+307:     # SQLite/JSONL scaffolding while the clean Arrival cut is adopted; no
+308:     # legacy opener is reached by the descriptor arm.
+309:     arrival_requested = (
+310:         store_type.lower() == "arrival"
+311:         or backend is not None
+312:         or location is not None
+313:         or documents is not None
+314:         or recover
+315:     )
+316:     if arrival_requested and not is_root:
+317:         return _init_arrival(
+318:             vertex_path,
+319:             name=name,
+320:             strict=strict,
+321:             observer=observer,
+322:             backend=backend,
+323:             location=location,
+324:             store_path=store_path,
+325:             documents=documents,
+326:             signer=signer,
+327:             fact_signer=fact_signer,
+328:             public_key=public_key,
+329:             credentials=credentials,
+330:             recover=recover,
+331:             overwrite=overwrite,
+332:             registry=registry,
+333:         )
+334:     if credentials is not None:
+335:         raise TargetUnsupported(
+336:             "initialization credentials require an explicit Arrival descriptor target"
+337:         )
+338:     if vertex_path.exists() and not overwrite:
+339:         raise TargetError(f"vertex file already exists: {vertex_path}")
+340: 
+341:     v_name = name or vertex_path.stem
+342: 
+343:     if is_root:
+344:         content = (
+345:             f'name "{v_name}"\n'
+346:             "// Root vertex — discovers all .vertex files under this directory\n"
+347:             'discover "./**/*.vertex"\n'
+348:         )
+349:         resolved_store = None
+350:     else:
+351:         ext = ".jsonl" if store_type.lower() == "jsonl" else ".db"
+352:         default_store = f".loops/data/{v_name}{ext}"
+353:         resolved_store = str(store_path) if store_path is not None else default_store
+354: 
+355:         lines = [f'name "{v_name}"', f'store "{resolved_store}"']
+356:         if strict:
+357:             lines.append("strict true")
+358:         lines.append("")
+359: 
+360:         if observer:
+361:             # Ensure keypair exists for initial observer
+362:             from custody import ensure_signing_key
+363: 
+364:             keypair = ensure_signing_key(vertex_path, observer=observer)
+365:             lines.append("observers {")
+366:             lines.append(f"  {observer} {{")
+367:             lines.append(f'    key "{keypair.public_b64}"')
+368:             lines.append("  }")
+369:             lines.append("}")
+370:             lines.append("")
+371: 
+372:         lines.append("loops {")
+373:         lines.append("  item {")
+374:         lines.append("    fold {")
+375:         lines.append('      items "collect" 100')
+376:         lines.append("    }")
+377:         lines.append("  }")
+378:         lines.append("}")
+379:         lines.append("")
+380:         content = "\n".join(lines)
+381: 
+382:     # Ensure parent directory exists
+383:     vertex_path.parent.mkdir(parents=True, exist_ok=True)
+384:     vertex_path.write_text(content, encoding="utf-8")
+385: 
+386:     return InitVertexResult(
+387:         target_path=str(vertex_path),
+388:         name=v_name,
+389:         store_path=resolved_store,
+390:         store_type=store_type,
+391:         is_root=is_root,
+392:         file_written=True,
+393:     )
+394: 
+395: 
+396: def _init_arrival(
+397:     vertex_path: Path,
+398:     *,
+399:     name: str | None,
+400:     strict: bool,
+401:     observer: str | None,
+402:     backend: str | None,
+403:     location: str | Path | None,
+404:     store_path: str | Path | None,
+405:     documents: list[dict] | None,
+406:     signer,
+407:     fact_signer,
+408:     public_key: str | None,
+409:     credentials: CredentialProvider | None,
+410:     recover: bool,
+411:     overwrite: bool,
+412:     registry: BackendRegistry | None,
+413: ) -> InitVertexResult:
+414:     """Compose custody and language inputs for the engine initializer."""
+415:     from engine.arrival_contract import Profile, StoreDescriptor
+416:     from engine.arrival_initialization import (
+417:         arrival_intent_path,
+418:         initialize_arrival,
+419:         new_lineage,
+420:         recover_arrival_initialization,
+421:     )
+422:     from engine.declaration import validate_arrival_runtime_identity
+423:     from lang import parse_vertex, vertex_to_documents
+424: 
+425:     from .errors import normalize_exception
+426: 
+427:     if overwrite:
+428:         raise TargetError("Arrival initialization never overwrites an existing artifact")
+429:     intent_data = None
+430:     if recover:
+431:         try:
+432:             intent_data = json.loads(arrival_intent_path(vertex_path).read_text())
+433:             reserved = intent_data["descriptor"]
+434:             reserved_observer = str(intent_data["observer"])
+435:             if observer is None:
+436:                 observer = reserved_observer
+437:             elif observer != reserved_observer:
+438:                 raise SdkValueError(
+439:                     "recovery observer disagrees with the reserved initialization intent"
+440:                 )
+441:             if backend is not None and backend != reserved["backend"]:
+442:                 raise SdkValueError(
+443:                     "recovery backend disagrees with the reserved initialization intent"
+444:                 )
+445:             if public_key is not None and public_key != str(intent_data["public_key"]):
+446:                 raise SdkValueError(
+447:                     "recovery public key disagrees with the reserved initialization intent"
+448:                 )
+449:             requested_location = location if location is not None else store_path
+450:             if reserved["backend"] == "file" and requested_location is not None:
+451:                 requested_location = str(
+452:                     (vertex_path.parent / str(requested_location)).resolve()
+453:                     if not Path(str(requested_location)).is_absolute()
+454:                     else Path(str(requested_location)).resolve()
+455:                 )
+456:             if (
+457:                 requested_location is not None
+458:                 and str(requested_location) != str(reserved["location"])
+459:             ):
+460:                 raise SdkValueError(
+461:                     "recovery location disagrees with the reserved initialization intent"
+462:                 )
+463:         except SdkValueError:
+464:             raise
+465:         except (OSError, ValueError, KeyError) as exc:
+466:             raise TargetError(f"cannot load Arrival initialization intent: {exc}") from exc
+467:     if not observer:
+468:         raise SdkValueError("Arrival initialization requires observer")
+469:     if location is not None and store_path is not None and str(location) != str(store_path):
+470:         raise SdkValueError(
+471:             "Arrival initialization received conflicting location and store_path"
+472:         )
+473:     if location is None:
+474:         location = store_path
+475:     v_name = name or vertex_path.stem
+476:     if not recover:
+477:         # The SDK scaffold declares item, and the runtime also adds cite.
+478:         # Refuse these collisions before the default custody path creates keys.
+479:         validate_arrival_runtime_identity(v_name, ("item",), refusal=SdkValueError)
+480:     chosen_backend = backend or "file"
+481:     if location is None:
+482:         relative_location = f".loops/data/{v_name}.arrival"
+483:         descriptor_location = str((vertex_path.parent / relative_location).resolve())
+484:     elif chosen_backend == "file":
+485:         relative_location = str(location)
+486:         descriptor_location = str((vertex_path.parent / relative_location).resolve())
+487:     else:
+488:         # A DSN is opaque to the SDK as well as to the engine registry.
+489:         relative_location = str(location)
+490:         descriptor_location = relative_location
+491: 
+492:     # Verification is independent of where signing callables came from.  A
+493:     # caller-supplied pair still has to prove both protocol domains against
+494:     # the supplied public key before an intent or mint is attempted.
+495:     from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
+496:     from sign import ed25519
+497: 
+498:     def _verify(domain: str, key: str, signature: str, digest: str) -> bool:
+499:         try:
+500:             public = ed25519.public_key_from_b64(key)
+501:         except ValueError:
+502:             return False
+503:         return ed25519.verify(public, signature, digest.encode(), domain=domain)
+504: 
+505:     def _fact_verify(key: str, signature: str, digest: str) -> bool:
+506:         return _verify(FACT_DOMAIN, key, signature, digest)
+507: 
+508:     def _arrival_verify(key: str, signature: str, digest: str) -> bool:
+509:         return _verify(ARRIVAL_DOMAIN, key, signature, digest)
+510: 
+511:     fact_verify = _fact_verify
+512:     arrival_verify = _arrival_verify
+513:     if not recover:
+514:         # The SDK is the custody owner. An injected signer/key pair is useful
+515:         # to headless deployments; absent one, key creation/loading is the
+516:         # same explicit custody operation used by the existing init command.
+517:         from custody import arrival_signer_for, ensure_signing_key, fact_signer_for
+518:         from engine.credentials import (
+519:             CredentialBindingEvidence,
+520:             CredentialPurpose,
+521:             CredentialRequest,
+522:             ResolvedCredential,
+523:             SigningDomain,
+524:         )
+525: 
+526:         if credentials is not None:
+527:             if signer is not None or fact_signer is not None:
+528:                 raise SdkValueError(
+529:                     "mapped Arrival initialization does not accept separate signer inputs"
+530:                 )
+531:             write_credentials = _arrival_credentials(vertex_path, credentials)
+532:             if not write_credentials.mapped or write_credentials.binding_resolver is None:
+533:                 raise SdkValueError(
+534:                     "Arrival initialization requires a mapped provider or explicit signers"
+535:                 )
+536:             fact_request = CredentialRequest(
+537:                 write_credentials.binding_namespace or "",
+538:                 observer,
+539:                 SigningDomain.FACT,
+540:                 CredentialPurpose.INITIALIZATION,
+541:             )
+542:             arrival_request = CredentialRequest(
+543:                 write_credentials.binding_namespace or "",
+544:                 observer,
+545:                 SigningDomain.ARRIVAL,
+546:                 CredentialPurpose.INITIALIZATION,
+547:             )
+548:             try:
+549:                 fact_credential = write_credentials.binding_resolver(fact_request)
+550:                 arrival_credential = write_credentials.binding_resolver(arrival_request)
+551:             except Exception as exc:
+552:                 normalized = normalize_exception(exc)
+553:                 if normalized is not exc:
+554:                     raise normalized from exc
+555:                 raise SdkValueError(
+556:                     "Arrival initialization could not resolve its pre-created mapped binding"
+557:                 ) from exc
+558:             if fact_credential is None or arrival_credential is None:
+559:                 raise SdkValueError(
+560:                     "mapped Arrival initialization requires a pre-created founding binding"
+561:                 )
+562:             def valid_bootstrap_credential(value: object, request: CredentialRequest) -> bool:
+563:                 if not isinstance(value, ResolvedCredential):
+564:                     return False
+565:                 evidence = value.evidence
+566:                 return (
+567:                     isinstance(evidence, CredentialBindingEvidence)
+568:                     and evidence.request == request
+569:                     and all(
+570:                         isinstance(item, str) and bool(item)
+571:                         for item in (
+572:                             evidence.key_ref,
+573:                             evidence.algorithm,
+574:                             evidence.public_key,
+575:                             evidence.provenance,
+576:                         )
+577:                     )
+578:                     and callable(value.sign_digest)
+579:                 )
+580: 
+581:             fact_valid = valid_bootstrap_credential(fact_credential, fact_request)
+582:             arrival_valid = valid_bootstrap_credential(arrival_credential, arrival_request)
+583:             if not fact_valid or not arrival_valid:
+584:                 raise SdkValueError(
+585:                     "mapped Arrival initialization resolver returned contradictory binding evidence"
+586:                 )
+587:             if (
+588:                 fact_credential.evidence.public_key != arrival_credential.evidence.public_key
+589:                 or fact_credential.evidence.key_ref != arrival_credential.evidence.key_ref
+590:             ):
+591:                 raise SdkValueError(
+592:                     "mapped Arrival initialization requires FACT and ARRIVAL bindings with one key"
+593:                 )
+594:             if public_key is not None and public_key != fact_credential.evidence.public_key:
+595:                 raise SdkValueError(
+596:                     "mapped Arrival initialization public_key disagrees with its binding"
+597:                 )
+598:             public_key = fact_credential.evidence.public_key
+599: 
+600:             def mapped_arrival_signer(author: str, digest: str) -> str | None:
+601:                 return arrival_credential.sign_digest(digest) if author == observer else None
+602: 
+603:             def mapped_fact_signer(author: str, digest: str) -> str | None:
+604:                 return fact_credential.sign_digest(digest) if author == observer else None
+605: 
+606:             signer = mapped_arrival_signer
+607:             fact_signer = mapped_fact_signer
+608:         elif signer is None and fact_signer is None and public_key is None:
+609:             try:
+610:                 keypair = ensure_signing_key(vertex_path, observer=observer)
+611:             except ValueError as exc:
+612:                 raise SdkValueError(str(exc)) from exc
+613:             public_key = keypair.public_b64
+614:             signer = arrival_signer_for(vertex_path)
+615:             fact_signer = fact_signer_for(vertex_path)
+616:         elif (
+617:             signer is None
+618:             or fact_signer is None
+619:             or public_key is None
+620:             or not callable(signer)
+621:             or not callable(fact_signer)
+622:         ):
+623:             raise SdkValueError(
+624:                 "Arrival initialization custom credentials require arrival signer, "
+625:                 "fact signer, and public key"
+626:             )
+627:         if signer is None or fact_signer is None or public_key is None:
+628:             raise SdkValueError("Arrival initialization requires usable custody signers")
+629: 
+630:     lineage = None
+631:     if not recover:
+632:         lineage = new_lineage()
+633:         lines = [
+634:             f"name {_kdl_quote(v_name, field='vertex name')}",
+635:             f"store {_kdl_quote(relative_location, field='store location')} "
+636:             f"backend={_kdl_quote(chosen_backend, field='backend')} "
+637:             f"lineage={_kdl_quote(lineage, field='lineage')} role=\"authority\"",
+638:         ]
+639:         if strict:
+640:             lines.append("strict true")
+641:         lines.extend(
+642:             [
+643:                 "observers {",
+644:                 f"  {_kdl_quote(observer, field='observer')} {{",
+645:                 f"    key {_kdl_quote(public_key, field='public key')}",
+646:                 "  }",
+647:                 "}",
+648:                 "",
+649:                 "loops {",
+650:                 "  item {",
+651:                 "    fold {",
+652:                 '      items "collect" 100',
+653:                 "    }",
+654:                 "  }",
+655:                 "}",
+656:                 "",
+657:             ]
+658:         )
+659:         declaration_text = "\n".join(lines)
+660:         try:
+661:             ast = parse_vertex(declaration_text, path=vertex_path)
+662:         except Exception as exc:
+663:             raise SdkValueError(f"invalid Arrival declaration text: {exc}") from exc
+664:         parsed_documents = [doc.as_json() for doc in vertex_to_documents(ast)]
+665:         if documents is None:
+666:             documents = parsed_documents
+667:         elif documents != parsed_documents:
+668:             raise SdkValueError(
+669:                 "Arrival declaration text and declaration documents disagree"
+670:             )
+671:         if (
+672:             ast.store_backend is None
+673:             or ast.store_backend.name != chosen_backend
+674:             or ast.store_backend.role != "authority"
+675:             or ast.store_backend.lineage != lineage
+676:         ):
+677:             raise SdkValueError(
+678:                 "Arrival declaration must carry the requested backend, lineage and authority role"
+679:             )
+680:     else:
+681:         # Recovery reads the stable observer and descriptor from the intent;
+682:         # the target is not re-rendered and no new lineage is selected.
+683:         try:
+684:             intent_data = intent_data or json.loads(arrival_intent_path(vertex_path).read_text())
+685:             lineage = str(intent_data["lineage"])
+686:             declaration_text = str(intent_data["declaration_text"])
+687:             if documents is None:
+688:                 documents = list(intent_data["documents"])
+689:             reserved_descriptor = intent_data["descriptor"]
+690:             chosen_backend = str(reserved_descriptor["backend"])
+691:             descriptor_location = str(reserved_descriptor["location"])
+692:             relative_location = descriptor_location
+693:             parsed = parse_vertex(declaration_text, path=vertex_path)
+694:             v_name = parsed.name
+695:         except (OSError, ValueError, KeyError) as exc:
+696:             raise TargetError(f"cannot load Arrival initialization intent: {exc}") from exc
+697: 
+698:     descriptor = StoreDescriptor(
+699:         backend=chosen_backend,
+700:         location=descriptor_location,
+701:         lineage=lineage,
+702:         role=Profile.AUTHORITY,
+703:     )
+704:     active_registry = (
+705:         registry if registry is not None else BackendRegistry.with_builtin_backends()
+706:     )
+707:     try:
+708:         if recover:
+709:             result = recover_arrival_initialization(
+710:                 active_registry,
+711:                 arrival_intent_path(vertex_path),
+712:             )
+713:         else:
+714:             result = initialize_arrival(
+715:                 active_registry,
+716:                 descriptor,
+717:                 target=vertex_path,
+718:                 documents=documents or (),
+719:                 declaration_text=declaration_text,
+720:                 observer=observer,
+721:                 public_key=public_key,
+722:                 signer=signer,
+723:                 fact_signer=fact_signer,
+724:                 arrival_signer=signer,
+725:                 fact_verify=fact_verify,
+726:                 arrival_verify=arrival_verify,
+727:                 lineage=lineage,
+728:             )
+729:     except BaseException as exc:
+730:         details = {"intent_path": str(arrival_intent_path(vertex_path))}
+731:         context = {"fact_id": lineage} if lineage is not None else None
+732:         normalized = normalize_exception(exc, context=context)
+733:         if hasattr(normalized, "details"):
+734:             normalized.details.update(details)
+735:         if normalized is exc:
+736:             # Keep SDK exceptions and process-control exceptions exactly as
+737:             # raised.  ``raise exc from exc`` would install a self-cause and
+738:             # obscure both cancellation and an already-established cause.
+739:             raise
+740:         raise normalized from exc
+741:     return InitVertexResult(
+742:         target_path=str(vertex_path),
+743:         name=v_name,
+744:         read_path="arrival",
+745:         store=StoreDescriptorInfo(
+746:             backend=chosen_backend,
+747:             location=descriptor_location,
+748:             lineage=result.lineage,
+749:             role="authority",
+750:         ),
+751:         store_path=relative_location,
+752:         store_type="arrival",
+753:         is_root=False,
+754:         file_written=result.file_written,
+755:         lineage=result.lineage,
+756:         head={
+757:             "lineage": result.head.lineage,
+758:             "ordinal": result.head.ordinal,
+759:             "record_hash": result.head.record_hash,
+760:         },
+761:         phase=result.phase,
+762:     )
+763: 
+764: 
+765: def inspect_declaration(
+766:     target: Path | str,
+767:     *,
+768:     registry: BackendRegistry | None = None,
+769: ) -> DeclarationInspectionResult:
+770:     """Inspect a .vertex declaration without materializing its projection.
+771: 
+772:     Parameters:
+773:         target: Path to the .vertex file.
+774:         registry: Optional Arrival backend registry used for descriptor opens.
+775: 
+776:     Returns:
+777:         DeclarationInspectionResult containing AST metadata, admission rules, and syntax health.
+778:     """
+779:     path = Path(target).resolve()
+780:     if not path.exists():
+781:         raise TargetNotFound(f"target path does not exist: {path}")
+782: 
+783:     # A descriptor is residence, not a legacy probe hint. Establish its
+784:     # attested bounded snapshot before considering the compatibility branch.
+785:     from .read import _arrival_declaration, _open_arrival_read
+786:     from .target import _arrival_definition
+787: 
+788:     definition = _arrival_definition(path, allow_aggregate=True)
+789:     if definition is not None and definition[2] is not None:
+790:         definition_path, definition_ast, descriptor = definition
+791:         arrival = (definition_path, definition_ast, descriptor)
+792:         with _open_arrival_read(arrival, registry=registry) as (
+793:             locator_ast,
+794:             descriptor,
+795:             opened,
+796:         ):
+797:             effective_ast, effective_status, _facts, _own_lineage = _arrival_declaration(
+798:                 locator_ast, path, opened, allow_aggregate=True
+799:             )
+800:             local_fingerprint = _document_fingerprint(locator_ast)
+801:             effective_fingerprint = _document_fingerprint(effective_ast)
+802:             declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = (
+803:                 _inspection_fields(effective_ast)
+804:             )
+805:             local_combine, local_discover = _inspection_topology(locator_ast)
+806:             effective_combine, effective_discover = _inspection_topology(effective_ast)
+807:             return DeclarationInspectionResult(
+808:                 read_path="arrival",
+809:                 store=StoreDescriptorInfo.from_descriptor(descriptor),
+810:                 basis=opened.basis,
+811:                 target_path=str(path),
+812:                 name=effective_ast.name,
+813:                 status=effective_status,
+814:                 local_status=(
+815:                     "matches-effective"
+816:                     if local_fingerprint == effective_fingerprint
+817:                     else "drifted"
+818:                 ),
+819:                 effective_status=effective_status,
+820:                 local_fingerprint=local_fingerprint,
+821:                 effective_fingerprint=effective_fingerprint,
+822:                 store_mode=descriptor.backend,
+823:                 store_path=descriptor.location,
+824:                 declared_kinds=declared_kinds,
+825:                 declared_observers=declared_observers,
+826:                 cadence_ticks=cadence_ticks,
+827:                 strict=strict,
+828:                 is_aggregate=is_aggregate,
+829:                 local_combine=local_combine,
+830:                 local_discover=local_discover,
+831:                 effective_combine=effective_combine,
+832:                 effective_discover=effective_discover,
+833:                 syntax_valid=True,
+834:                 errors=[],
+835:             )
+836: 
+837:     # A valid storeless aggregate has no adopted declaration to consult. Its
+838:     # root AST is the exact one just parsed by the target resolver, avoiding a
+839:     # second file read before a legacy probe could observe replacement bytes.
+840:     if (
+841:         definition is not None
+842:         and definition[2] is None
+843:         and definition[1].store is None
+844:         and (definition[1].combine is not None or definition[1].discover is not None)
+845:     ):
+846:         return _frozen_local_aggregate_inspection(definition[0], definition[1])
+847: 
+848:     probe = probe_target(path)
+849:     if probe.target_type != "vertex":
+850:         raise SdkValueError(
+851:             f"inspect_declaration requires a .vertex target, got {probe.target_type}"
+852:         )
+853: 
+854:     errors: list[str] = []
+855:     syntax_valid = True
+856:     file_ast = None
+857:     try:
+858:         file_ast = parse_vertex_file(path)
+859:     except Exception as exc:
+860:         syntax_valid = False
+861:         errors.append(str(exc))
+862: 
+863:     decl_status = None
+864:     if syntax_valid:
+865:         try:
+866:             decl_ast, decl_status = load_declaration_status(path)
+867:         except Exception as exc:
+868:             errors.append(str(exc))
+869: 
+870:     v_name = getattr(file_ast, "name", path.stem) if file_ast else path.stem
+871:     store_mode = probe.canonical_mode
+872:     store_path = str(probe.canonical_path) if probe.canonical_path else None
+873: 
+874:     declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = _inspection_fields(
+875:         file_ast
+876:     )
+877:     local_combine, local_discover = _inspection_topology(file_ast)
+878: 
+879:     return DeclarationInspectionResult(
+880:         target_path=str(path),
+881:         name=v_name,
+882:         status=decl_status or "uninitialized",
+883:         local_status=decl_status if syntax_valid else "syntax-invalid",
+884:         effective_status=decl_status,
+885:         store_mode=store_mode,
+886:         store_path=store_path,
+887:         declared_kinds=declared_kinds,
+888:         declared_observers=declared_observers,
+889:         cadence_ticks=cadence_ticks,
+890:         strict=strict,
+891:         is_aggregate=is_aggregate,
+892:         local_combine=local_combine,
+893:         local_discover=local_discover,
+894:         syntax_valid=syntax_valid,
+895:         errors=errors,
+896:     )
+897: 
+898: 
+899: def _frozen_local_aggregate_inspection(
+900:     path: Path, ast: Any
+901: ) -> DeclarationInspectionResult:
+902:     """Return storeless aggregate topology from one retained local AST."""
+903:     declared_kinds, declared_observers, cadence_ticks, strict, is_aggregate = (
+904:         _inspection_fields(ast)
+905:     )
+906:     combine, discover = _inspection_topology(ast)
+907:     fingerprint = _document_fingerprint(ast)
+908:     return DeclarationInspectionResult(
+909:         read_path="local-frozen",
+910:         target_path=str(path),
+911:         name=ast.name,
+912:         status="local-only",
+913:         local_status="frozen-local",
+914:         effective_status="local-only",
+915:         local_fingerprint=fingerprint,
+916:         effective_fingerprint=fingerprint,
+917:         declared_kinds=declared_kinds,
+918:         declared_observers=declared_observers,
+919:         cadence_ticks=cadence_ticks,
+920:         strict=strict,
+921:         is_aggregate=is_aggregate,
+922:         local_combine=combine,
+923:         local_discover=discover,
+924:         effective_combine=None if combine is None else [dict(entry) for entry in combine],
+925:         effective_discover=discover,
+926:         syntax_valid=True,
+927:         errors=[],
+928:     )
+929: 
+930: 
+931: def _inspection_fields(ast: Any | None) -> tuple[list[str], list[str], list[str], bool, bool]:
+932:     """Extract public declaration fields from one already-chosen AST."""
+933:     if ast is None:
+934:         return [], [], [], False, False
+935:     return (
+936:         sorted(ast.loops.keys()) if getattr(ast, "loops", None) else [],
+937:         (
+938:             sorted(observer.name for observer in ast.observers)
+939:             if getattr(ast, "observers", None)
+940:             else []
+941:         ),
+942:         sorted(tick.name for tick in ast.cadence) if getattr(ast, "cadence", None) else [],
+943:         getattr(ast, "strict", False),
+944:         getattr(ast, "combine", None) is not None or getattr(ast, "discover", None) is not None,
+945:     )
+946: 
+947: 
+948: def _inspection_topology(
+949:     ast: Any | None,
+950: ) -> tuple[list[dict[str, str | None]] | None, str | None]:
+951:     """Serialize only one declaration root's unexpanded aggregate shape."""
+952:     if ast is None:
+953:         return None, None
+954:     combine = getattr(ast, "combine", None)
+955:     return (
+956:         None
+957:         if combine is None
+958:         else [{"name": entry.name, "alias": entry.alias} for entry in combine],
+959:         getattr(ast, "discover", None),
+960:     )
+961: 
+962: 
+963: def _document_fingerprint(ast: Any) -> str:
+964:     """Hash semantic declaration documents, deliberately excluding residence."""
+965:     from lang import vertex_to_documents
+966: 
+967:     documents = vertex_to_documents(ast)
+968:     canonical = json.dumps(
+969:         [document.as_json() for document in documents],
+970:         sort_keys=True,
+971:         separators=(",", ":"),
+972:     )
+973:     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+===== libs/sdk/src/sdk/errors.py =====
+1: """Normalize engine boundary failures for SDK process callers.
+2: 
+3: Engine deliberately keeps backend and witness refusal families separate.  The
+4: SDK is the process boundary, so it translates those families into stable SDK
+5: errors while retaining the identity evidence an operator needs to reconcile a
+6: refusal or an outcome that may already have committed.
+7: """
+8: 
+9: from __future__ import annotations
+10: 
+11: from collections.abc import Mapping
+12: from pathlib import PurePath
+13: from typing import Any
+14: 
+15: from engine.admission import AdmissionError
+16: from engine.arrival import ArrivalError
+17: from engine.arrival_contract import ContractRefusal
+18: from engine.arrival_declarations import (
+19:     DeclarationCommittedIncomplete,
+20:     DeclarationOutcomeUnknown,
+21:     DeclarationStale,
+22:     DeclarationUnwitnessed,
+23: )
+24: from engine.arrival_head_attestation import AttestationRefusal
+25: from engine.arrival_head_seam import NotWitnessed
+26: from engine.arrival_initialization import (
+27:     InitializationCommittedIncomplete,
+28:     InitializationOutcomeUnknown,
+29:     InitializationUnwitnessed,
+30: )
+31: from engine.arrival_maintenance import ProjectionSyncError
+32: from engine.arrival_restore import RestoreForwardIncomplete, RestoreForwardUnknown
+33: from engine.arrival_search import SearchIndexSyncError
+34: from engine.credentials import CredentialBindingRefused
+35: from engine.runtime_write import (
+36:     BatchPostCommitProjectionFailed,
+37:     BatchWriteCommitUnknown,
+38:     BatchWritePreparationRefused,
+39:     PostCommitProjectionFailed,
+40:     RuntimeWriteRefused,
+41:     WriteCommitUnknown,
+42: )
+43: 
+44: from .types import AdmissionFailed, SdkError
+45: 
+46: __all__ = [
+47:     "ArrivalRefusal",
+48:     "AdmissionRefusal",
+49:     "CommittedOutcome",
+50:     "CommittedProjectionFailed",
+51:     "CommittedIncomplete",
+52:     "CommittedUnwitnessed",
+53:     "CommittedOutcomeUnknown",
+54:     "ProjectionOutcomeUnknown",
+55:     "normalize_exception",
+56: ]
+57: 
+58: 
+59: def _json_value(value: Any) -> Any:
+60:     if value is None or isinstance(value, (str, int, float, bool)):
+61:         return value
+62:     if isinstance(value, PurePath):
+63:         return str(value)
+64:     # Identity diagnostics must never stringify arbitrary record/payload objects.
+65:     return None
+66: 
+67: 
+68: def _head_dict(value: Any) -> dict[str, Any] | None:
+69:     fields = ("lineage", "ordinal", "record_hash")
+70:     if not all(hasattr(value, field) for field in fields):
+71:         return None
+72:     return {field: _json_value(getattr(value, field)) for field in fields}
+73: 
+74: 
+75: def _coverage_dict(value: Any) -> dict[str, Any] | None:
+76:     """Serialize explicit search-index coverage without backend row bodies."""
+77:     through = _head_dict(getattr(value, "through", None))
+78:     fields_hash = getattr(value, "fields_hash", None)
+79:     schema_version = getattr(value, "schema_version", None)
+80:     if through is None or not isinstance(fields_hash, str) or not isinstance(schema_version, str):
+81:         return None
+82:     return {
+83:         "through": through,
+84:         "fields_hash": fields_hash,
+85:         "schema_version": schema_version,
+86:     }
+87: 
+88: 
+89: def _identity_details(exc: BaseException) -> dict[str, Any]:
+90:     """Copy stable coordinates without serializing mutable record payloads."""
+91:     details: dict[str, Any] = {}
+92:     for name in (
+93:         "fact_id",
+94:         "tick_id",
+95:         "ordinal",
+96:         "observer",
+97:         "kind",
+98:         "vertex",
+99:         "item_index",
+100:         "source_type",
+101:         "lineage",
+102:         "intent_path",
+103:         "phase",
+104:         "fields_hash",
+105:         "view_generation",
+106:         "tier_index",
+107:     ):
+108:         value = getattr(exc, name, None)
+109:         if value is not None:
+110:             coordinate = _json_value(value)
+111:             if coordinate is not None:
+112:                 details[name] = coordinate
+113:     for name in ("fact_ids", "tick_ids"):
+114:         value = getattr(exc, name, None)
+115:         if value is not None:
+116:             details[name] = [_json_value(item) for item in value]
+117:     items = getattr(exc, "items", None)
+118:     if items is not None:
+119:         details["items"] = [
+120:             {
+121:                 "fact_id": _json_value(item.fact_id),
+122:                 "tick_id": _json_value(item.tick_id),
+123:                 "tick_name": _json_value(item.tick_name),
+124:                 "already_present": bool(item.already_present),
+125:             }
+126:             for item in items
+127:         ]
+128:     for name in (
+129:         "head",
+130:         "captured_head",
+131:         "presented",
+132:         "before",
+133:         "after",
+134:         "target",
+135:         "projected_before",
+136:         "observed_after",
+137:         "projected_head",
+138:     ):
+139:         value = getattr(exc, name, None)
+140:         if value is None:
+141:             continue
+142:         head = _head_dict(value)
+143:         if head is not None:
+144:             details[name] = head
+145:     for name in ("coverage_before", "coverage_after", "observed_after"):
+146:         value = getattr(exc, name, None)
+147:         coverage = _coverage_dict(value)
+148:         if coverage is not None:
+149:             details[name] = coverage
+150:     # Preserve an explicitly unavailable coordinate without claiming a head or
+151:     # coverage. Missing attributes on older wrappers still remain omitted.
+152:     for name in (
+153:         "captured_head", "projected_head", "projected_before", "observed_after",
+154:         "coverage_before", "coverage_after",
+155:     ):
+156:         if hasattr(exc, name) and getattr(exc, name) is None:
+157:             details[name] = None
+158:     commit = getattr(exc, "commit", None)
+159:     if commit is not None:
+160:         before = _head_dict(getattr(commit, "before", None))
+161:         after = _head_dict(getattr(commit, "after", None))
+162:         commit_details: dict[str, Any] = {}
+163:         if before is not None:
+164:             commit_details["before"] = before
+165:         if after is not None:
+166:             commit_details["after"] = after
+167:         if commit_details:
+168:             details["commit"] = commit_details
+169:     return details
+170: 
+171: 
+172: def _credential_binding_details(exc: BaseException) -> dict[str, Any] | None:
+173:     """Extract public mapped-binding evidence from an explicit causal chain."""
+174:     seen: set[int] = set()
+175:     current: BaseException | None = exc
+176:     for _ in range(3):
+177:         if current is None or id(current) in seen:
+178:             return None
+179:         seen.add(id(current))
+180:         if isinstance(current, CredentialBindingRefused):
+181:             result: dict[str, Any] = {"reason": current.reason}
+182:             request = current.request
+183:             if request is not None:
+184:                 result["request"] = {
+185:                     "namespace": request.namespace,
+186:                     "observer": request.observer,
+187:                     "domain": request.domain.value,
+188:                     "purpose": request.purpose.value,
+189:                 }
+190:             if current.captured_head is not None:
+191:                 head = _head_dict(current.captured_head)
+192:                 if head is not None:
+193:                     result["captured_head"] = head
+194:             if current.use_position is not None:
+195:                 result["use_position"] = current.use_position
+196:             binding = current.evidence
+197:             if binding is not None:
+198:                 # A malformed provider response can be the reason for refusal.
+199:                 # Do not serialize arbitrary objects retained as that evidence.
+200:                 result["binding"] = {
+201:                     name: value if isinstance(value, str) else None
+202:                     for name in ("key_ref", "algorithm", "public_key", "provenance")
+203:                     for value in (getattr(binding, name, None),)
+204:                 }
+205:             return result
+206:         current = _causal_exception(current)
+207:     return None
+208: 
+209: 
+210: def _causal_exception(exc: BaseException) -> BaseException | None:
+211:     cause = getattr(exc, "cause", None)
+212:     if isinstance(cause, BaseException):
+213:         return cause
+214:     return exc.__cause__ if isinstance(exc.__cause__, BaseException) else None
+215: 
+216: 
+217: def _cause_details(exc: BaseException) -> dict[str, Any] | None:
+218:     """Two explicit causal nodes, never implicit context or record bodies."""
+219:     seen = {id(exc)}
+220:     result: dict[str, Any] | None = None
+221:     parent: dict[str, Any] | None = None
+222:     for _ in range(2):
+223:         cause = _causal_exception(exc)
+224:         if cause is None or id(cause) in seen:
+225:             break
+226:         seen.add(id(cause))
+227:         try:
+228:             message = str(cause)
+229:         except Exception:
+230:             message = "<message unavailable>"
+231:         node: dict[str, Any] = {
+232:             "type": type(cause).__name__,
+233:             "message": message[:512],
+234:             "details": _identity_details(cause),
+235:         }
+236:         if len(message) > 512:
+237:             node["truncated"] = True
+238:         if parent is None:
+239:             result = node
+240:         else:
+241:             parent["cause"] = node
+242:         parent = node
+243:         exc = cause
+244:     return result
+245: 
+246: 
+247: def _evidence_details(exc: BaseException, details: Mapping[str, Any]) -> dict[str, Any] | None:
+248:     """Expose coordinator proofs without deriving effects from error classes."""
+249:     evidence: dict[str, Any] = {}
+250:     phase = getattr(exc, "coordinator_phase", None)
+251:     if isinstance(phase, str):
+252:         evidence["phase"] = phase
+253:     effects = getattr(exc, "effects", None)
+254:     if isinstance(effects, Mapping):
+255:         safe_effects = {}
+256:         for resource in ("custody", "witness", "derived", "cache", "artifact", "dispatch"):
+257:             effect = effects.get(resource)
+258:             if not isinstance(effect, Mapping):
+259:                 continue
+260:             state = effect.get("state")
+261:             attempt = effect.get("attempt")
+262:             if state not in (
+263:                 "not-attempted", "known-none", "committed", "unknown", "completed", "incomplete"
+264:             ):
+265:                 continue
+266:             if attempt == "not-entered" and state != "not-attempted":
+267:                 continue
+268:             if attempt == "entered" and state == "not-attempted":
+269:                 continue
+270:             safe_effect = {"state": state}
+271:             if attempt in ("not-entered", "entered"):
+272:                 safe_effect["attempt"] = attempt
+273:             safe_effects[resource] = safe_effect
+274:         if safe_effects:
+275:             evidence["effects"] = safe_effects
+276:     cause = _cause_details(exc)
+277:     if cause is not None:
+278:         evidence["cause"] = cause
+279:     if not evidence:
+280:         return None
+281:     evidence["schema"] = "loops.sdk/evidence/v1"
+282:     basis_fields = (
+283:         "head", "captured_head", "presented", "target", "projected_before", "projected_head",
+284:         "observed_after", "coverage_before", "coverage_after", "fields_hash", "view_generation",
+285:     )
+286:     identity_fields = (
+287:         "fact_id", "tick_id", "fact_ids", "tick_ids", "items", "item_index", "tier_index",
+288:         "ordinal", "observer", "kind", "vertex", "lineage", "commit",
+289:     )
+290:     basis = {name: details[name] for name in basis_fields if name in details}
+291:     identities = {name: details[name] for name in identity_fields if name in details}
+292:     if basis:
+293:         evidence["basis"] = basis
+294:     if identities:
+295:         evidence["identities"] = identities
+296:     return evidence
+297: 
+298: 
+299: def _context_detail(name: str, value: Any) -> Any:
+300:     """Serialize only stable identity fields supplied by an SDK operation."""
+301:     if name in {"fact_ids", "tick_ids"}:
+302:         return [_json_value(item) for item in value]
+303:     if name == "items":
+304:         return [
+305:             {
+306:                 "fact_id": _json_value(item.fact_id),
+307:                 "tick_id": _json_value(item.tick_id),
+308:                 "tick_name": _json_value(item.tick_name),
+309:                 "already_present": bool(item.already_present),
+310:             }
+311:             for item in value
+312:         ]
+313:     head = _head_dict(value)
+314:     return head if head is not None else _json_value(value)
+315: 
+316: 
+317: class ArrivalRefusal(SdkError):
+318:     """A typed, non-committing Arrival diagnostic refusal."""
+319: 
+320:     def __init__(self, message: str, *, source_type: str, details: Mapping[str, Any]) -> None:
+321:         super().__init__(message)
+322:         self.source_type = source_type
+323:         self.details = dict(details)
+324: 
+325:     def as_dict(self) -> dict[str, Any]:
+326:         return {
+327:             "schema": "loops.sdk/error/v1",
+328:             "type": type(self).__name__,
+329:             "message": str(self),
+330:             "source_type": self.source_type,
+331:             "outcome": "refused",
+332:             "details": dict(self.details),
+333:         }
+334: 
+335: 
+336: class AdmissionRefusal(AdmissionFailed):
+337:     """An engine admission refusal retaining its source and diagnostics."""
+338: 
+339:     def __init__(
+340:         self,
+341:         message: str,
+342:         *,
+343:         source_type: str,
+344:         details: Mapping[str, Any],
+345:         observer: str | None = None,
+346:         kind: str | None = None,
+347:         vertex: str | None = None,
+348:     ) -> None:
+349:         super().__init__(message, observer=observer, kind=kind, vertex=vertex)
+350:         self.source_type = source_type
+351:         self.details = dict(details)
+352: 
+353:     def as_dict(self) -> dict[str, Any]:
+354:         return {
+355:             "schema": "loops.sdk/error/v1",
+356:             "type": type(self).__name__,
+357:             "message": str(self),
+358:             "source_type": self.source_type,
+359:             "outcome": "admission-refused",
+360:             "details": dict(self.details),
+361:         }
+362: 
+363: 
+364: class CommittedOutcome(SdkError):
+365:     """A durable or possibly durable operation with explicit reconciliation evidence."""
+366: 
+367:     outcome = "committed"
+368: 
+369:     def __init__(self, message: str, *, source_type: str, details: Mapping[str, Any]) -> None:
+370:         super().__init__(message)
+371:         self.source_type = source_type
+372:         self.details = dict(details)
+373: 
+374:     def as_dict(self) -> dict[str, Any]:
+375:         return {
+376:             "schema": "loops.sdk/error/v1",
+377:             "type": type(self).__name__,
+378:             "message": str(self),
+379:             "source_type": self.source_type,
+380:             "outcome": self.outcome,
+381:             "details": dict(self.details),
+382:         }
+383: 
+384: 
+385: class CommittedOutcomeUnknown(CommittedOutcome):
+386:     """The append outcome is unknown; reconcile before retrying."""
+387: 
+388:     outcome = "unknown"
+389: 
+390: 
+391: class CommittedUnwitnessed(CommittedOutcome):
+392:     """Custody committed, but witnessing failed."""
+393: 
+394:     outcome = "committed-unwitnessed"
+395: 
+396: 
+397: class CommittedProjectionFailed(CommittedOutcome):
+398:     """Custody committed, but post-commit projection publication failed."""
+399: 
+400:     outcome = "committed-projection-failed"
+401: 
+402: 
+403: class CommittedIncomplete(CommittedOutcome):
+404:     """A known commit exists while a later initialization phase is incomplete."""
+405: 
+406:     outcome = "committed-incomplete"
+407: 
+408: 
+409: class ProjectionOutcomeUnknown(SdkError):
+410:     """Projection maintenance may have changed derived state; reconcile it."""
+411: 
+412:     outcome = "projection-unknown"
+413: 
+414:     def __init__(self, message: str, *, source_type: str, details: Mapping[str, Any]) -> None:
+415:         super().__init__(message)
+416:         self.source_type = source_type
+417:         self.details = dict(details)
+418: 
+419:     def as_dict(self) -> dict[str, Any]:
+420:         return {
+421:             "schema": "loops.sdk/error/v1",
+422:             "type": type(self).__name__,
+423:             "message": str(self),
+424:             "source_type": self.source_type,
+425:             "outcome": self.outcome,
+426:             "details": dict(self.details),
+427:         }
+428: 
+429: 
+430: def normalize_exception(
+431:     exc: BaseException, *, context: Mapping[str, Any] | None = None
+432: ) -> BaseException:
+433:     """Return a stable SDK exception for engine boundary failures.
+434: 
+435:     Existing SDK errors are returned unchanged.  Classification is by the
+436:     engine's public exception types, never by message text.
+437:     """
+438:     if not isinstance(exc, Exception) or isinstance(exc, SdkError):
+439:         return exc
+440:     details = _identity_details(exc)
+441:     context_fields = {
+442:         "captured_head",
+443:         "fact_id",
+444:         "tick_id",
+445:         "fact_ids",
+446:         "tick_ids",
+447:         "items",
+448:         "item_index",
+449:     }
+450:     for name, value in (context or {}).items():
+451:         if name in details or name not in context_fields:
+452:             continue
+453:         coordinate = _context_detail(name, value)
+454:         if coordinate is not None or value is None:
+455:             details[name] = coordinate
+456:     details["source_type"] = type(exc).__name__
+457:     credential = _credential_binding_details(exc)
+458:     if credential is not None:
+459:         details["credential_binding"] = credential
+460:     evidence = _evidence_details(exc, details)
+461:     if evidence is not None:
+462:         details["evidence"] = evidence
+463:     if isinstance(exc, (BatchWriteCommitUnknown, WriteCommitUnknown)):
+464:         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+465:     if isinstance(exc, InitializationOutcomeUnknown):
+466:         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+467:     if isinstance(exc, (DeclarationOutcomeUnknown, RestoreForwardUnknown)):
+468:         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+469:     if isinstance(exc, InitializationUnwitnessed):
+470:         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
+471:     if isinstance(exc, DeclarationUnwitnessed):
+472:         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
+473:     if isinstance(exc, InitializationCommittedIncomplete):
+474:         return CommittedIncomplete(str(exc), source_type=type(exc).__name__, details=details)
+475:     if isinstance(exc, (DeclarationCommittedIncomplete, RestoreForwardIncomplete)):
+476:         return CommittedIncomplete(str(exc), source_type=type(exc).__name__, details=details)
+477:     if isinstance(exc, NotWitnessed):
+478:         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
+479:     if isinstance(exc, DeclarationStale):
+480:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+481:     if isinstance(exc, BatchPostCommitProjectionFailed):
+482:         return CommittedProjectionFailed(str(exc), source_type=type(exc).__name__, details=details)
+483:     if isinstance(exc, PostCommitProjectionFailed):
+484:         return CommittedProjectionFailed(str(exc), source_type=type(exc).__name__, details=details)
+485:     if isinstance(exc, ProjectionSyncError):
+486:         return ProjectionOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+487:     if isinstance(exc, SearchIndexSyncError):
+488:         return ProjectionOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
+489:     if isinstance(exc, BatchWritePreparationRefused):
+490:         fact = exc.item.fact
+491:         if exc.item.fact_id is not None:
+492:             details.setdefault("fact_id", exc.item.fact_id)
+493:         details.setdefault("observer", fact.observer)
+494:         details.setdefault("kind", fact.kind)
+495:         details.setdefault("vertex", exc.effective_declaration.name)
+496:         if exc.admission_refused:
+497:             return AdmissionRefusal(
+498:                 str(exc),
+499:                 source_type=type(exc).__name__,
+500:                 details=details,
+501:                 observer=fact.observer,
+502:                 kind=fact.kind,
+503:                 vertex=exc.effective_declaration.name,
+504:             )
+505:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+506:     if isinstance(exc, AdmissionError):
+507:         return AdmissionRefusal(
+508:             str(exc),
+509:             source_type=type(exc).__name__,
+510:             details=details,
+511:             observer=getattr(exc, "observer", None),
+512:             kind=getattr(exc, "kind", None),
+513:             vertex=getattr(exc, "vertex", None),
+514:         )
+515:     if isinstance(exc, CredentialBindingRefused):
+516:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+517:     if isinstance(
+518:         exc,
+519:         (
+520:             AttestationRefusal,
+521:             ContractRefusal,
+522:             ArrivalError,
+523:             RuntimeWriteRefused,
+524:         ),
+525:     ):
+526:         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
+527:     return exc
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/validation-evidence/focused-pytest.log =====
+1: .................................................                        [100%]
+2: 49 passed in 1.13s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/validation-evidence/ruff.log =====
+1: All checks passed!
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/validation-evidence/sdk-full.txt =====
+1: ........................................................................ [ 12%]
+2: ........................................................................ [ 24%]
+3: ........................................................................ [ 37%]
+4: ........................................................................ [ 49%]
+5: ........................................................................ [ 62%]
+6: ........................................................................ [ 74%]
+7: ........................................................................ [ 86%]
+8: ........................................................................ [ 99%]
+9: ....                                                                     [100%]
+10: 580 passed in 21.79s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/validation-evidence/architecture-full.txt =====
+1: ........................................................................ [ 71%]
+2: .............................                                            [100%]
+3: 101 passed in 6.20s
+
+===== FULL PRODUCTION / TEST PATCH =====
+diff --git a/libs/sdk/README.md b/libs/sdk/README.md
+index 9d364848..eba88131 100644
+--- a/libs/sdk/README.md
++++ b/libs/sdk/README.md
+@@ -248,6 +248,32 @@ equal observer labels alone never select another namespace's key.
+ See [custody binding recovery](../custody/README.md#explicit-mapped-bindings)
+ for interruption handling and filesystem scope.
+ 
++### Recovering an interrupted mapped declaration edit
++
++An edit can raise `CommittedIncomplete` after its declaration records are
++durable but before projection synchronization or local cache publication
++finishes. Its public `details["intent_path"]` identifies the retained recovery
++intent. Use it before deciding whether to retry the proposal:
++
++```python
++from sdk import CommittedIncomplete, edit_declaration, recover_declaration
++
++try:
++    edit_declaration(vertex, proposal, observer="alice", credentials=credentials)
++except CommittedIncomplete as outcome:
++    recovered = recover_declaration(outcome.details["intent_path"])
++```
++
++Recovery reconciles the exact retained suffix, synchronizes the projection,
++and publishes the retained declaration bytes without re-signing or appending
++the proposal again. A recovery result has no original `Commit`; its basis is
++the original captured edit basis. Follow it with `inspect_declaration(vertex)`
++to obtain a fresh effective-declaration/read basis, and use
++`verify_target(vertex)` when the bounded `Full` hash-chain claim is needed.
++The [mapped declaration recovery workload](tests/test_arrival_declaration_recovery_workload.py)
++uses a deterministic injected `after-append` interruption beneath the public
++SDK edit call; it is not a process-kill or crash-survival test.
++
+ Supported Arrival execution reserves the vertex name from its loop names.
+ Every exact name collision refuses, including passive loops, reset/carry loops,
+ and count- or event-triggered boundaries. The runtime also adds an implicit
+diff --git a/libs/sdk/tests/test_arrival_declaration_recovery_workload.py b/libs/sdk/tests/test_arrival_declaration_recovery_workload.py
+new file mode 100644
+index 00000000..de078e4c
+--- /dev/null
++++ b/libs/sdk/tests/test_arrival_declaration_recovery_workload.py
+@@ -0,0 +1,306 @@
++"""Public mapped-custody conformance for interrupted declaration recovery."""
++
++from __future__ import annotations
++
++import json
++from dataclasses import asdict
++from pathlib import Path
++
++import pytest
++from engine import arrival_declarations
++from engine.arrival_contract import ProjectionBehind
++
++from sdk import (
++    AdmissionFailed,
++    ArrivalRefusal,
++    CommittedIncomplete,
++    CustodyCredentialProvider,
++    MappedCredentialProvider,
++    edit_declaration,
++    emit_fact,
++    init_vertex,
++    inspect_declaration,
++    read_facts,
++    recover_declaration,
++    verify_target,
++)
++
++
++@pytest.fixture(autouse=True)
++def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
++
++
++def _add_note_kind(declaration: str, *, collect_limit: int = 10) -> str:
++    item = (
++        "  item {\n"
++        "    fold {\n"
++        '      items "collect" 100\n'
++        "    }\n"
++        "  }\n"
++    )
++    note = (
++        "  note {\n"
++        "    fold {\n"
++        f'      items "collect" {collect_limit}\n'
++        "    }\n"
++        "  }\n"
++    )
++    assert declaration.count(item) == 1
++    return declaration.replace(item, item + note)
++
++
++def test_mapped_declaration_recovery_restores_inspection_and_writes(
++    tmp_path: Path,
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    provider = MappedCredentialProvider(
++        tmp_path / "custody",
++        namespace="recovery-tenant",
++        receipt_observer="alice",
++    )
++    provider.create_binding("alice", token="create-alice")
++    vertex = tmp_path / "workflow.vertex"
++    initialized = init_vertex(
++        vertex,
++        name="workflow",
++        store_type="arrival",
++        location=(tmp_path / "data" / "workflow.arrival").resolve(),
++        observer="alice",
++        strict=True,
++        credentials=provider,
++    )
++    assert initialized.lineage is not None
++    proposed = _add_note_kind(vertex.read_text(encoding="utf-8"))
++    original_cache = vertex.read_bytes()
++    baseline_inspection = inspect_declaration(vertex)
++    assert baseline_inspection.basis is not None
++    assert baseline_inspection.store == initialized.store
++    assert baseline_inspection.local_status == "matches-effective"
++    assert baseline_inspection.declared_kinds == ["item"]
++    baseline_basis = asdict(baseline_inspection.basis)
++    baseline_internal = read_facts(
++        vertex,
++        include_internal=True,
++        limit=20,
++        order="oldest",
++    )
++    baseline_ids = [item["id"] for item in baseline_internal.items]
++    initial_verification = verify_target(vertex)
++    assert initial_verification.claims == (
++        "grammar",
++        "density",
++        "lineage",
++        "hash-chain",
++    )
++    assert initial_verification.excludes == (
++        "signature-authorship",
++        "external-key-trust",
++        "projection",
++    )
++    before_edit = initial_verification.verified_through
++    assert before_edit is not None
++    with pytest.raises(AdmissionFailed) as undeclared:
++        emit_fact(
++            vertex,
++            "note",
++            {"text": "before declaration"},
++            observer="alice",
++            origin="recovery-workflow",
++            ts=9.0,
++            id_override="note-before-declaration",
++            credentials=provider,
++        )
++    assert undeclared.value.observer == "alice"
++    assert undeclared.value.kind == "note"
++    assert verify_target(vertex).verified_through == before_edit
++
++    original_apply = arrival_declarations.apply_declaration_edit
++
++    def interrupt_after_append(registry, plan):
++        def fail(phase: str) -> None:
++            if phase == "after-append":
++                raise OSError("injected declaration publication interruption")
++
++        return original_apply(registry, plan, failure_hook=fail)
++
++    monkeypatch.setattr(
++        arrival_declarations,
++        "apply_declaration_edit",
++        interrupt_after_append,
++    )
++    with pytest.raises(CommittedIncomplete) as interrupted:
++        edit_declaration(
++            vertex,
++            proposed,
++            observer="alice",
++            credentials=provider,
++        )
++
++    failure = interrupted.value
++    encoded_failure = failure.as_dict()
++    json.dumps(encoded_failure, allow_nan=False)
++    assert encoded_failure["outcome"] == "committed-incomplete"
++    assert failure.source_type == "DeclarationCommittedIncomplete"
++    assert failure.details["phase"] == "appended"
++    assert failure.details["commit"]["before"] == {
++        "lineage": before_edit.lineage,
++        "ordinal": before_edit.ordinal,
++        "record_hash": before_edit.record_hash,
++    }
++    durable_head = failure.details["commit"]["after"]
++    assert durable_head["lineage"] == before_edit.lineage
++    assert durable_head["ordinal"] > before_edit.ordinal
++    assert failure.details["head"] == durable_head
++    assert failure.details["fact_ids"]
++    intent = Path(failure.details["intent_path"])
++    assert intent.exists()
++    assert vertex.read_bytes() == original_cache
++    assert verify_target(vertex).as_dict()["verified_through"] == durable_head
++
++    with pytest.raises(ProjectionBehind):
++        inspect_declaration(vertex)
++
++    with pytest.raises(ArrivalRefusal) as pending:
++        edit_declaration(
++            vertex,
++            _add_note_kind(
++                vertex.read_text(encoding="utf-8"),
++                collect_limit=11,
++            ),
++            observer="alice",
++            credentials=provider,
++        )
++    assert pending.value.source_type == "DeclarationPreparationRefused"
++    pending_evidence = pending.value.details["evidence"]
++    assert pending_evidence["phase"] == "prepare"
++    assert pending_evidence["effects"]["custody"] == {
++        "state": "not-attempted",
++        "attempt": "not-entered",
++    }
++    assert pending_evidence["cause"]["type"] == "ProjectionBehind"
++    assert pending_evidence["basis"]["captured_head"] == durable_head
++    assert intent.exists()
++    assert verify_target(vertex).as_dict()["verified_through"] == durable_head
++
++    with monkeypatch.context() as recovery_poison:
++        recovery_poison.setattr(
++            MappedCredentialProvider,
++            "resolve",
++            lambda *_args, **_kwargs: pytest.fail(
++                "declaration recovery resolved mapped signing credentials"
++            ),
++        )
++        recovery_poison.setattr(
++            CustodyCredentialProvider,
++            "for_write",
++            lambda *_args, **_kwargs: pytest.fail(
++                "declaration recovery acquired legacy signing credentials"
++            ),
++        )
++        recovered = recover_declaration(intent)
++    assert recovered.status == "recovered"
++    assert recovered.phase == "published"
++    assert recovered.commit is None
++    assert recovered.changes is None
++    assert recovered.file_written is True
++    assert recovered.head == durable_head
++    assert recovered.captured_head == failure.details["commit"]["before"]
++    assert recovered.basis == baseline_basis
++    assert recovered.fact_ids == tuple(failure.details["fact_ids"])
++    assert not intent.exists()
++    assert vertex.read_text(encoding="utf-8") == proposed
++    assert verify_target(vertex).as_dict()["verified_through"] == durable_head
++    json.dumps(recovered.as_dict(), allow_nan=False)
++
++    recovered_internal = read_facts(
++        vertex,
++        include_internal=True,
++        limit=20,
++        order="oldest",
++    )
++    recovered_ids = [item["id"] for item in recovered_internal.items]
++    assert recovered_ids[: len(baseline_ids)] == baseline_ids
++    assert all(recovered_ids.count(fact_id) == 1 for fact_id in recovered.fact_ids)
++    recovered_rows = [
++        item for item in recovered_internal.items if item["id"] in recovered.fact_ids
++    ]
++    assert len(recovered_rows) == len(recovered.fact_ids)
++    note_declarations = [
++        item
++        for item in recovered_rows
++        if item["kind"] == "_decl.kind-defined"
++        and item["payload"]["subject"] == "note"
++    ]
++    assert len(note_declarations) == 1
++
++    inspection = inspect_declaration(vertex)
++    assert inspection.read_path == "arrival"
++    assert inspection.syntax_valid is True
++    assert inspection.status == inspection.effective_status == "store"
++    assert inspection.local_status == "matches-effective"
++    assert inspection.declared_kinds == ["item", "note"]
++    assert inspection.basis is not None
++    assert inspection.basis.lineage == initialized.lineage
++    assert inspection.basis.captured_head == inspection.basis.projected_through
++    assert inspection.basis.captured_head.ordinal == durable_head["ordinal"]
++    assert inspection.basis.captured_head.record_hash == durable_head["record_hash"]
++    json.dumps(inspection.as_dict(), allow_nan=False)
++
++    monkeypatch.setattr(
++        arrival_declarations,
++        "apply_declaration_edit",
++        original_apply,
++    )
++    repeated = edit_declaration(
++        vertex,
++        proposed,
++        observer="alice",
++        credentials=provider,
++    )
++    assert repeated.status == "noop"
++    assert repeated.phase == "noop"
++    assert repeated.commit is None
++    assert repeated.file_written is False
++    assert verify_target(vertex).as_dict()["verified_through"] == durable_head
++
++    reopened_provider = MappedCredentialProvider(
++        tmp_path / "custody",
++        namespace="recovery-tenant",
++        receipt_observer="alice",
++    )
++    continued = emit_fact(
++        vertex,
++        "note",
++        {"text": "after recovery"},
++        observer="alice",
++        origin="recovery-workflow",
++        ts=20.0,
++        id_override="note-after-recovery",
++        credentials=reopened_provider,
++    )
++    assert continued.stored is True
++    assert continued.signed is True
++    assert continued.commit is not None
++    assert continued.commit.before.ordinal == durable_head["ordinal"]
++    assert continued.commit.before.record_hash == durable_head["record_hash"]
++    assert continued.commit.after.lineage == initialized.lineage
++    assert continued.commit.after.ordinal > continued.commit.before.ordinal
++    assert continued.witnessed is True
++    assert continued.projection == "synced"
++
++    page = read_facts(vertex, kind="note", limit=10, order="oldest")
++    assert page.basis is not None
++    assert page.basis.lineage == initialized.lineage
++    assert page.basis.captured_head == continued.commit.after
++    assert page.basis.projected_through == page.basis.captured_head
++    assert [(item["id"], item["observer"], item["payload"]) for item in page.items] == [
++        ("note-after-recovery", "alice", {"text": "after recovery"})
++    ]
++    verified = verify_target(vertex)
++    assert verified.captured_head == continued.commit.after
++    assert verified.verified_through == page.basis.captured_head
++    assert verified.claims == initial_verification.claims
++    assert verified.excludes == initial_verification.excludes
+

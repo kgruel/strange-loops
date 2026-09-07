@@ -1,0 +1,5 @@
+# All commands ran in /Users/kaygee/Code/loops-wt/arrival-finish with uv --no-sync.
+XDG_STATE_HOME=$RUN/state-sdk XDG_CONFIG_HOME=$RUN/config-sdk LOOPS_HOME=$RUN/loops-sdk uv run --no-sync --package sdk pytest libs/sdk/tests -q
+XDG_STATE_HOME=$RUN/state-arch XDG_CONFIG_HOME=$RUN/config-arch LOOPS_HOME=$RUN/loops-arch uv run --no-sync pytest tests/architecture -q
+XDG_STATE_HOME=$RUN/state-ruff XDG_CONFIG_HOME=$RUN/config-ruff LOOPS_HOME=$RUN/loops-ruff uv run --no-sync --package sdk ruff check libs/sdk/tests/test_arrival_declaration_recovery_workload.py
+git diff --check

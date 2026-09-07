@@ -1,0 +1,27 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06",
+  "due_at": "2026-09-07T01:03:56.629085+00:00",
+  "baseline": "2d4d2d0a",
+  "scope": "Public SDK declaration recovery conformance followup",
+  "jobs": [
+    {
+      "name": "followup",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/followup-prompt.txt",
+      "sha256": "0ad7ef2e13d27c80278255c66b8c923945e8ce23bf73e6a35d8a82f71b833a14",
+      "sources": {
+        "libs/sdk/tests/test_arrival_declaration_recovery_workload.py": "75260f0bdaad5a140f61bd04203934e33c7a63b0926ca87f28ae81515b8a4563",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/correction.patch": "d027dfc82f38dba5db84192a41f9cce1002e4127460222919cfaf6ddbcb67e29",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/final-findings.md": "57d166721ac198fc78ef11fa905f8c03d83936b9b173c572e654242fc2181323",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/primary-triage.md": "1936e4d9ab85b5c4389bc82817afafda1970edc148adf7341547549084195c91",
+        "libs/engine/src/engine/arrival_declarations.py": "8ba5e7a5b89485e2efd360790ada96eaeeea3e0ccc2fa24a42e6f8caf9f9402c",
+        "docs/scratch/arrival-break/sdk-conformance-declaration-recovery-2026-09-06.md": "bfce0e08ef57626293328ae07eee82fad6e8f40ac71a8e38cad0001adb7fe31f",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/validation-evidence/focused-pytest.log": "3e3f4b36479892181e3ca0d62dc9f53edf48f904afdb048ad3ebad20c6e37825",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-followup-2026-09-06/validation-evidence/ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      "status": "pending"
+    }
+  ]
+}

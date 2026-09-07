@@ -1,0 +1,16 @@
+{
+  "instruction": "You are the final adversarial reviewer for a bounded SDK workload-conformance slice. Use Fable 5.1 LOW. Static review only; no tools, execution, delegation or modifications. Return ACCEPT or REVISE, blockers with source locations/concrete false positives and smallest corrections, then optional findings. Do not infer validation you did not run.\nBaseline 2d4d2d0a. User-approved scope: mapped public declaration edit interrupted after durable append, recover using public intent, inspect, continue authorized writing. This is deterministic failure-hook integration coverage, not process-crash/durability proof or all recovery phases. No production change intended. Existing tests cover preappend/not-applied, cache-detach/publication failures, competing cache, and exact suffix validation.\nAssess executable assertions for causal specificity, durable commit vs cache/projection lag, no duplicate append, exact declaration fact identity, truthful original recovery basis vs fresh read basis, credential-free recovery vs authorized subsequent write, isolated fixtures, and docs claim boundaries. Full prefix verification does not verify signatures/key trust/projection consistency; explicit evidence comparisons and existing mapped signing tests are complementary. Do not demand C9 retirement or unrelated API expansion. Test logs are native execution evidence, not reviewer execution.\n",
+  "sources": [
+    "libs/sdk/tests/test_arrival_declaration_recovery_workload.py",
+    "libs/sdk/README.md",
+    "docs/scratch/arrival-break/sdk-conformance-declaration-recovery-2026-09-06.md",
+    "libs/engine/src/engine/arrival_declarations.py",
+    "libs/sdk/src/sdk/declare.py",
+    "libs/sdk/src/sdk/errors.py",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/validation-evidence/focused-pytest.log",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/validation-evidence/ruff.log",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/validation-evidence/sdk-full.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-declaration-recovery-final-2026-09-06/validation-evidence/architecture-full.txt"
+  ],
+  "patch": true
+}

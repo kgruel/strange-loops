@@ -248,6 +248,32 @@ equal observer labels alone never select another namespace's key.
 See [custody binding recovery](../custody/README.md#explicit-mapped-bindings)
 for interruption handling and filesystem scope.
 
+### Recovering an interrupted mapped declaration edit
+
+An edit can raise `CommittedIncomplete` after its declaration records are
+durable but before projection synchronization or local cache publication
+finishes. Its public `details["intent_path"]` identifies the retained recovery
+intent. Use it before deciding whether to retry the proposal:
+
+```python
+from sdk import CommittedIncomplete, edit_declaration, recover_declaration
+
+try:
+    edit_declaration(vertex, proposal, observer="alice", credentials=credentials)
+except CommittedIncomplete as outcome:
+    recovered = recover_declaration(outcome.details["intent_path"])
+```
+
+Recovery reconciles the exact retained suffix, synchronizes the projection,
+and publishes the retained declaration bytes without re-signing or appending
+the proposal again. A recovery result has no original `Commit`; its basis is
+the original captured edit basis. Follow it with `inspect_declaration(vertex)`
+to obtain a fresh effective-declaration/read basis, and use
+`verify_target(vertex)` when the bounded `Full` hash-chain claim is needed.
+The [mapped declaration recovery workload](tests/test_arrival_declaration_recovery_workload.py)
+uses a deterministic injected `after-append` interruption beneath the public
+SDK edit call; it is not a process-kill or crash-survival test.
+
 Supported Arrival execution reserves the vertex name from its loop names.
 Every exact name collision refuses, including passive loops, reset/carry loops,
 and count- or event-triggered boundaries. The runtime also adds an implicit

@@ -124,11 +124,20 @@ Legacy targets keep their existing behavior and do not consult the registry.
 
 `export_target("target.vertex", "snapshot.jsonl")` writes an exact captured
 wire prefix and returns its manifest, selected/captured heads and byte count.
-It refuses to replace an existing output. A late source failure publishes no
-partial artifact; a directory-sync failure after publication raises
-`ExportPublicationError` with `published=True` and the complete artifact's
-identity. Export requires no current query projection. Import and replication
-are still pending their explicit initialization/restoration boundary.
+`result.head` names the selected export prefix, while `result.captured_head`
+records the source head observed when export opened; they differ for a
+requested historical prefix. It refuses to replace an existing output. A late
+source failure publishes no partial artifact; a directory-sync failure after
+publication raises `ExportPublicationError` with `published=True` and the
+complete artifact's identity. Export requires no current query projection.
+
+Portable artifact import into an empty receiver remains separate.
+`restore_forward` is a live replication operation: it opens explicit source
+and receiver descriptors, rather than consuming an export artifact. Its
+receiver must already be an exact source prefix. A selected historical prefix
+below the locally witnessed source head refuses with `HeadRollback` before any
+receiver append. Restore leaves the receiver projection unchanged; use
+`sync_target` before a projection-backed read.
 
 ---
 

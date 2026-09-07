@@ -1,0 +1,1853 @@
+You are the final adversarial reviewer for a bounded public SDK workload-conformance slice. Use Fable 5.1 LOW. Static review only; no tools, execution, delegation or modifications. Return ACCEPT or REVISE, blockers with source locations, concrete false positives and smallest corrections, then optional findings. Do not infer validation you did not run.
+Baseline 3152e810. Scope: captured-prefix export → restore forward → verify → explicit sync → read. Public mapped initialization/emission establish a source and a preexisting replica fixture. Source advances beyond selected S before historical export; export captured head differs from selected artifact head, and exact retained bytes exclude later observations. Historical selected restore below locally witnessed latest head MUST refuse HeadRollback before receiver append; current live-source restore then succeeds and includes later observations. Restore does not consume the export artifact; explicit receiver descriptor/initial exported-prefix setup is not a public import API. Empty receiver import remains separate work.
+Assess exact exported bytes/head/manifest/count and stable selected identity, causal specificity of old-prefix refusal and receiver preservation, full-head commit chain, restore-forward retention of prior history and descriptor role, successful structural verification while projection remains stale, refusal of CURRENT read without implicit repair, explicit sync before/target/after, exact complete receipt-order public rows and prior-row retention, no-op exact restore, strict JSON results and isolated fixtures. Full verifies grammar/density/lineage/hash chain, not signatures/key trust/projection. No production changes intended. This deterministic workflow does not claim concurrent/process-crash coverage; existing engine/SDK transfer/restore tests retain publication, CAS/stream, unknown receipt, committed-incomplete and projection contradiction coverage. Do not demand C9 retirement or unrelated scope expansion. Native logs are prior executed validation, not reviewer execution.
+
+
+===== libs/sdk/tests/test_arrival_transfer_workload.py =====
+1: """Public captured-prefix export and forward-restore conformance."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import json
+6: from pathlib import Path
+7: 
+8: import pytest
+9: from engine.arrival_contract import ProjectionBehind
+10: 
+11: from sdk import (
+12:     ArrivalRefusal,
+13:     MappedCredentialProvider,
+14:     emit_fact,
+15:     export_target,
+16:     init_vertex,
+17:     read_facts,
+18:     restore_forward,
+19:     sync_target,
+20:     verify_target,
+21: )
+22: 
+23: 
+24: @pytest.fixture(autouse=True)
+25: def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+26:     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+27:     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+28:     monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
+29: 
+30: 
+31: def test_captured_export_restore_floor_and_explicit_projection_sync(tmp_path: Path) -> None:
+32:     provider = MappedCredentialProvider(
+33:         tmp_path / "custody",
+34:         namespace="transfer-workload",
+35:         receipt_observer="alice",
+36:     )
+37:     provider.create_binding("alice", token="create-alice")
+38: 
+39:     source = tmp_path / "source.vertex"
+40:     source_store = (tmp_path / "source.arrival").resolve()
+41:     initialized = init_vertex(
+42:         source,
+43:         name="transfer-workload",
+44:         store_type="arrival",
+45:         location=source_store,
+46:         observer="alice",
+47:         strict=True,
+48:         credentials=provider,
+49:     )
+50:     initial_head = verify_target(source).verified_through
+51:     assert initial_head is not None
+52:     assert initialized.store is not None
+53:     assert initialized.store.role == "authority"
+54:     assert initialized.store.lineage == initial_head.lineage == initialized.lineage
+55: 
+56:     # There is no public artifact-import operation. Installing the exact
+57:     # genesis export and a replica descriptor is bounded fixture setup; every
+58:     # transfer, verification, synchronization, and read below uses the SDK.
+59:     receiver_store = (tmp_path / "receiver.arrival").resolve()
+60:     initial_export = export_target(source, receiver_store, through=initial_head)
+61:     assert initial_export.head == initial_export.captured_head == initial_head
+62:     receiver = tmp_path / "receiver.vertex"
+63:     receiver.write_text(
+64:         source.read_text()
+65:         .replace(str(source_store), str(receiver_store), 1)
+66:         .replace('role="authority"', 'role="replica"', 1)
+67:     )
+68:     receiver_descriptor = receiver.read_bytes()
+69:     initial_sync = sync_target(receiver)
+70:     assert initial_sync.target == initial_head
+71:     assert initial_sync.projected_after == initial_head
+72:     assert initial_sync.changed is True
+73:     initial_read = read_facts(receiver, limit=20, order="oldest")
+74:     assert initial_read.items == []
+75:     assert initial_read.truncated is False
+76:     assert initial_read.basis is not None
+77:     assert initial_read.basis.captured_head == initial_head
+78:     assert initial_read.basis.projected_through == initial_head
+79:     initial_internal = read_facts(
+80:         receiver, limit=20, order="oldest", include_internal=True
+81:     )
+82:     initial_internal_ids = [item["id"] for item in initial_internal.items]
+83:     assert initial_internal_ids
+84:     assert initial_internal.truncated is False
+85:     for result in (initial_export, initial_sync, initial_read, initial_internal):
+86:         json.dumps(result.as_dict(), allow_nan=False)
+87: 
+88:     selected = emit_fact(
+89:         source,
+90:         "item",
+91:         {"phase": "selected", "value": 1},
+92:         observer="alice",
+93:         origin="transfer-workload",
+94:         ts=10.0,
+95:         id_override="selected-item",
+96:         credentials=provider,
+97:     )
+98:     assert selected.commit is not None
+99:     assert selected.commit.before == initial_head
+100:     selected_head = selected.commit.after
+101:     selected_source_bytes = source_store.read_bytes()
+102:     later = emit_fact(
+103:         source,
+104:         "item",
+105:         {"phase": "later", "value": 2},
+106:         observer="alice",
+107:         origin="transfer-workload",
+108:         ts=11.0,
+109:         id_override="later-item",
+110:         credentials=provider,
+111:     )
+112:     assert later.commit is not None
+113:     assert later.commit.before == selected_head
+114:     current_head = later.commit.after
+115:     current_source_bytes = source_store.read_bytes()
+116:     assert selected_head.lineage == current_head.lineage == initial_head.lineage
+117:     assert initial_head.ordinal < selected_head.ordinal < current_head.ordinal
+118: 
+119:     retained_artifact = tmp_path / "selected-prefix.arrival"
+120:     retained = export_target(source, retained_artifact, through=selected_head)
+121:     retained_bytes = retained_artifact.read_bytes()
+122:     assert retained.captured_head == current_head
+123:     assert retained.head == selected_head
+124:     assert retained.manifest["lineage"] == selected_head.lineage
+125:     assert retained.manifest["through_ordinal"] == selected_head.ordinal
+126:     assert retained.manifest["through_record_hash"] == selected_head.record_hash
+127:     assert retained.manifest["count"] == selected_head.ordinal + 1
+128:     assert retained.byte_count == len(retained_bytes)
+129:     assert retained_bytes == selected_source_bytes
+130:     assert b"later-item" not in retained_bytes
+131:     assert retained_bytes != current_source_bytes
+132:     json.dumps(retained.as_dict(), allow_nan=False)
+133: 
+134:     receiver_before_refusal = receiver_store.read_bytes()
+135:     with pytest.raises(ArrivalRefusal) as rollback:
+136:         restore_forward(source, receiver, through=selected_head)
+137:     assert rollback.value.source_type == "HeadRollback"
+138:     json.dumps(rollback.value.as_dict(), allow_nan=False)
+139:     assert receiver_store.read_bytes() == receiver_before_refusal
+140:     assert retained_artifact.read_bytes() == retained_bytes
+141:     assert receiver.read_bytes() == receiver_descriptor
+142: 
+143:     restored = restore_forward(source, receiver)
+144:     assert restored.captured_head == current_head
+145:     assert restored.before == initial_head
+146:     assert restored.after == current_head
+147:     assert restored.commit is not None
+148:     assert restored.commit.before == restored.before
+149:     assert restored.commit.after == restored.after
+150:     assert restored.receiver_store.role == "replica"
+151:     assert receiver_store.read_bytes() == current_source_bytes
+152:     assert receiver_store.read_bytes().startswith(receiver_before_refusal)
+153:     assert receiver.read_bytes() == receiver_descriptor
+154:     json.dumps(restored.as_dict(), allow_nan=False)
+155: 
+156:     verified = verify_target(receiver)
+157:     assert verified.captured_head == current_head
+158:     assert verified.verified_through == current_head
+159:     assert verified.claims == ("grammar", "density", "lineage", "hash-chain")
+160:     assert verified.excludes == (
+161:         "signature-authorship",
+162:         "external-key-trust",
+163:         "projection",
+164:     )
+165: 
+166:     # Custody advanced, but restore deliberately did not mutate the derived
+167:     # projection. Reads refuse until the caller explicitly catches it up.
+168:     with pytest.raises(ProjectionBehind):
+169:         read_facts(receiver, limit=20, order="oldest")
+170: 
+171:     synced = sync_target(receiver)
+172:     assert synced.captured_head == current_head
+173:     assert synced.target == current_head
+174:     assert synced.projected_before == initial_head
+175:     assert synced.projected_after == current_head
+176:     assert synced.changed is True
+177:     assert synced.agreement is True
+178: 
+179:     receiver_read = read_facts(receiver, limit=20, order="oldest")
+180:     assert receiver_read.truncated is False
+181:     assert receiver_read.basis is not None
+182:     assert receiver_read.basis.captured_head == current_head
+183:     assert receiver_read.basis.projected_through == current_head
+184:     assert [
+185:         (item["id"], item["observer"], item["payload"])
+186:         for item in receiver_read.items
+187:     ] == [
+188:         ("selected-item", "alice", {"phase": "selected", "value": 1}),
+189:         ("later-item", "alice", {"phase": "later", "value": 2}),
+190:     ]
+191:     receiver_internal = read_facts(
+192:         receiver, limit=20, order="oldest", include_internal=True
+193:     )
+194:     assert receiver_internal.truncated is False
+195:     assert receiver_internal.items[: len(initial_internal.items)] == initial_internal.items
+196:     assert [item["id"] for item in receiver_internal.items] == [
+197:         *initial_internal_ids,
+198:         "selected-item",
+199:         "later-item",
+200:     ]
+201: 
+202:     source_read = read_facts(source, limit=20, order="oldest")
+203:     source_internal = read_facts(
+204:         source, limit=20, order="oldest", include_internal=True
+205:     )
+206:     assert source_read.items == receiver_read.items
+207:     assert source_read.basis == receiver_read.basis
+208:     assert source_internal.items == receiver_internal.items
+209:     assert source_internal.basis == receiver_internal.basis
+210:     receiver_before_noop = receiver_store.read_bytes()
+211:     repeated = restore_forward(source, receiver)
+212:     assert repeated.before == repeated.after == current_head
+213:     assert repeated.commit is None
+214:     assert receiver_store.read_bytes() == receiver_before_noop
+215:     assert receiver.read_bytes() == receiver_descriptor
+216:     for result in (
+217:         restored,
+218:         verified,
+219:         synced,
+220:         receiver_read,
+221:         receiver_internal,
+222:         source_read,
+223:         source_internal,
+224:         repeated,
+225:     ):
+226:         json.dumps(result.as_dict(), allow_nan=False)
+
+===== libs/sdk/README.md =====
+1: # sdk — Loops Apex Composition Library
+2: 
+3: `sdk` is the headless composition layer uniting `engine`, `custody`, `lang`, `store`, `atoms`, and `sign` into unified, typed operations. It serves as the single foundation for presentation layers (`apps/loops`, TUI, external agents, Python scripts) without leaking presentation logic into the core substrate.
+4: 
+5: ---
+6: 
+7: ## Architectural Guarantees
+8: 
+9: - **Zero Presentation Logic**: Returns pure typed dataclasses; never formats terminal escape codes or parses CLI flags.
+10: - **Descriptor-First Arrival Reads**: An explicitly declared backend and instance role select the adapter; store locations remain opaque to the SDK.
+11: - **Visible Legacy Boundary**: Bare `.jsonl`/SQLite inputs remain transitional and every read result labels its path as `legacy` with `basis=None`.
+12: - **Witness-Axis Honesty**: Fact listing and pagination use append-order cursors (`WitnessPosition`) ensuring deterministic, non-lossy walks.
+13: - **Declared Admission & Attestation**: Fact emission enforces declared observer and kind admission policies, signing with operation-fresh custody keys.
+14: - **AST-Verified Ceremonies**: Declarative vertex modifications are verified against the language grammar and executed via transactional plan/apply ceremonies.
+15: 
+16: ---
+17: 
+18: ## API Reference
+19: 
+20: ### 1. Target Resolution & Discovery
+21: 
+22: ```python
+23: from sdk import resolve_arrival_target, resolve_target, discover_targets, TargetInfo
+24: 
+25: # Supported Arrival target: the descriptor carries backend, opaque location,
+26: # optional lineage pin, and mandatory instance role.
+27: arrival = resolve_arrival_target("path/to/target.vertex")
+28: # -> ArrivalTarget(store=StoreDescriptorInfo(backend='file', location='...', role='replica'))
+29: 
+30: # Single target probe
+31: info = resolve_target("path/to/target.vertex")
+32: # -> TargetInfo(target_type='vertex', canonical_mode='sqlite', canonical_path=..., index_path=..., exists=True, ...)
+33: 
+34: # Multi-target workspace discovery
+35: targets = discover_targets(".", recursive=True)
+36: ```
+37: 
+38: - **`resolve_target(target: Path | str) -> TargetInfo`**:
+39:   Transitional filesystem probe for legacy targets. Raises `TargetNotFound` or `TargetUnsupported`.
+40: - **`resolve_arrival_target(target: Path | str) -> ArrivalTarget`**:
+41:   Parses an explicit vertex descriptor without probing or normalizing its backend-owned location. It refuses suffix inference and an omitted instance role.
+42: - **`discover_targets(root_path=".", *, recursive=True, include_bare=True) -> list[TargetInfo]`**:
+43:   Discovers all Loops vertices and bare stores in a directory tree.
+44: 
+45: ---
+46: 
+47: ### 2. Read Operations
+48: 
+49: ```python
+50: from sdk import (
+51:     read_summary,
+52:     read_facts,
+53:     read_state,
+54:     read_ticks,
+55:     read_fact_by_id,
+56:     search_facts,
+57:     resolve_entity,
+58:     read_timeline,
+59:     sync_target,
+60: )
+61: 
+62: # Target statistical summary & kind inventory
+63: summary = read_summary("target.vertex")
+64: # -> ReadSummary(read_path='arrival', basis=ReadBasis(...), store=StoreDescriptorInfo(...), ...)
+65: 
+66: # Bounded, cursor-bearing fact pagination
+67: page = read_facts("target.vertex", limit=10, order="newest")
+68: # -> FactPageResult(items=[...], next_cursor=..., truncated=True, order='newest')
+69: 
+70: # Arrival continuations are process-local capabilities. Pass next_cursor back
+71: # to read_facts() directly; as_dict() reports has_continuation=True and redacts
+72: # the engine value instead of emitting an unprotected wire token.
+73: 
+74: # Folded vertex state
+75: state = read_state("target.vertex", kind="note")
+76: # -> FoldStateResult(vertex_name='target', sections={'note': {'count': 10, 'items': [...]}})
+77: 
+78: # Full-text search across observation payloads
+79: search_res = search_facts("target.vertex", query="refactor auth", limit=10)
+80: # -> SearchResult(query='refactor auth', matches=[...], total_matches=1)
+81: 
+82: # Domain entity fold-key resolution
+83: fact_id = resolve_entity("target.vertex", kind="task", key="task_id", value="T-100")
+84: 
+85: # Interleaved chronological timeline (facts + ticks)
+86: timeline = read_timeline("target.vertex", limit=50)
+87: 
+88: # Explicit projection synchronization. Arrival sync first attests custody and
+89: # catches a missing or behind projection up through the captured head.
+90: sync_res = sync_target("target.vertex")
+91: # -> SyncResult(read_path='arrival', captured_head=..., target=...,
+92: #               projected_before=..., projected_after=..., changed=True, ...)
+93: 
+94: # Tick records
+95: ticks = read_ticks("target.vertex", name="default")
+96: for tick in ticks.items:
+97:     print(tick["name"])
+98: 
+99: # Fact lookup by full ID or prefix
+100: lookup = read_fact_by_id("target.vertex", "01M01...")
+101: fact = lookup.fact
+102: ```
+103: 
+104: `read_summary`, `read_facts`, `read_state`, `read_ticks`, and
+105: `read_fact_by_id` always return typed result models. Descriptor-first results
+106: carry the custody head and represented projection prefix in `basis`; legacy
+107: results carry `read_path="legacy"` and `basis=None`. Descriptor reads require a
+108: current projection and never materialize, repair, or catch it up. Search,
+109: entity resolution, and timelines carry the same captured basis. Aggregate
+110: state, summary and timeline results retain per-occurrence member bases rather
+111: than inventing one shared head. `sync_target` is the
+112: explicit maintenance boundary: it may catch up a missing or behind Arrival
+113: projection, while inconsistent existing state and rebuild requests refuse.
+114: 
+115: Arrival read operations, including `resolve_entity`, `read_timeline`, and
+116: `inspect_declaration`, accept an optional keyword-only `registry=` for custom
+117: `engine.arrival_registry.BackendRegistry` instances. Omission selects the
+118: built-in backends. A supplied registry handles every supported root and member
+119: Arrival open; unknown backends refuse without fallback, and non-file locations reach
+120: the named adapter unchanged. Timeline reuses its captured root when the
+121: effective declaration selects aggregation. Entity resolution and declaration
+122: inspection retain their current Arrival aggregate restrictions.
+123: Legacy targets keep their existing behavior and do not consult the registry.
+124: 
+125: `export_target("target.vertex", "snapshot.jsonl")` writes an exact captured
+126: wire prefix and returns its manifest, selected/captured heads and byte count.
+127: `result.head` names the selected export prefix, while `result.captured_head`
+128: records the source head observed when export opened; they differ for a
+129: requested historical prefix. It refuses to replace an existing output. A late
+130: source failure publishes no partial artifact; a directory-sync failure after
+131: publication raises `ExportPublicationError` with `published=True` and the
+132: complete artifact's identity. Export requires no current query projection.
+133: 
+134: Portable artifact import into an empty receiver remains separate.
+135: `restore_forward` is a live replication operation: it opens explicit source
+136: and receiver descriptors, rather than consuming an export artifact. Its
+137: receiver must already be an exact source prefix. A selected historical prefix
+138: below the locally witnessed source head refuses with `HeadRollback` before any
+139: receiver append. Restore leaves the receiver projection unchanged; use
+140: `sync_target` before a projection-backed read.
+141: 
+142: ---
+143: 
+144: ### 3. Fact Emission
+145: 
+146: ```python
+147: from sdk import BatchEmitResult, EmitReceipt, emit_batch, emit_fact, preview_emission
+148: from atoms import Fact
+149: 
+150: # Emitting by kind and payload
+151: receipt = emit_fact(
+152:     "target.vertex",
+153:     kind_or_fact="note",
+154:     payload={"title": "Meeting Notes", "body": "Discussed SDK API"},
+155:     observer="alice",
+156: )
+157: # Descriptor-first Arrival receipts carry the captured head, durable Commit,
+158: # witness state, and post-commit projection status.
+159: 
+160: # Or preflight dry-run simulation
+161: preview = preview_emission("target.vertex", "note", {"title": "Test"}, observer="alice")
+162: 
+163: # A descriptor-first batch is planned from one snapshot and uses one append.
+164: batch = emit_batch(
+165:     "target.vertex",
+166:     [fact, ("note", {"title": "Batch item"})],
+167:     observer="alice",
+168: )
+169: for receipt in batch.items:
+170:     print(receipt.id, receipt.stored)
+171: print(batch.commit, batch.atomicity, batch.projection)
+172: ```
+173: 
+174: - **`emit_fact(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, id_override=None, credentials=None, admit_undeclared=False, dry_run=False, registry=None) -> EmitReceipt`**:
+175:   Emits a fact (or `Fact` atom) under declared admission rules. Descriptor-first Arrival writes prepare from one CURRENT snapshot, append once against its captured full head, witness the commit, then explicitly synchronize the projection. Bypassing strict kind admission requires `admit_undeclared=True`. Deterministic IDs can be specified with `id_override`. `dry_run=True` simulates emission without storage.
+176: - **`preview_emission(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, admit_undeclared=False, credentials=None, registry=None) -> EmitPreviewResult`**:
+177:   Simulates emission against declared policies, checking fold key requirements without disk side effects. Arrival policy and fold metadata come from the same bounded effective declaration used for planning; a missing projection refuses without materializing it.
+178: - **`emit_batch(target, facts, *, observer=None, origin="", credentials=None, admit_undeclared=False, registry=None) -> BatchEmitResult`**:
+179:   Normalizes every item before resolving the target. A descriptor-first Arrival batch derives all per-item admission decisions from one current snapshot, appends the packed records under one head comparison, witnesses one shared commit, and explicitly synchronizes the projection. Each mapping item may set its own boolean `admit_undeclared`; duplicate receipts retain `stored=False`. Empty input is an explicit zero-write result. Legacy targets return the same wrapper with `atomic=False`, `atomicity="legacy-sequential"`, and no invented shared commit; `LegacyBatchPartialFailure` retains receipts if that sequential loop stops after an observable prefix.
+180: 
+181: `CustodyCredentialProvider()` and `CustodyCredentialProvider(key_dir=None)` use
+182: the existing custody resolver. A non-`None` `key_dir` now raises
+183: `SdkValueError` during construction because directory overrides were previously
+184: accepted but ignored. This applies before either Arrival or legacy operations
+185: can use the provider. Callers that need another credential source can continue
+186: to supply a custom `CredentialProvider`; that interface does not itself create
+187: an observer mapping or register public keys.
+188: 
+189: For an explicit persisted namespace, use `MappedCredentialProvider` with an
+190: Arrival target. Prepare the binding separately from initializing the store:
+191: 
+192: ```python
+193: from pathlib import Path
+194: from sdk import MappedCredentialProvider, init_vertex, emit_fact
+195: 
+196: credentials = MappedCredentialProvider(
+197:     Path("/absolute/path/to/private-custody"),
+198:     namespace="personal",
+199:     receipt_observer="alice",  # explicit local receipt-signing selection
+200: )
+201: binding = credentials.create_binding("alice", token="bootstrap-alice-1")
+202: init_vertex(
+203:     Path("observations.vertex"), store_type="arrival", observer="alice",
+204:     credentials=credentials,
+205: )
+206: emit_fact(
+207:     Path("observations.vertex"), "item", {"value": 1},
+208:     observer="alice", credentials=credentials,
+209: )
+210: ```
+211: 
+212: Mapped selection uses the exact namespace and observer, independently of the
+213: vertex filename or lineage. The engine checks author keys against verified
+214: history through captured H, for use after H, and verifies each signature in its
+215: own domain. Receipt signing uses the explicitly selected local observer and
+216: the effective declaration's current receipt-key policy; the unsigned outer tick
+217: still names the physical genesis custodian. Omitting `receipt_observer` permits
+218: unsigned ticks before the signed-tick era, and refuses a required signed tick.
+219: A missing author binding may remain unsigned where the existing policy allows;
+220: a contradictory or unauthorized binding refuses before append.
+221: 
+222: Mapped initialization only loads a pre-created binding. For another observer,
+223: prepare its binding and pass `key=binding.public_key` to `grant_observer` with
+224: the existing author's credentials. Mapped `grant_observer(key=None)` refuses
+225: before creating keys. Recovery of an existing Arrival initialization intent
+226: signs nothing and does not require private custody to remain available.
+227: Mapped providers are supported on Arrival targets; legacy writers explicitly
+228: refuse them. The default `CustodyCredentialProvider` remains unchanged.
+229: 
+230: The runnable [two-observer mapped workload](tests/test_arrival_mapped_workload.py)
+231: shows the complete public lifecycle: create Alice and Bob bindings under one
+232: persisted provider root and exact namespace; initialize with Alice; grant Bob
+233: using Bob's pre-created public key; then emit with both authors. For a locator
+234: move that keeps the same physical file-backed store, initialize with an
+235: **absolute** `location` and move only the `.vertex` file while retaining its
+236: store clause, lineage, and role. Recreate `MappedCredentialProvider` with the
+237: same provider root, namespace, and receipt observer before continuing work.
+238: The absolute store location keeps the same store residence, while
+239: mapped key selection comes only from the provider namespace and exact observer
+240: label; neither the vertex filename nor its new directory chooses a key.
+241: 
+242: After relocation, `verify_target(relocated_vertex)` provides a `Full`
+243: verification of the captured prefix's grammar, dense ordinals, lineage, and
+244: record-hash chain. It does not establish projection agreement, signature
+245: authorship, key trust, or the identity of an observer across lineages. The
+246: mapped workload exercises public writes with captured authorization; the
+247: [mapped signing tests](tests/test_arrival_mapped_credentials.py) separately
+248: verify domain-specific signatures and key-history behavior.
+249: 
+250: `import_legacy(vertex_path, observer, token=...)` explicitly copies a verified
+251: legacy key into managed storage without changing the original. It preserves
+252: flat/nested ambiguity and alias refusals. After import, locator moves do not
+253: change mapped selection. No read, preview, or signer load imports or creates a
+254: binding. `bind_existing_ref(observer, key_ref, expected_public_key, token=...)`
+255: permits deliberate reuse of a completed managed key in another namespace;
+256: equal observer labels alone never select another namespace's key.
+257: See [custody binding recovery](../custody/README.md#explicit-mapped-bindings)
+258: for interruption handling and filesystem scope.
+259: 
+260: ### Recovering an interrupted mapped declaration edit
+261: 
+262: An edit can raise `CommittedIncomplete` after its declaration records are
+263: durable but before projection synchronization or local cache publication
+264: finishes. Its public `details["intent_path"]` identifies the retained recovery
+265: intent. Use it before deciding whether to retry the proposal:
+266: 
+267: ```python
+268: from sdk import CommittedIncomplete, edit_declaration, recover_declaration
+269: 
+270: try:
+271:     edit_declaration(vertex, proposal, observer="alice", credentials=credentials)
+272: except CommittedIncomplete as outcome:
+273:     recovered = recover_declaration(outcome.details["intent_path"])
+274: ```
+275: 
+276: Recovery reconciles the exact retained suffix, synchronizes the projection,
+277: and publishes the retained declaration bytes without re-signing or appending
+278: the proposal again. A recovery result has no original `Commit`; its basis is
+279: the original captured edit basis. Follow it with `inspect_declaration(vertex)`
+280: to obtain a fresh effective-declaration/read basis, and use
+281: `verify_target(vertex)` when the bounded `Full` hash-chain claim is needed.
+282: The [mapped declaration recovery workload](tests/test_arrival_declaration_recovery_workload.py)
+283: uses a deterministic injected `after-append` interruption beneath the public
+284: SDK edit call; it is not a process-kill or crash-survival test.
+285: 
+286: Supported Arrival execution reserves the vertex name from its loop names.
+287: Every exact name collision refuses, including passive loops, reset/carry loops,
+288: and count- or event-triggered boundaries. The runtime also adds an implicit
+289: `cite` loop, so a vertex named `cite` cannot execute under this restriction.
+290: Runtime capture checks the historized effective declaration and expanded
+291: template loop names before hydration and planning; editing only the local cache
+292: cannot bypass it. New and proposed declarations check their declared loops and
+293: the implicit `cite` loop. The SDK initializer also refuses the name `item`,
+294: because its scaffold declares an `item` loop, before creating custody keys.
+295: External template sources are expanded and checked at runtime; declaration
+296: editing does not load them solely to enforce this rule.
+297: 
+298: This is an Arrival execution compatibility restriction. Existing histories
+299: remain available through evidence reads, declaration inspection and export.
+300: A collision-free declaration can be appended to correct an ambiguous current
+301: declaration; prior facts and ticks retain their original names and bytes.
+302: This does not establish which role an already-recorded ambiguous tick had;
+303: historical boundary continuity remains a separate limitation.
+304: Legacy runtime behavior and the wire format retain their existing rules.
+305: 
+306: ---
+307: 
+308: ### 4. Arrival Source Execution
+309: 
+310: ```python
+311: from sdk import run_sources
+312: 
+313: result = await run_sources("target.vertex", observer="alice", force=False)
+314: for tier in result.tiers:
+315:     print(tier.outcome, tier.commit, tier.fact_ids, tier.tick_ids)
+316: ```
+317: 
+318: - **`await run_sources(target, *, observer, force=False, credentials=None, registry=None, collector_factory=None, dispatcher=None, evaluated_at=None) -> SourceRunResult`**:
+319:   Captures a CURRENT Arrival Authority before collection, fixes cadence and dependency tiers, and commits each collected tier with one exact-head batch append plus explicit projection synchronization. The lifecycle observer is always explicit. Existing custody keys are loaded when present; the operation never creates keys.
+320: 
+321:   When the invocation finishes without a terminal failure, a source error returns `status="error"` with its yielded observations and error lifecycle fact durable. Interrupted results retain prior commits and distinguish `known_uncommitted` collection from an append whose durability is `unknown`; collectors are not rerun within the invocation. When `dispatcher` is omitted, captured tick run intents remain visible with `dispatch_status="not-requested"` and `attempted=False`. This operation supports explicit single-store Arrival Authority descriptors only and never falls through to legacy source execution.
+322: 
+323:   Coordinator failures during ID allocation, lifecycle construction, or otherwise successful collector cleanup return an incomplete result with terminal category `collection-failed`. `terminal.details.collection` contains the current tier's basis, `custody="not-attempted"`, completed siblings, and paired partial observations from failed or cancelled siblings. Incomplete attempts have no lifecycle fact; prior tiers keep their commits. These partial observations live in terminal evidence, not `known_uncommitted`, which describes a fully collected tier. Owned iterators and distinct iterable owners receive `aclose()` when available; caller cancellation propagates after sibling cleanup. Closing a collector does not undo its external effects or guarantee subprocess termination.
+324: 
+325:   Calling `run_sources` again is a fresh, cadence-based invocation with fresh
+326:   generated IDs; it is not a resume token for retained collector output. For
+327:   example, an upstream source can remain skipped by its persisted successful
+328:   cadence while a downstream source retries from its persisted trigger. A
+329:   downstream failure before yielding leaves no domain observation from that
+330:   collector attempt to repeat; it says nothing about its external effects. If
+331:   it yielded before reporting a `SourceError` and that tier has an actual
+332:   commit, the observation and error lifecycle are durable. A later fresh
+333:   invocation can collect the same logical observation again under a distinct
+334:   fact ID. Callers need a source-specific idempotency or reconciliation policy
+335:   for external effects and overlapping collected observations. The public
+336:   two-tier case is exercised in
+337:   [`tests/test_arrival_source_resumption_workload.py`](tests/test_arrival_source_resumption_workload.py).
+338: 
+339: ### 5. Declaration, Scaffolding & Ceremonies
+340: 
+341: ```python
+342: from sdk import (
+343:     init_vertex,
+344:     inspect_declaration,
+345:     add_kind,
+346:     edit_kind,
+347:     remove_kind,
+348:     grant_observer,
+349:     revoke_observer,
+350:     plan_kind_mutation,
+351:     recover_ceremony,
+352: )
+353: from lang.ast import LoopDef, FoldDecl, FoldCollect
+354: 
+355: # Scaffold a new vertex declaration
+356: init_res = init_vertex("target.vertex", name="my_app", store_type="sqlite")
+357: 
+358: # Deep structural inspection & syntax validation
+359: info = inspect_declaration("target.vertex")
+360: 
+361: # Plan declaration update (dry-run diff)
+362: plan = plan_kind_mutation("target.vertex", "add", "todo")
+363: 
+364: # Add new loop kind with default 'items collect 100'
+365: result = add_kind("target.vertex", "todo", observer="admin")
+366: 
+367: # Edit existing kind definition
+368: result = edit_kind(
+369:     "target.vertex",
+370:     "note",
+371:     LoopDef(folds=(FoldDecl("items", FoldCollect(50)),)),
+372:     observer="admin",
+373: )
+374: 
+375: # Remove kind definition
+376: result = remove_kind("target.vertex", "deprecated_kind", observer="admin")
+377: 
+378: # Manage observer admission grants
+379: grant_observer("target.vertex", "alice", grants=["todo", "note"], observer="admin")
+380: revoke_observer("target.vertex", "alice", observer="admin")
+381: 
+382: # Recover interrupted ceremony
+383: recovery = recover_ceremony("target.vertex.intent")
+384: ```
+385: 
+386: ---
+387: 
+388: ## Result Models
+389: 
+390: All models are frozen, immutable dataclasses providing `.as_dict()` conversion:
+391: 
+392: Arrival fact and tick items include receipt-order coordinates. Legacy items
+393: retain their established serialized fields; use `read_path`, `basis`, and
+394: `store` on the enclosing result to identify the source and read boundary.
+395: 
+396: | Model | Schema | Purpose |
+397: | :--- | :--- | :--- |
+398: | **`ArrivalTarget`** | `loops.sdk/arrival-target/v1` | Vertex path plus its serializable explicit store descriptor. |
+399: | **`InitVertexResult`** | `loops.sdk/init-vertex/v1` | Outcome of vertex scaffolding operation. |
+400: | **`DeclarationInspectionResult`** | `loops.sdk/declaration-inspection/v1` | Deep structural inspection of a `.vertex` file. |
+401: | **`DeclarationPlanResult`** | `loops.sdk/declaration-plan/v1` | Dry-run preview of a proposed declaration update. |
+402: | **`ReadSummary`** | `loops.sdk/read-summary/v2` | Basis-bearing inventory of facts, ticks, and kinds. |
+403: | **`FactPageResult`** | `loops.sdk/facts-page/v2` | Basis-bearing bounded page with continuation metadata. |
+404: | **`FactLookupResult`** | `loops.sdk/fact-lookup/v1` | Basis-bearing exact/prefix lookup; a miss retains its basis. |
+405: | **`TickReadResult`** | `loops.sdk/tick-read/v1` | Basis-bearing chronological tick records. |
+406: | **`FoldStateResult`** | `loops.sdk/fold-state/v2` | State folded from facts and declarations in one bounded snapshot. |
+407: | **`SearchResult`** | `loops.sdk/search-result/v1` | Full-text search matches, snippets, and rankings. |
+408: | **`TimelineResult`** | `loops.sdk/timeline-result/v1` | Interleaved chronological stream of facts and tick seals. |
+409: | **`SyncResult`** | `loops.sdk/sync-result/v2` | Legacy index status or Arrival captured/target/before/after projection basis. |
+410: | **`EmitReceipt`** | `loops.sdk/emit-receipt/v2` | Legacy receipt fields plus Arrival store, captured head, commit, witness, and projection outcome. |
+411: | **`SourceRunResult`** | `loops.sdk/source-run/v1` | Captured cadence, collected bodies, tier commits, and interrupted projection/dispatch evidence. |
+412: | **`EmitPreviewResult`** | `loops.sdk/emit-preview/v2` | Preflight admission/fold result with descriptor and captured-head provenance. |
+413: | **`KindMutationResult`** | `loops.sdk/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |
+414: 
+415: ---
+416: 
+417: ## Exception Taxonomy
+418: 
+419: ```mermaid
+420: graph TD
+421:     SdkError --> TargetError
+422:     TargetError --> TargetNotFound
+423:     TargetError --> TargetUnsupported
+424:     TargetError --> TargetNotWritable
+425:     SdkError --> AdmissionFailed
+426:     SdkError --> EmissionFailed
+427:     SdkError --> SdkValueError
+428:     SdkValueError --> InvalidEmissionRequest
+429:     EmissionFailed --> InvalidEmissionRequest
+430:     EmissionFailed --> CommittedEmissionError
+431:     SdkError --> CeremonyFailed
+432: ```
+433: 
+434: - **`SdkError`**: Base class for all high-level SDK exceptions.
+435: - **`SdkValueError`**: Base class for SDK parameter and validation errors (inherits from `ValueError`).
+436: - **`TargetNotFound`**: Target path does not exist on disk.
+437: - **`TargetUnsupported`**: Path exists but is not a recognized Loops artifact.
+438: - **`TargetNotWritable`**: Target or derived index cannot be written to.
+439: - **`AdmissionFailed`**: Declared admission policy (strict kinds or observer grants) refused the operation.
+440: - **`EmissionFailed`**: Fact emission failed prior to committing.
+441: - **`InvalidEmissionRequest`**: Invalid emission parameters (missing required observer or invalid shape).
+442: - **`CommittedEmissionError`**: Fact was written to storage, but a post-commit task failed (carries `.fact_id`).
+443: - **`CeremonyFailed`**: Declaration update AST generation or ceremony apply was refused.
+444: 
+445: Descriptor-first reads also surface engine contract refusals (for example, a
+446: missing or behind projection or an invalid continuation) and declaration
+447: resolution errors. These keep the adapter's evidence-bearing refusal intact.
+448: 
+449: Arrival `sync_target` and `sync_search_index` normalize maintenance failures as
+450: `ProjectionOutcomeUnknown`. Their optional `details.evidence` object uses
+451: `loops.sdk/evidence/v1`: it records the coordinator phase, resource effects,
+452: available head/coverage coordinates, and up to two explicit causal exceptions.
+453: Search failures before the build call report derived state as
+454: `not-entered`/`not-attempted`; failures after entering build or projection
+455: catch-up report `entered`/`unknown`. A nested refusal does not prove that an
+456: adapter left derived state unchanged. Existing error outcomes, source types,
+457: and operation-specific `details.phase` remain intact. Cause messages are capped
+458: at 512 characters; record bodies and implicit exception context are excluded.
+459: Declaration preparation refusals carry preparation evidence without claiming a
+460: custody append. Cancellation and process-control exceptions propagate unchanged.
+461: 
+462: ## Restore an existing exact copy
+463: 
+464: ```python
+465: from sdk import restore_forward
+466: 
+467: restored = restore_forward("source.vertex", "replica.vertex")
+468: print(restored.before, restored.after)
+469: ```
+470: 
+471: Both vertices require explicit Arrival descriptors. The receiver must already
+472: be an exact prefix of the verified source. Restoration appends the complete
+473: missing suffix atomically through at least the witnessed head, preserving its
+474: declared role. `restored.commit` is an actual receipt, or `None` when the exact
+475: selected head is already present. Projection catch-up remains explicit.
+476: 
+477: Ordinary opening still refuses rollback. `CommittedOutcomeUnknown` retains
+478: before/target heads when a replication receipt was lost;
+479: `CommittedIncomplete` retains the commit if later witnessing or comparison
+480: failed. Empty receiver installation is a separate, pending import operation.
+
+===== docs/scratch/arrival-break/sdk-conformance-captured-transfer-2026-09-06.md =====
+1: # Public SDK conformance: captured export and restore-forward
+2: 
+3: Status: implementation and native validation complete; final review pending
+4: on `arrival/finish`, based on
+5: `3152e810`. This is the fourth bounded public workload-conformance slice before
+6: C9. No commit or push is part of this pass.
+7: 
+8: ## Contract under test
+9: 
+10: An exported prefix is bounded by its selected full head, even if the source
+11: has advanced. The export result distinguishes the head captured when opening
+12: the source from the selected head represented by the artifact. Selection does
+13: not lower the local witness floor.
+14: 
+15: Restore-forward opens explicit source and receiver descriptors; it does not
+16: consume an export artifact. The receiver must already contain an exact source
+17: prefix. Its proposed restored head must reach the witnessed floor. Selecting
+18: an older, otherwise valid source prefix can therefore export successfully but
+19: refuse restoration with `HeadRollback`. A fresh restoration through the source
+20: head appends the missing suffix without replacing prior history.
+21: 
+22: Restoration preserves the receiver's role and leaves its projection at its
+23: existing version. Structural verification can succeed while a CURRENT read
+24: still refuses. Explicit synchronization then catches the projection up, and
+25: public reads must agree with the restored custody and retain all prior rows.
+26: 
+27: ## Scope and executable evidence
+28: 
+29: Sol implements the workflow; Terra audits contracts and SDK guidance; Luna
+30: validates the integrated suites; root checks causal assertions and triages a
+31: frozen Fable 5.1 LOW adversarial review. Every test process isolates XDG state,
+32: XDG config and `LOOPS_HOME`; mapped keys and stores are disposable.
+33: 
+34: The [workflow](../../../libs/sdk/tests/test_arrival_transfer_workload.py) uses
+35: public initialization, emission, export, restoration, verification, sync and
+36: fact reads. Receiver installation uses public export to write the initial exact prefix,
+37: followed by an explicit replica descriptor as test fixture setup. That is not
+38: a public import API.
+39: Empty-receiver import remains separate work.
+40: 
+41: The workflow distinguishes retained selected export bytes from the later live
+42: source used for successful restoration. The later source observations belong
+43: in the restored receiver but not in the historical exported artifact. These
+44: are deterministic sequential operations, not a concurrent writer or crash
+45: test. Existing transfer tests retain stream-lifetime, races, unknown receipt,
+46: committed-incomplete, projection contradiction and publication fault coverage.
+47: 
+48: Full verification establishes grammar, density, lineage and hash chain. It
+49: excludes signature authorship, external key trust and projection verification;
+50: the workflow separately compares exact artifact/custody bytes and public rows.
+51: No trust reset, witness deletion or implicit projection repair is involved.
+52: 
+53: ## Validation and review
+54: 
+55: Final focused SDK transfer/export/restore validation: **16 passed** /0.49s.
+56: Full SDK: **583 passed** /20.96s. Architecture: **101 passed** /5.67s.
+57: Engine transfer/restore regressions: **55 passed** /0.38s. Scoped Ruff and
+58: whitespace checks pass. Final Fable-low review is pending. All validation
+59: commands use `uv run --no-sync` with isolated process roots; test, SDK guidance
+60: and production-context hashes were unchanged across the full suite run.
+61: The executable SHA-256 is
+62: `5103a21f0bf0cabb65b3e3a3b3d95426619ec8f0f1022b6958f205fd58746d83`.
+63: No production code changed.
+64: 
+65: ## Next
+66: 
+67: The four agreed public workflow slices lead into C9: inventory the supported
+68: SDK/minimal-CLI surface and remaining legacy callers, choose a bounded first
+69: transition, and retire competing authority paths with their consumers covered.
+70: Projection preserve/rebuild recovery, empty-receiver exact import, foreign
+71: admission, descriptor adoption and live-store migration remain separate work;
+72: this conformance pass does not implement or authorize those operations.
+
+===== libs/sdk/src/sdk/transfer.py =====
+1: """Portable exact export artifacts over captured Arrival custody."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import json
+6: import os
+7: import tempfile
+8: from contextlib import contextmanager, suppress
+9: from dataclasses import asdict, dataclass
+10: from pathlib import Path
+11: from typing import Any
+12: 
+13: from engine.arrival_contract import Commit, Head
+14: from engine.arrival_registry import BackendRegistry
+15: from engine.arrival_transfer import open_export
+16: 
+17: from .errors import normalize_exception
+18: from .target import _arrival_descriptor
+19: from .types import SdkError, StoreDescriptorInfo, TargetUnsupported, _commit_dict
+20: 
+21: 
+22: @dataclass(frozen=True)
+23: class ExportResult:
+24:     source: str
+25:     output: str
+26:     store: StoreDescriptorInfo
+27:     captured_head: Head
+28:     head: Head
+29:     codec: str
+30:     manifest: dict[str, Any]
+31:     byte_count: int
+32:     schema: str = "loops.sdk/export/v2"
+33: 
+34:     def as_dict(self) -> dict[str, Any]:
+35:         return asdict(self)
+36: 
+37: 
+38: class ExportPublicationError(SdkError):
+39:     """An output artifact failed to publish or establish directory durability."""
+40: 
+41:     def __init__(self, result: ExportResult, *, published: bool, cause: BaseException) -> None:
+42:         super().__init__(f"export artifact publication failed: {cause}")
+43:         self.result = result
+44:         self.published = published
+45:         self.cause = cause
+46: 
+47:     def as_dict(self) -> dict[str, Any]:
+48:         return {
+49:             "schema": "loops.sdk/error/v1",
+50:             "type": type(self).__name__,
+51:             "message": str(self),
+52:             "outcome": (
+53:                 "artifact-durability-unknown" if self.published else "artifact-not-published"
+54:             ),
+55:             "result": self.result.as_dict(),
+56:             "published": self.published,
+57:             "source_type": type(self.cause).__name__,
+58:         }
+59: 
+60: 
+61: def export_target(
+62:     target: Path | str,
+63:     output: Path | str,
+64:     *,
+65:     through: Head | None = None,
+66:     codec: str = "arrival-jsonl-v1",
+67:     registry: BackendRegistry | None = None,
+68: ) -> ExportResult:
+69:     """Publish a complete exact wire prefix exclusively at ``output``.
+70: 
+71:     The manifest travels in the result. No second artifact or archive framing
+72:     is added. Existing output files are never replaced, and a late source
+73:     refusal cannot publish a truncated successful-looking export. Source read
+74:     errors retain their source classification; output I/O failures carry an
+75:     ExportPublicationError with the artifact's publication state.
+76:     """
+77:     resolved = _arrival_descriptor(target)
+78:     if resolved is None:
+79:         raise TargetUnsupported("export requires an explicit Arrival descriptor target")
+80:     source, _ast, descriptor = resolved
+81:     destination = Path(output).absolute()
+82:     active = registry if registry is not None else BackendRegistry.with_builtin_backends()
+83:     temp: Path | None = None
+84:     try:
+85:         with open_export(active, descriptor, through=through, codec=codec) as exported:
+86:             # Refuse a backend's non-JSON manifest before writing any output.
+87:             manifest = json.loads(json.dumps(dict(exported.manifest), allow_nan=False))
+88:             result = ExportResult(
+89:                 source=str(source), output=str(destination),
+90:                 store=StoreDescriptorInfo.from_descriptor(descriptor),
+91:                 captured_head=exported.captured_head, head=exported.head,
+92:                 codec=exported.codec, manifest=manifest, byte_count=0,
+93:             )
+94:             published = False
+95: 
+96:             @contextmanager
+97:             def publication_errors():
+98:                 try:
+99:                     yield
+100:                 except OSError as exc:
+101:                     raise ExportPublicationError(
+102:                         result, published=published, cause=exc
+103:                     ) from exc
+104: 
+105:             with publication_errors():
+106:                 fd, name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
+107:                 temp = Path(name)
+108:                 try:
+109:                     stream = os.fdopen(fd, "wb")
+110:                 except BaseException:
+111:                     os.close(fd)
+112:                     raise
+113:             byte_count = 0
+114:             try:
+115:                 # Pull source chunks outside output error classification.
+116:                 for chunk in exported.records:
+117:                     with publication_errors():
+118:                         byte_count += stream.write(chunk)
+119:                 with publication_errors():
+120:                     stream.flush()
+121:                     os.fsync(stream.fileno())
+122:             except BaseException as failure:
+123:                 # Closing buffered output can fail too. Preserve the original
+124:                 # source/output classification and attach the cleanup failure.
+125:                 try:
+126:                     stream.close()
+127:                 except OSError as cleanup_error:
+128:                     failure.add_note(f"export output cleanup also failed: {cleanup_error}")
+129:                 raise
+130:             else:
+131:                 with publication_errors():
+132:                     stream.close()
+133:             result = ExportResult(
+134:                 source=result.source, output=result.output, store=result.store,
+135:                 captured_head=result.captured_head, head=result.head,
+136:                 codec=result.codec, manifest=manifest, byte_count=byte_count,
+137:             )
+138:             with publication_errors():
+139:                 os.link(temp, destination)
+140:                 published = True
+141:                 directory_fd = os.open(destination.parent, os.O_RDONLY)
+142:                 try:
+143:                     os.fsync(directory_fd)
+144:                 finally:
+145:                     os.close(directory_fd)
+146:             return result
+147:     except Exception as exc:
+148:         normalized = normalize_exception(exc)
+149:         if normalized is exc:
+150:             raise
+151:         raise normalized from exc
+152:     finally:
+153:         if temp is not None:
+154:             with suppress(OSError):
+155:                 temp.unlink()
+156: 
+157: 
+158: @dataclass(frozen=True)
+159: class RestoreForwardResult:
+160:     source: str
+161:     receiver: str
+162:     source_store: StoreDescriptorInfo
+163:     receiver_store: StoreDescriptorInfo
+164:     captured_head: Head
+165:     before: Head
+166:     after: Head
+167:     commit: Commit | None
+168:     schema: str = "loops.sdk/restore-forward/v2"
+169: 
+170:     def as_dict(self) -> dict[str, Any]:
+171:         return {
+172:             "schema": self.schema,
+173:             "source": self.source,
+174:             "receiver": self.receiver,
+175:             "source_store": asdict(self.source_store),
+176:             "receiver_store": asdict(self.receiver_store),
+177:             "captured_head": asdict(self.captured_head),
+178:             "before": asdict(self.before),
+179:             "after": asdict(self.after),
+180:             "commit": _commit_dict(self.commit),
+181:         }
+182: 
+183: 
+184: def restore_forward(
+185:     source: Path | str,
+186:     receiver: Path | str,
+187:     *,
+188:     through: Head | None = None,
+189:     registry: BackendRegistry | None = None,
+190: ) -> RestoreForwardResult:
+191:     """Restore an existing exact copy through the current witnessed head.
+192: 
+193:     Both targets require explicit Arrival descriptors. The receiver retains
+194:     its declared role. Its declaration cache and projection remain at their
+195:     existing versions; projection catch-up is a separate explicit operation.
+196:     Unknown outcomes carry the exact before/target heads for reconciliation.
+197:     """
+198:     resolved_source = _arrival_descriptor(source)
+199:     resolved_receiver = _arrival_descriptor(receiver)
+200:     if resolved_source is None or resolved_receiver is None:
+201:         raise TargetUnsupported("restore-forward requires two explicit Arrival descriptors")
+202:     source_path, _source_ast, source_store = resolved_source
+203:     receiver_path, _receiver_ast, receiver_store = resolved_receiver
+204:     active = registry if registry is not None else BackendRegistry.with_builtin_backends()
+205:     try:
+206:         result = active.restore_forward(source_store, receiver_store, through=through)
+207:         return RestoreForwardResult(
+208:             source=str(source_path), receiver=str(receiver_path),
+209:             source_store=StoreDescriptorInfo.from_descriptor(source_store),
+210:             receiver_store=StoreDescriptorInfo.from_descriptor(receiver_store),
+211:             captured_head=result.captured_head, before=result.before,
+212:             after=result.after, commit=result.commit,
+213:         )
+214:     except Exception as exc:
+215:         normalized = normalize_exception(exc)
+216:         if normalized is exc:
+217:             raise
+218:         raise normalized from exc
+
+===== libs/sdk/src/sdk/verify.py =====
+1: """Custody-prefix verification for explicit Arrival descriptors."""
+2: 
+3: from __future__ import annotations
+4: 
+5: from contextlib import suppress
+6: from pathlib import Path
+7: 
+8: from engine.arrival_contract import Full, Head, HeadMismatch, NotAuthority, Watermark
+9: from engine.arrival_head_seam import AttestedLedger, Compared, Indeterminate, PreGenesis
+10: from engine.arrival_registry import BackendRegistry
+11: 
+12: from .errors import normalize_exception
+13: from .target import _arrival_descriptor
+14: from .types import StoreDescriptorInfo, VerifyResult
+15: 
+16: __all__ = ["verify_target"]
+17: 
+18: 
+19: def _close_quietly(handle: object) -> None:
+20:     close = getattr(handle, "close", None)
+21:     if callable(close):
+22:         with suppress(Exception):
+23:             close()
+24: 
+25: 
+26: def _verified_prefix(ledger: AttestedLedger, captured: Head, target: Head) -> Head:
+27:     """Verify one target already bounded by the comparison established at open."""
+28:     if target.lineage != captured.lineage:
+29:         raise NotAuthority(
+30:             f"verification target names lineage {target.lineage}, but the "
+31:             f"attested ledger presents {captured.lineage}"
+32:         )
+33:     if target.ordinal > captured.ordinal:
+34:         raise HeadMismatch(
+35:             f"verification target ordinal {target.ordinal} exceeds the attested "
+36:             f"captured ordinal {captured.ordinal}"
+37:         )
+38:     resolved = ledger.head_at(Watermark(target.lineage, target.ordinal))
+39:     if resolved != target:
+40:         raise HeadMismatch("verification target no longer resolves to its recorded hash")
+41:     verified = ledger.verify(Full(through=resolved))
+42:     if verified != resolved:
+43:         raise HeadMismatch("full verification returned a different head")
+44:     return verified
+45: 
+46: 
+47: def verify_target(
+48:     target: Path | str,
+49:     *,
+50:     through: Head | None = None,
+51:     registry: BackendRegistry | None = None,
+52: ) -> VerifyResult:
+53:     """Fully verify one attested Arrival prefix without reading its projection.
+54: 
+55:     ``Full`` establishes grammar, dense ordinals, one lineage, and the record
+56:     hash chain through the returned head. It does not verify record signatures,
+57:     authorship, key trust, or projection agreement.
+58:     """
+59:     ledger: object | None = None
+60:     query: object | None = None
+61:     try:
+62:         resolved = _arrival_descriptor(target)
+63:         if resolved is None:
+64:             from .types import TargetUnsupported
+65: 
+66:             raise TargetUnsupported("verify_target requires an explicit Arrival descriptor")
+67:         _path, _ast, descriptor = resolved
+68:         ledger, query = (registry or BackendRegistry.with_builtin_backends()).open(descriptor)
+69:         if not isinstance(ledger, AttestedLedger):
+70:             raise TypeError("BackendRegistry.open must return an AttestedLedger")
+71:         comparison = ledger.opened.comparison
+72:         if isinstance(comparison, PreGenesis):
+73:             if comparison.ledger_refusal is not None:
+74:                 raise comparison.ledger_refusal
+75:             raise HeadMismatch("a pre-genesis ledger has no full verification head")
+76:         if isinstance(comparison, Indeterminate):
+77:             raise comparison.refusal
+78:         if not isinstance(comparison, Compared):
+79:             raise TypeError(f"unsupported head comparison {comparison!r}")
+80:         captured = comparison.presented
+81:         verified = _verified_prefix(ledger, captured, captured if through is None else through)
+82:         return VerifyResult(
+83:             store=StoreDescriptorInfo.from_descriptor(descriptor),
+84:             captured_head=captured,
+85:             verified_through=verified,
+86:         )
+87:     except BaseException as exc:
+88:         normalized = normalize_exception(exc)
+89:         if normalized is exc:
+90:             raise
+91:         raise normalized from exc
+92:     finally:
+93:         _close_quietly(query)
+94:         _close_quietly(ledger)
+
+===== libs/engine/src/engine/arrival_transfer.py =====
+1: """Captured exact export through attested ledger contracts."""
+2: 
+3: from __future__ import annotations
+4: 
+5: from collections.abc import Iterator, Mapping
+6: from contextlib import suppress
+7: from typing import Any
+8: 
+9: from .arrival_contract import (
+10:     ExportedPrefix,
+11:     Full,
+12:     Head,
+13:     HeadMismatch,
+14:     NotAuthority,
+15:     NotSupported,
+16:     Profile,
+17:     StoreDescriptor,
+18:     Watermark,
+19: )
+20: from .arrival_head_seam import AttestedLedger, Compared, Indeterminate, PreGenesis
+21: from .arrival_registry import BackendRegistry
+22: 
+23: 
+24: def _close(handle: Any) -> None:
+25:     close = getattr(handle, "close", None)
+26:     if callable(close):
+27:         with suppress(Exception):
+28:             close()
+29: 
+30: 
+31: def _require_role(descriptor: StoreDescriptor) -> None:
+32:     if descriptor.role not in (Profile.AUTHORITY, Profile.REPLICA):
+33:         raise NotAuthority("exact transfer requires an explicit Authority or Replica role")
+34: 
+35: 
+36: def _captured(ledger: AttestedLedger) -> Head:
+37:     comparison = ledger.opened.comparison
+38:     if isinstance(comparison, Compared):
+39:         return comparison.presented
+40:     if isinstance(comparison, Indeterminate):
+41:         raise comparison.refusal
+42:     if isinstance(comparison, PreGenesis):
+43:         if comparison.ledger_refusal is not None:
+44:             raise comparison.ledger_refusal
+45:         raise HeadMismatch("the export source has no captured head")
+46:     raise TypeError("registry opener returned an unsupported head comparison")
+47: 
+48: 
+49: def _verify_prefix(ledger: AttestedLedger, captured: Head, through: Head) -> None:
+50:     if through.lineage != captured.lineage or through.ordinal > captured.ordinal:
+51:         raise HeadMismatch("selected prefix lies outside the captured ledger head")
+52:     if ledger.head_at(Watermark(through.lineage, through.ordinal)) != through:
+53:         raise HeadMismatch("selected prefix hash differs from captured ledger membership")
+54:     if ledger.verify(Full(through=through)) != through:
+55:         raise HeadMismatch("full verification did not establish the selected prefix")
+56: 
+57: 
+58: class CapturedExport:
+59:     """A single-use exact byte stream that retains its adapter resources."""
+60: 
+61:     def __init__(
+62:         self, ledger: AttestedLedger, query: Any, captured: Head, prefix: ExportedPrefix
+63:     ) -> None:
+64:         self.captured_head = captured
+65:         self.head = prefix.head
+66:         self.codec = prefix.codec
+67:         self.manifest: Mapping[str, Any] = dict(prefix.manifest)
+68:         self._prefix = prefix
+69:         self._ledger = ledger
+70:         self._query = query
+71:         self._closed = False
+72:         self.records = self._records()
+73: 
+74:     def _records(self) -> Iterator[bytes]:
+75:         try:
+76:             if self._closed:
+77:                 raise ValueError("captured export is closed")
+78:             yield from self._prefix.records
+79:         finally:
+80:             self.close()
+81: 
+82:     def close(self) -> None:
+83:         if self._closed:
+84:             return
+85:         self._closed = True
+86:         _close(self._prefix.records)
+87:         _close(self._query)
+88:         _close(self._ledger)
+89: 
+90:     def __enter__(self) -> CapturedExport:
+91:         if self._closed:
+92:             raise ValueError("captured export is closed")
+93:         return self
+94: 
+95:     def __exit__(self, *_unused: Any) -> None:
+96:         self.close()
+97: 
+98: 
+99: def open_export(
+100:     registry: BackendRegistry,
+101:     descriptor: StoreDescriptor,
+102:     *,
+103:     through: Head | None = None,
+104:     codec: str = "arrival-jsonl-v1",
+105: ) -> CapturedExport:
+106:     """Verify and retain one exact prefix; no projection snapshot is required."""
+107:     _require_role(descriptor)
+108:     ledger, query = registry.open(descriptor)
+109:     try:
+110:         if not isinstance(ledger, AttestedLedger):
+111:             raise TypeError("registry opener must return an AttestedLedger")
+112:         captured = _captured(ledger)
+113:         selected = captured if through is None else through
+114:         if codec not in ledger.capabilities().export_codecs:
+115:             raise NotSupported(f"backend does not advertise export codec {codec!r}")
+116:         _verify_prefix(ledger, captured, selected)
+117:         prefix = ledger.export(through=selected, codec=codec)
+118:         if prefix.head != selected or prefix.codec != codec:
+119:             _close(prefix.records)
+120:             raise HeadMismatch("backend export differs from the requested prefix or codec")
+121:         return CapturedExport(ledger, query, captured, prefix)
+122:     except BaseException:
+123:         _close(query)
+124:         _close(ledger)
+125:         raise
+
+===== libs/engine/src/engine/arrival_restore.py =====
+1: """Explicit exact-prefix restoration, with no reusable custody handle.
+2: 
+3: The proposed receiver head passes pure witness comparison before mutation.
+4: The actual receiver is compared again after full-head CAS, then witnessed.
+5: No reset, new genesis, projection repair, or partial chunking occurs.
+6: """
+7: 
+8: from __future__ import annotations
+9: 
+10: import time
+11: from copy import deepcopy
+12: from dataclasses import dataclass
+13: from typing import TYPE_CHECKING
+14: 
+15: from .arrival import GENESIS_KIND, KEY_INTRODUCTION_KIND
+16: from .arrival_body import ROW_KINDS, rows_of_body
+17: from .arrival_contract import (
+18:     AtomicLimitExceeded,
+19:     Commit,
+20:     ContractRefusal,
+21:     FactRequest,
+22:     Full,
+23:     Head,
+24:     HeadMismatch,
+25:     Open,
+26:     ProjectionRequirement,
+27:     StoreDescriptor,
+28:     TickRequest,
+29:     VerifyScope,
+30:     Watermark,
+31: )
+32: from .arrival_head_attestation import record_binding
+33: from .arrival_head_seam import AttestedLedger, Compared, Indeterminate, _HeadObservation
+34: from .arrival_transfer import _captured, _close, _require_role, _verify_prefix
+35: from .declaration import validate_arrival_declaration_anchor
+36: 
+37: if TYPE_CHECKING:
+38:     from .arrival_registry import BackendRegistry
+39: 
+40: 
+41: @dataclass(frozen=True)
+42: class RestoreForwardResult:
+43:     captured_head: Head
+44:     before: Head
+45:     after: Head
+46:     commit: Commit | None
+47: 
+48: 
+49: class RestoreForwardUnknown(Exception):
+50:     """Replication was entered but no authoritative receipt returned."""
+51: 
+52:     def __init__(self, before: Head, target: Head, cause: BaseException) -> None:
+53:         super().__init__(f"restore-forward outcome is unknown: {cause}")
+54:         self.before = before
+55:         self.target = target
+56:         self.cause = cause
+57: 
+58: 
+59: class RestoreForwardIncomplete(Exception):
+60:     """Exact records committed; later comparison or witnessing failed."""
+61: 
+62:     def __init__(self, commit: Commit, cause: BaseException) -> None:
+63:         super().__init__(f"restore-forward committed but completion failed: {cause}")
+64:         self.commit = commit
+65:         self.before = commit.before
+66:         self.after = commit.after
+67:         self.cause = cause
+68: 
+69: 
+70: class _BoundedProof:
+71:     """Only the evidence operations used by the pure head comparison."""
+72: 
+73:     def __init__(self, source: AttestedLedger, head: Head) -> None:
+74:         self._source = source
+75:         self._head = head
+76: 
+77:     def verify(self, scope: VerifyScope) -> Head:
+78:         if isinstance(scope, Open):
+79:             return self._head
+80:         _verify_prefix(self._source, self._head, scope.through)
+81:         return scope.through
+82: 
+83:     def head_at(self, watermark: Watermark) -> Head:
+84:         if watermark.lineage != self._head.lineage or watermark.ordinal > self._head.ordinal:
+85:             raise HeadMismatch("restoration proof does not cover this watermark")
+86:         return self._source.head_at(watermark)
+87: 
+88: 
+89: def _ledger_rows(ledger: AttestedLedger, through: Head) -> list[tuple[object, ...]]:
+90:     """Expand one verified custody prefix into its exact projected row stream."""
+91:     rows: list[tuple[object, ...]] = []
+92:     for record in ledger.scan(through=through):
+93:         record_kind = record["k"]
+94:         if record_kind in (GENESIS_KIND, KEY_INTRODUCTION_KIND):
+95:             continue
+96:         if record_kind not in ROW_KINDS:
+97:             raise HeadMismatch(
+98:                 f"record {record['ord']} has unsupported projection kind {record_kind!r}"
+99:             )
+100:         for sequence, (row_kind, row) in enumerate(rows_of_body(record_kind, record["body"])):
+101:             rows.append((int(record["ord"]), sequence, row_kind, *row))
+102:     return rows
+103: 
+104: 
+105: def _snapshot_rows(snapshot: object) -> list[tuple[object, ...]]:
+106:     """Read retained wire evidence without rebuilding payload text from JSON."""
+107:     facts = snapshot.facts(
+108:         FactRequest(limit=None, include_internal=True, order="oldest")
+109:     ).items
+110:     ticks = snapshot.ticks(TickRequest(since=-float("inf"), until=float("inf")))
+111:     rows: list[tuple[object, ...]] = []
+112:     for fact in facts:
+113:         if fact.payload_text is None:
+114:             raise HeadMismatch(
+115:                 "projection omitted exact fact payload text required for restore audit"
+116:             )
+117:         rows.append(
+118:             (
+119:                 fact.arrival_ordinal,
+120:                 fact.arrival_seq,
+121:                 "fact",
+122:                 fact.id,
+123:                 fact.kind,
+124:                 fact.ts,
+125:                 fact.observer,
+126:                 fact.origin,
+127:                 fact.payload_text,
+128:                 fact.signature,
+129:             )
+130:         )
+131:     for tick in ticks:
+132:         if tick.payload_text is None:
+133:             raise HeadMismatch(
+134:                 "projection omitted exact tick payload text required for restore audit"
+135:             )
+136:         rows.append(
+137:             (
+138:                 tick.arrival_ordinal,
+139:                 tick.arrival_seq,
+140:                 "tick",
+141:                 tick.id,
+142:                 tick.name,
+143:                 tick.ts,
+144:                 tick.since,
+145:                 tick.origin,
+146:                 tick.payload_text,
+147:                 tick.prev_hash,
+148:                 tick.window_start,
+149:                 tick.fact_cursor,
+150:                 tick.window_hash,
+151:                 tick.signature,
+152:             )
+153:         )
+154:     return sorted(rows, key=lambda row: (row[0], row[1], row[2]))
+155: 
+156: 
+157: def _audit_declaration_anchor(
+158:     snapshot: object, expected: list[tuple[object, ...]], head: Head
+159: ) -> None:
+160:     """Require a claimed own declaration identity to be projected exactly."""
+161:     anchor = snapshot.declaration_anchor
+162:     validate_arrival_declaration_anchor(anchor, head)
+163:     expected_genesis = [
+164:         row
+165:         for row in expected
+166:         if row[2] == "fact" and row[3] == head.lineage and row[4] == "_decl.genesis"
+167:     ]
+168:     if not expected_genesis:
+169:         if anchor.own_lineage is not None or anchor.genesis is not None:
+170:             raise HeadMismatch(
+171:                 "projection claims a declaration identity absent from its audited prefix"
+172:             )
+173:         return
+174:     if len(expected_genesis) != 1 or anchor.own_lineage != head.lineage:
+175:         raise HeadMismatch("projection does not name the audited declaration genesis")
+176:     genesis = anchor.genesis
+177:     if genesis is None or genesis.payload_text is None:
+178:         raise HeadMismatch("projection omitted audited declaration genesis evidence")
+179:     actual = (
+180:         genesis.arrival_ordinal,
+181:         genesis.arrival_seq,
+182:         "fact",
+183:         genesis.id,
+184:         genesis.kind,
+185:         genesis.ts,
+186:         genesis.observer,
+187:         genesis.origin,
+188:         genesis.payload_text,
+189:         genesis.signature,
+190:     )
+191:     if actual != expected_genesis[0]:
+192:         raise HeadMismatch("projection declaration anchor differs from audited genesis row")
+193: 
+194: 
+195: def _audit_projection(ledger: AttestedLedger, query: object, through: Head) -> None:
+196:     """Refuse a represented projection whose bounded rows differ from custody.
+197: 
+198:     Watermarks contain a lineage and ordinal but no record hash.  An explicit
+199:     restore therefore pays this full, read-only comparison: it catches a
+200:     projection from a distinct branch at the same coordinate without adding a
+201:     checkpoint field to the neutral query contract.  An absent projection has
+202:     no derived evidence to contradict custody and remains absent; this never
+203:     builds or repairs it.
+204:     """
+205:     snapshot = query.open_snapshot(
+206:         captured_head=through,
+207:         requirement=ProjectionRequirement.ALLOW_BEHIND,
+208:     )
+209:     try:
+210:         watermark = snapshot.represented
+211:         if watermark is None:
+212:             return
+213:         observed = ledger.head_at(watermark)
+214:         # A snapshot clamps rows to H when its watermark advanced concurrently;
+215:         # when it lags, its own represented prefix is the only row set it claims.
+216:         audited = through if observed.ordinal > through.ordinal else observed
+217:         expected = _ledger_rows(ledger, audited)
+218:         _audit_declaration_anchor(snapshot, expected, audited)
+219:         actual = _snapshot_rows(snapshot)
+220:         if actual != expected:
+221:             raise HeadMismatch(
+222:                 "projection rows do not exactly match the verified custody prefix "
+223:                 f"through ordinal {audited.ordinal}"
+224:             )
+225:     finally:
+226:         _close(snapshot)
+227: 
+228: 
+229: def _restore_forward(
+230:     registry: BackendRegistry,
+231:     source: StoreDescriptor,
+232:     receiver: StoreDescriptor,
+233:     *,
+234:     through: Head | None = None,
+235: ) -> RestoreForwardResult:
+236:     """Registry-owned procedure: restore an existing verified exact prefix."""
+237:     _require_role(source)
+238:     _require_role(receiver)
+239:     source_ledger, source_query = registry.open(source)
+240:     target_ledger = target_query = None
+241:     try:
+242:         if not isinstance(source_ledger, AttestedLedger):
+243:             raise TypeError("restoration source must be independently attested")
+244:         captured = _captured(source_ledger)
+245:         selected = captured if through is None else through
+246:         _verify_prefix(source_ledger, captured, selected)
+247:         target_ledger, target_query, binding = registry._open_components(receiver)
+248:         before = target_ledger.verify(Open())
+249:         if target_ledger.verify(Full(through=before)) != before:
+250:             raise HeadMismatch("receiver full verification did not establish its head")
+251:         if before.lineage != selected.lineage or before.ordinal > selected.ordinal:
+252:             raise HeadMismatch("receiver is not an older prefix of the selected source")
+253:         if source_ledger.head_at(Watermark(before.lineage, before.ordinal)) != before:
+254:             raise HeadMismatch("receiver and source do not share the exact receiver head")
+255: 
+256:         # Derived evidence belongs to the receiver's actual prefix. Comparing
+257:         # it only with the proposed head can hide tail loss: a fork's ahead
+258:         # projection would become apparently current after a different suffix
+259:         # fills the same ordinals. Refuse before mutation, preserving that
+260:         # evidence for explicit projection recovery.
+261:         _HeadObservation(
+262:             target_ledger,
+263:             location=receiver.location,
+264:             query=target_query,
+265:             binding=binding,
+266:         )._projection(before)
+267:         _audit_projection(target_ledger, target_query, before)
+268: 
+269:         count = selected.ordinal - before.ordinal
+270:         limit = target_ledger.capabilities().max_atomic_records
+271:         if limit is not None and count > limit:
+272:             raise AtomicLimitExceeded(
+273:                 f"restoration requires {count} atomic records; receiver limit is {limit}"
+274:             )
+275:         records = tuple(
+276:             deepcopy(dict(record))
+277:             for record in source_ledger.scan(after=before.ordinal, through=selected)
+278:         )
+279:         if len(records) != count:
+280:             raise HeadMismatch("source scan did not supply the complete restoration suffix")
+281:         # Pure proof: binding, witness floor, reset fences and projection evidence.
+282:         observation = _HeadObservation(
+283:             _BoundedProof(source_ledger, selected),
+284:             location=receiver.location,
+285:             query=target_query,
+286:             binding=binding,
+287:         )
+288:         report, _earned = observation._observe()
+289:         if isinstance(report.comparison, Indeterminate):
+290:             raise report.comparison.refusal
+291:         if not isinstance(report.comparison, Compared):
+292:             raise HeadMismatch("restoration proof established no comparable head")
+293: 
+294:         commit = None
+295:         if records:
+296:             try:
+297:                 commit = target_ledger.replicate(before, records)
+298:             except ContractRefusal:
+299:                 raise
+300:             except Exception as exc:
+301:                 raise RestoreForwardUnknown(before, selected, exc) from exc
+302:         try:
+303:             if commit is not None and (commit.before != before or commit.after != selected):
+304:                 raise HeadMismatch("backend receipt differs from the proven restoration")
+305:             # First receiver acceptance; recheck changes while replication ran.
+306:             actual = AttestedLedger(
+307:                 target_ledger,
+308:                 location=receiver.location,
+309:                 query=target_query,
+310:                 binding=binding,
+311:             )
+312:             if _captured(actual) != selected:
+313:                 raise HeadMismatch("receiver changed before restoration completion")
+314:             _audit_projection(actual, target_query, selected)
+315:             if commit is not None:
+316:                 actual._witness(commit)
+317:             record_binding(binding.key, selected.lineage, time.time())
+318:         except Exception as exc:
+319:             if commit is None:
+320:                 raise
+321:             raise RestoreForwardIncomplete(commit, exc) from exc
+322:         return RestoreForwardResult(captured, before, selected, commit)
+323:     finally:
+324:         _close(target_query)
+325:         _close(target_ledger)
+326:         _close(source_query)
+327:         _close(source_ledger)
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/focused-pytest.log =====
+1: ................                                                         [100%]
+2: 16 passed in 0.49s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/ruff.log =====
+1: All checks passed!
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/sdk-full.txt =====
+1: ........................................................................ [ 12%]
+2: ........................................................................ [ 24%]
+3: ........................................................................ [ 37%]
+4: ........................................................................ [ 49%]
+5: ........................................................................ [ 61%]
+6: ........................................................................ [ 74%]
+7: ........................................................................ [ 86%]
+8: ........................................................................ [ 98%]
+9: .......                                                                  [100%]
+10: 583 passed in 20.96s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/architecture-full.txt =====
+1: ........................................................................ [ 71%]
+2: .............................                                            [100%]
+3: 101 passed in 5.67s
+
+===== docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/engine-transfer.txt =====
+1: .......................................................                  [100%]
+2: 55 passed in 0.38s
+
+===== FULL PRODUCTION / TEST PATCH =====
+diff --git a/libs/sdk/README.md b/libs/sdk/README.md
+index 7276409b..4fca5812 100644
+--- a/libs/sdk/README.md
++++ b/libs/sdk/README.md
+@@ -124,11 +124,20 @@ Legacy targets keep their existing behavior and do not consult the registry.
+ 
+ `export_target("target.vertex", "snapshot.jsonl")` writes an exact captured
+ wire prefix and returns its manifest, selected/captured heads and byte count.
+-It refuses to replace an existing output. A late source failure publishes no
+-partial artifact; a directory-sync failure after publication raises
+-`ExportPublicationError` with `published=True` and the complete artifact's
+-identity. Export requires no current query projection. Import and replication
+-are still pending their explicit initialization/restoration boundary.
++`result.head` names the selected export prefix, while `result.captured_head`
++records the source head observed when export opened; they differ for a
++requested historical prefix. It refuses to replace an existing output. A late
++source failure publishes no partial artifact; a directory-sync failure after
++publication raises `ExportPublicationError` with `published=True` and the
++complete artifact's identity. Export requires no current query projection.
++
++Portable artifact import into an empty receiver remains separate.
++`restore_forward` is a live replication operation: it opens explicit source
++and receiver descriptors, rather than consuming an export artifact. Its
++receiver must already be an exact source prefix. A selected historical prefix
++below the locally witnessed source head refuses with `HeadRollback` before any
++receiver append. Restore leaves the receiver projection unchanged; use
++`sync_target` before a projection-backed read.
+ 
+ ---
+ 
+diff --git a/libs/sdk/tests/test_arrival_transfer_workload.py b/libs/sdk/tests/test_arrival_transfer_workload.py
+new file mode 100644
+index 00000000..a5d6eaf2
+--- /dev/null
++++ b/libs/sdk/tests/test_arrival_transfer_workload.py
+@@ -0,0 +1,226 @@
++"""Public captured-prefix export and forward-restore conformance."""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import pytest
++from engine.arrival_contract import ProjectionBehind
++
++from sdk import (
++    ArrivalRefusal,
++    MappedCredentialProvider,
++    emit_fact,
++    export_target,
++    init_vertex,
++    read_facts,
++    restore_forward,
++    sync_target,
++    verify_target,
++)
++
++
++@pytest.fixture(autouse=True)
++def _isolated_process_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
++    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
++    monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops-home"))
++
++
++def test_captured_export_restore_floor_and_explicit_projection_sync(tmp_path: Path) -> None:
++    provider = MappedCredentialProvider(
++        tmp_path / "custody",
++        namespace="transfer-workload",
++        receipt_observer="alice",
++    )
++    provider.create_binding("alice", token="create-alice")
++
++    source = tmp_path / "source.vertex"
++    source_store = (tmp_path / "source.arrival").resolve()
++    initialized = init_vertex(
++        source,
++        name="transfer-workload",
++        store_type="arrival",
++        location=source_store,
++        observer="alice",
++        strict=True,
++        credentials=provider,
++    )
++    initial_head = verify_target(source).verified_through
++    assert initial_head is not None
++    assert initialized.store is not None
++    assert initialized.store.role == "authority"
++    assert initialized.store.lineage == initial_head.lineage == initialized.lineage
++
++    # There is no public artifact-import operation. Installing the exact
++    # genesis export and a replica descriptor is bounded fixture setup; every
++    # transfer, verification, synchronization, and read below uses the SDK.
++    receiver_store = (tmp_path / "receiver.arrival").resolve()
++    initial_export = export_target(source, receiver_store, through=initial_head)
++    assert initial_export.head == initial_export.captured_head == initial_head
++    receiver = tmp_path / "receiver.vertex"
++    receiver.write_text(
++        source.read_text()
++        .replace(str(source_store), str(receiver_store), 1)
++        .replace('role="authority"', 'role="replica"', 1)
++    )
++    receiver_descriptor = receiver.read_bytes()
++    initial_sync = sync_target(receiver)
++    assert initial_sync.target == initial_head
++    assert initial_sync.projected_after == initial_head
++    assert initial_sync.changed is True
++    initial_read = read_facts(receiver, limit=20, order="oldest")
++    assert initial_read.items == []
++    assert initial_read.truncated is False
++    assert initial_read.basis is not None
++    assert initial_read.basis.captured_head == initial_head
++    assert initial_read.basis.projected_through == initial_head
++    initial_internal = read_facts(
++        receiver, limit=20, order="oldest", include_internal=True
++    )
++    initial_internal_ids = [item["id"] for item in initial_internal.items]
++    assert initial_internal_ids
++    assert initial_internal.truncated is False
++    for result in (initial_export, initial_sync, initial_read, initial_internal):
++        json.dumps(result.as_dict(), allow_nan=False)
++
++    selected = emit_fact(
++        source,
++        "item",
++        {"phase": "selected", "value": 1},
++        observer="alice",
++        origin="transfer-workload",
++        ts=10.0,
++        id_override="selected-item",
++        credentials=provider,
++    )
++    assert selected.commit is not None
++    assert selected.commit.before == initial_head
++    selected_head = selected.commit.after
++    selected_source_bytes = source_store.read_bytes()
++    later = emit_fact(
++        source,
++        "item",
++        {"phase": "later", "value": 2},
++        observer="alice",
++        origin="transfer-workload",
++        ts=11.0,
++        id_override="later-item",
++        credentials=provider,
++    )
++    assert later.commit is not None
++    assert later.commit.before == selected_head
++    current_head = later.commit.after
++    current_source_bytes = source_store.read_bytes()
++    assert selected_head.lineage == current_head.lineage == initial_head.lineage
++    assert initial_head.ordinal < selected_head.ordinal < current_head.ordinal
++
++    retained_artifact = tmp_path / "selected-prefix.arrival"
++    retained = export_target(source, retained_artifact, through=selected_head)
++    retained_bytes = retained_artifact.read_bytes()
++    assert retained.captured_head == current_head
++    assert retained.head == selected_head
++    assert retained.manifest["lineage"] == selected_head.lineage
++    assert retained.manifest["through_ordinal"] == selected_head.ordinal
++    assert retained.manifest["through_record_hash"] == selected_head.record_hash
++    assert retained.manifest["count"] == selected_head.ordinal + 1
++    assert retained.byte_count == len(retained_bytes)
++    assert retained_bytes == selected_source_bytes
++    assert b"later-item" not in retained_bytes
++    assert retained_bytes != current_source_bytes
++    json.dumps(retained.as_dict(), allow_nan=False)
++
++    receiver_before_refusal = receiver_store.read_bytes()
++    with pytest.raises(ArrivalRefusal) as rollback:
++        restore_forward(source, receiver, through=selected_head)
++    assert rollback.value.source_type == "HeadRollback"
++    json.dumps(rollback.value.as_dict(), allow_nan=False)
++    assert receiver_store.read_bytes() == receiver_before_refusal
++    assert retained_artifact.read_bytes() == retained_bytes
++    assert receiver.read_bytes() == receiver_descriptor
++
++    restored = restore_forward(source, receiver)
++    assert restored.captured_head == current_head
++    assert restored.before == initial_head
++    assert restored.after == current_head
++    assert restored.commit is not None
++    assert restored.commit.before == restored.before
++    assert restored.commit.after == restored.after
++    assert restored.receiver_store.role == "replica"
++    assert receiver_store.read_bytes() == current_source_bytes
++    assert receiver_store.read_bytes().startswith(receiver_before_refusal)
++    assert receiver.read_bytes() == receiver_descriptor
++    json.dumps(restored.as_dict(), allow_nan=False)
++
++    verified = verify_target(receiver)
++    assert verified.captured_head == current_head
++    assert verified.verified_through == current_head
++    assert verified.claims == ("grammar", "density", "lineage", "hash-chain")
++    assert verified.excludes == (
++        "signature-authorship",
++        "external-key-trust",
++        "projection",
++    )
++
++    # Custody advanced, but restore deliberately did not mutate the derived
++    # projection. Reads refuse until the caller explicitly catches it up.
++    with pytest.raises(ProjectionBehind):
++        read_facts(receiver, limit=20, order="oldest")
++
++    synced = sync_target(receiver)
++    assert synced.captured_head == current_head
++    assert synced.target == current_head
++    assert synced.projected_before == initial_head
++    assert synced.projected_after == current_head
++    assert synced.changed is True
++    assert synced.agreement is True
++
++    receiver_read = read_facts(receiver, limit=20, order="oldest")
++    assert receiver_read.truncated is False
++    assert receiver_read.basis is not None
++    assert receiver_read.basis.captured_head == current_head
++    assert receiver_read.basis.projected_through == current_head
++    assert [
++        (item["id"], item["observer"], item["payload"])
++        for item in receiver_read.items
++    ] == [
++        ("selected-item", "alice", {"phase": "selected", "value": 1}),
++        ("later-item", "alice", {"phase": "later", "value": 2}),
++    ]
++    receiver_internal = read_facts(
++        receiver, limit=20, order="oldest", include_internal=True
++    )
++    assert receiver_internal.truncated is False
++    assert receiver_internal.items[: len(initial_internal.items)] == initial_internal.items
++    assert [item["id"] for item in receiver_internal.items] == [
++        *initial_internal_ids,
++        "selected-item",
++        "later-item",
++    ]
++
++    source_read = read_facts(source, limit=20, order="oldest")
++    source_internal = read_facts(
++        source, limit=20, order="oldest", include_internal=True
++    )
++    assert source_read.items == receiver_read.items
++    assert source_read.basis == receiver_read.basis
++    assert source_internal.items == receiver_internal.items
++    assert source_internal.basis == receiver_internal.basis
++    receiver_before_noop = receiver_store.read_bytes()
++    repeated = restore_forward(source, receiver)
++    assert repeated.before == repeated.after == current_head
++    assert repeated.commit is None
++    assert receiver_store.read_bytes() == receiver_before_noop
++    assert receiver.read_bytes() == receiver_descriptor
++    for result in (
++        restored,
++        verified,
++        synced,
++        receiver_read,
++        receiver_internal,
++        source_read,
++        source_internal,
++        repeated,
++    ):
++        json.dumps(result.as_dict(), allow_nan=False)
+

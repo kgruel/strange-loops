@@ -140,9 +140,17 @@ separate [design proposal](projection-recovery-correctness-design-2026-09-05.md)
 ## Cross-operation acceptance scenarios
 
 Extend existing integration fixtures instead of reproducing implementation
-branches in isolated unit tests. These were acceptance targets from the initial audit. C3/C8a evidence now lives
-in the linked first-slice report; remaining scenarios still need their own
-implementation and validation.
+branches in isolated unit tests. These were acceptance targets from the initial
+audit. C3/C8a evidence lives in the linked first-slice report. The four agreed
+public workflow slices now have accepted evidence for
+[two-observer emission and relocation](sdk-conformance-two-observer-2026-09-06.md),
+[declaration recovery](sdk-conformance-declaration-recovery-2026-09-06.md),
+[partial source failure and fresh invocation](sdk-conformance-source-resumption-2026-09-06.md),
+and [captured export, restore, verify and sync/read](sdk-conformance-captured-transfer-2026-09-06.md).
+These bounded workflows complement the individual consistency regressions;
+they do not claim every concurrency, failure or adoption scenario below.
+C9 transition and retirement are next; larger maintenance/transfer work remains
+separate.
 
 | Scenario | Existing coverage to build on | Added cross-operation assertion |
 | --- | --- | --- |

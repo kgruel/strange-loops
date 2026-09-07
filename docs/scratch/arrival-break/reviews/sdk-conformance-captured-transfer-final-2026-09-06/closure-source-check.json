@@ -1,0 +1,19 @@
+{
+  "checked_at": "2026-09-07T02:21:55.466110+00:00",
+  "before_maintained_status_updates": true,
+  "all_sources_match": true,
+  "sources": {
+    "libs/sdk/tests/test_arrival_transfer_workload.py": true,
+    "libs/sdk/README.md": true,
+    "docs/scratch/arrival-break/sdk-conformance-captured-transfer-2026-09-06.md": true,
+    "libs/sdk/src/sdk/transfer.py": true,
+    "libs/sdk/src/sdk/verify.py": true,
+    "libs/engine/src/engine/arrival_transfer.py": true,
+    "libs/engine/src/engine/arrival_restore.py": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/focused-pytest.log": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/ruff.log": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/sdk-full.txt": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/architecture-full.txt": true,
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/engine-transfer.txt": true
+  }
+}

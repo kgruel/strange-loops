@@ -1,3 +1,54 @@
+## September 6: captured transfer conformance complete; C9 transition next
+
+The fourth agreed public SDK workload-conformance slice is complete on
+`arrival/finish` in `loops-wt/arrival-finish`, based on `3152e810` and included in this
+checkpoint; nothing pushed. Sol implemented the
+workflow, Terra audited contracts/guidance, Luna validated suites, and root
+tightened byte/row evidence and triaged the frozen Fable-low review. No
+production change was needed.
+
+Mapped initialization and public export establish an initial exact copy;
+a replica descriptor is explicit fixture setup because public empty-receiver
+import is still pending. The receiver first syncs that initial prefix. Source
+emission then creates a selected head and advances again. Historical export
+after that advance reports distinct captured and selected heads; the bytes
+exactly match the retained selected source and exclude the later observation.
+
+An old selected-head restore refuses with HeadRollback without changing the
+receiver ledger or descriptor. Fresh restore uses the live source descriptor
+and appends through the locally witnessed head. It preserves the entire prior
+prefix and receiver role. Full verification succeeds while CURRENT read still
+refuses ProjectionBehind; explicit sync reports the initial projected head
+and advances it to the restored head. Complete internal/domain reads match
+source and receiver, including unchanged prior declaration rows. Repeated
+restore is a no-op with no invented Commit. Export is not an import API or
+a way to lower the witness floor.
+
+Fable 5.1 LOW and primary verdicts: **ACCEPT**, no blockers or source
+corrections. All frozen sources matched at closure; only maintained
+status/handoff prose changed afterward. No jobs remain.
+Native validation: focused transfer/export/restore **16 passed** /0.49s;
+full SDK **583 passed** /20.96s; architecture **101 passed** /5.67s; engine
+transfer/restore **55 passed** /0.38s. Scoped Ruff and whitespace pass.
+Every test process isolates XDG state/config and LOOPS_HOME; explicit logs
+are archived without stores/keys. Test SHA-256:
+`5103a21f0bf0cabb65b3e3a3b3d95426619ec8f0f1022b6958f205fd58746d83`.
+See the [report](sdk-conformance-captured-transfer-2026-09-06.md).
+
+**Next bounded step:** C9 transition inventory and first CLI slice selection,
+using the established delegation/review pattern. Compare supported public SDK
+operations with `apps/loops-min` commands and legacy callers, then choose the
+smallest process workflow that can use the proven SDK contracts. The minimal
+client still reserves init/emit/emit-batch/declaration as unavailable despite
+those SDK contracts now existing. Keep serialization and outcome semantics in
+the SDK; retire old authority paths only with surviving consumers covered.
+No C9 implementation began here. Larger projection preserve/rebuild recovery,
+empty-receiver exact import, foreign admission, descriptor adoption and live
+adoption remain separate work. This completes the four agreed conformance
+workloads, not every scenario on the consistency matrix or the full roadmap.
+
+Earlier entries below preserve their status at the time of writing.
+
 ## September 6: source failure conformance complete; captured transfer next
 
 The third public SDK workload-conformance slice is complete on `arrival/finish`

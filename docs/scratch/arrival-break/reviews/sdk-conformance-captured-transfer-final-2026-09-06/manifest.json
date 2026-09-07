@@ -1,0 +1,31 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06",
+  "due_at": "2026-09-07T02:19:33.253307+00:00",
+  "baseline": "3152e810",
+  "scope": "Public SDK captured transfer conformance final",
+  "jobs": [
+    {
+      "name": "final",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/final-prompt.txt",
+      "sha256": "2d626f36e4197e2a0ce22bc866b6cb157d4ea85574c15a8cb295e685b37e6ecd",
+      "sources": {
+        "libs/sdk/tests/test_arrival_transfer_workload.py": "5103a21f0bf0cabb65b3e3a3b3d95426619ec8f0f1022b6958f205fd58746d83",
+        "libs/sdk/README.md": "6a4dbbd92dfcc8c4d57a79867051fd0c121a4763f1658ca9f0699c51d2623bbe",
+        "docs/scratch/arrival-break/sdk-conformance-captured-transfer-2026-09-06.md": "89313ec521de0db30ac80f6e477a7f8b7897d611fd47300f5dcf979b9e0c8fdb",
+        "libs/sdk/src/sdk/transfer.py": "ac5d0e8d596c5cc281f5db4aa94ffea686cb4bf11ac9f4c85522a2d109ea29b7",
+        "libs/sdk/src/sdk/verify.py": "301162d7ec3ca18c7e60b0b0fd3702a4900b121a5225baf0dbf271777e94f525",
+        "libs/engine/src/engine/arrival_transfer.py": "e6724e6bc2f3e5c201904b919ced0051847043b73c22cb8a7b0d6f0a99149c6a",
+        "libs/engine/src/engine/arrival_restore.py": "81666b64abf13639d5a0fbe480c624891be85efe62d25004e535ed2d62991b2a",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/focused-pytest.log": "fee33d760717989ea8d921994e5318208fae670f195f536cd0f479f6d522a62c",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/sdk-full.txt": "40fd818e27a4a63515c480fdfab1f1fc9b0ad943d1fd5147a14a74813ebdc17c",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/architecture-full.txt": "d2281c07202edcdecd882e77a832fe26554067d9644e3e2ae7cbd193af078a2f",
+        "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/engine-transfer.txt": "031755532a44f76ff2dfa512f7d40ef4aaaec956c191bea445bcd15f37e9c24d"
+      },
+      "status": "pending"
+    }
+  ]
+}

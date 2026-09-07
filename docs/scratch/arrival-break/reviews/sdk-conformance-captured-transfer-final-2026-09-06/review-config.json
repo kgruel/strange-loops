@@ -1,0 +1,18 @@
+{
+  "instruction": "You are the final adversarial reviewer for a bounded public SDK workload-conformance slice. Use Fable 5.1 LOW. Static review only; no tools, execution, delegation or modifications. Return ACCEPT or REVISE, blockers with source locations, concrete false positives and smallest corrections, then optional findings. Do not infer validation you did not run.\nBaseline 3152e810. Scope: captured-prefix export \u2192 restore forward \u2192 verify \u2192 explicit sync \u2192 read. Public mapped initialization/emission establish a source and a preexisting replica fixture. Source advances beyond selected S before historical export; export captured head differs from selected artifact head, and exact retained bytes exclude later observations. Historical selected restore below locally witnessed latest head MUST refuse HeadRollback before receiver append; current live-source restore then succeeds and includes later observations. Restore does not consume the export artifact; explicit receiver descriptor/initial exported-prefix setup is not a public import API. Empty receiver import remains separate work.\nAssess exact exported bytes/head/manifest/count and stable selected identity, causal specificity of old-prefix refusal and receiver preservation, full-head commit chain, restore-forward retention of prior history and descriptor role, successful structural verification while projection remains stale, refusal of CURRENT read without implicit repair, explicit sync before/target/after, exact complete receipt-order public rows and prior-row retention, no-op exact restore, strict JSON results and isolated fixtures. Full verifies grammar/density/lineage/hash chain, not signatures/key trust/projection. No production changes intended. This deterministic workflow does not claim concurrent/process-crash coverage; existing engine/SDK transfer/restore tests retain publication, CAS/stream, unknown receipt, committed-incomplete and projection contradiction coverage. Do not demand C9 retirement or unrelated scope expansion. Native logs are prior executed validation, not reviewer execution.\n",
+  "sources": [
+    "libs/sdk/tests/test_arrival_transfer_workload.py",
+    "libs/sdk/README.md",
+    "docs/scratch/arrival-break/sdk-conformance-captured-transfer-2026-09-06.md",
+    "libs/sdk/src/sdk/transfer.py",
+    "libs/sdk/src/sdk/verify.py",
+    "libs/engine/src/engine/arrival_transfer.py",
+    "libs/engine/src/engine/arrival_restore.py",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/focused-pytest.log",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/ruff.log",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/sdk-full.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/architecture-full.txt",
+    "docs/scratch/arrival-break/reviews/sdk-conformance-captured-transfer-final-2026-09-06/validation-evidence/engine-transfer.txt"
+  ],
+  "patch": true
+}

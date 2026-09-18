@@ -1,3 +1,23 @@
+## September 18: adoption remediation accepted and checkpointed
+
+Corrections are checkpointed in **7ede817a** and **c5eb5041** on `arrival/finish`.
+Sol handled engine fixes, Terra SDK wiring and source-policy triage, Luna
+independent fault regressions/review, and root integration tests and Fable review.
+The second Fable pass found a remaining recovery maintenance-preflight gap;
+it was fixed in both append paths along with intent locking and diagnostics.
+The final Fable 5.1 pass returned **ACCEPT**, no P1/P2 blockers, all five original
+findings resolved, and unchanged reviewed source hashes.
+
+Final engine validation: **2,642 passed, 1 skipped**. Final SDK/migration checks:
+**24 passed**. Earlier full SDK and repository checks on the first correction
+passed **609** and **115** respectively. Scoped type/lint checks are green.
+
+See [final review](reviews/adoption-fable-r3-2026-09-18/findings.md) and
+[closure and nonblocking follow-ups](reviews/adoption-fable-r3-2026-09-18/primary-triage.md).
+Two P3 input-error edge cases are tracked there. Next work is the representative-
+copy migration/adoption rehearsal with reviewed inputs. No live stores, mappings
+or writers changed; nothing pushed or merged.
+
 ## September 18: Fable findings corrected; second review pending
 
 The original Fable review and reproductions are checkpointed in **72fe4781**.

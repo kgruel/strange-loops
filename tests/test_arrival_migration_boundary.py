@@ -541,3 +541,229 @@ raise AssertionError("durable stop phase was not reached")
     with pytest.raises(SdkError):
         recover_arrival_adoption(intent)
     assert migrated.target_path.read_bytes() == final
+
+
+def _mapped_migration_fixture(tmp_path: Path):
+    """A real signed migration for adoption's SDK boundary fault tests."""
+    from sdk import MappedCredentialProvider
+
+    data = tmp_path / "data"
+    data.mkdir()
+    source = data / "legacy.jsonl"
+    _write_jsonl(source)
+    provider = MappedCredentialProvider(
+        tmp_path / "credentials", namespace="adoption-faults", receipt_observer="alice",
+    )
+    binding = provider.create_binding("alice", token="create-alice")
+    vertex = tmp_path / "alice.vertex"
+    _write_vertex(vertex, binding.public_key, source.name)
+    reviewed = vertex.read_text()
+    signer = provider.resolve(CredentialRequest(
+        provider.namespace, "alice", SigningDomain.ARRIVAL, CredentialPurpose.INITIALIZATION,
+    ))
+    assert signer is not None
+    migration = run_migration(
+        source, vertex, store_dir=data, signer=lambda _observer, digest: signer.sign_digest(digest),
+    )
+    return provider, binding, vertex, reviewed, migration
+
+
+@pytest.mark.parametrize("broken_domain", [SigningDomain.FACT, SigningDomain.ARRIVAL])
+def test_adoption_independently_verifies_custom_mapped_signatures(
+    tmp_path: Path, broken_domain: SigningDomain,
+) -> None:
+    from engine.credentials import ResolvedCredential
+    from sdk import adopt_arrival
+
+    provider, _binding, vertex, reviewed, migration = _mapped_migration_fixture(tmp_path)
+    before = migration.target_path.read_bytes()
+
+    def resolve(request):
+        genuine = provider.resolve(request)
+        assert genuine is not None
+        if request.domain is broken_domain:
+            return ResolvedCredential(genuine.evidence, lambda _digest: "junk-signature")
+        return genuine
+
+    untrustworthy = WriteCredentials(
+        binding_namespace=provider.namespace,
+        binding_resolver=resolve,
+        signature_verifier=lambda *_args: True,
+    )
+    with pytest.raises(SdkError, match="sign|verif"):
+        adopt_arrival(
+            vertex, selected_head=migration.head, reviewed_text=reviewed,
+            reviewed_sha256=hashlib.sha256(reviewed.encode()).hexdigest(),
+            declaration_text=vertex.read_text(), observer="alice", credentials=untrustworthy,
+        )
+    assert migration.target_path.read_bytes() == before
+    assert not vertex.with_name(vertex.name + ".arrival-adopt.intent").exists()
+
+
+def test_adoption_verifies_actual_binding_when_observer_has_two_valid_keys(tmp_path: Path) -> None:
+    from engine.admission import fact_commitment_hash
+    from engine.arrival import content_commitment
+    from engine.arrival_contract import RecordDraft
+    from sdk import MappedCredentialProvider, adopt_arrival
+
+    provider, original, vertex, reviewed, migration = _mapped_migration_fixture(tmp_path)
+    selected = MappedCredentialProvider(
+        tmp_path / "second-credentials", namespace="selected-key", receipt_observer="alice",
+    )
+    second = selected.create_binding("alice", token="create-second-key")
+    signer = provider.resolve(CredentialRequest(
+        provider.namespace, "alice", SigningDomain.ARRIVAL, CredentialPurpose.KEY_INTRODUCTION,
+    ))
+    assert signer is not None
+    body = {"observer": "alice", "key": second.public_key}
+    digest = content_commitment("key", 1002.0, "alice", "", body)
+    registry = BackendRegistry.with_builtin_backends()
+    descriptor = descriptor_for(parse_vertex_file(vertex), vertex)
+    assert descriptor is not None
+    ledger, query = registry.open(descriptor)
+    try:
+        introduction = ledger.append(migration.head, (
+            RecordDraft("key", 1002.0, "alice", "", body, signer.sign_digest(digest)),
+        ))
+    finally:
+        query.close()
+        ledger.close()
+    result = adopt_arrival(
+        vertex, selected_head=introduction.after, reviewed_text=reviewed,
+        reviewed_sha256=hashlib.sha256(reviewed.encode()).hexdigest(),
+        declaration_text=vertex.read_text(), observer="alice", credentials=selected,
+    )
+    assert result.commit is not None and result.commit.before == introduction.after
+    record = result.commit.records[0]
+    fact = record["body"]
+    inner = fact_commitment_hash(
+        fact["kind"], fact["ts"], fact["observer"], fact["origin"], fact["payload"],
+    )
+    outer = content_commitment(
+        record["k"], record["at"], record["observer"], record["origin"], fact,
+    )
+    for domain, signature, commitment in (
+        (SigningDomain.FACT, fact["signature"], inner),
+        (SigningDomain.ARRIVAL, record["sig"], outer),
+    ):
+        assert selected.verify(domain, second.public_key, signature, commitment)
+        assert not provider.verify(domain, original.public_key, signature, commitment)
+    assert read_summary(vertex).basis.captured_head == result.head
+
+
+@pytest.mark.parametrize(
+    "maintenance", ["missing", "no-catch-up", "rebuild-only", "catch-up-and-rebuild"],
+)
+def test_adoption_refuses_unusable_maintenance_before_resolving_credentials(
+    tmp_path: Path, maintenance: str,
+) -> None:
+    from engine.arrival_maintenance import MaintenanceCapabilities
+    from engine.arrival_registry import _file_binding, _open_file_backend
+    from sdk import adopt_arrival
+
+    provider, _binding, vertex, reviewed, migration = _mapped_migration_fixture(tmp_path)
+    before = migration.target_path.read_bytes()
+    calls = []
+
+    class UnsupportedMaintenance:
+        def capabilities(self):
+            return MaintenanceCapabilities(
+                catch_up=maintenance == "catch-up-and-rebuild",
+                rebuild=maintenance in {"rebuild-only", "catch-up-and-rebuild"},
+            )
+
+        def catch_up(self, _head):
+            calls.append("catch-up")
+            raise AssertionError("preflight must not mutate projections")
+
+        def close(self):
+            calls.append("closed")
+
+    registry = BackendRegistry()
+    registry.register(
+        "file", _open_file_backend, binding_provider=_file_binding,
+        maintenance_opener=None if maintenance == "missing" else lambda _d: UnsupportedMaintenance(),
+    )
+
+    def resolve(request):
+        calls.append("resolve")
+        return provider.resolve(request)
+
+    credentials = WriteCredentials(
+        binding_namespace=provider.namespace,
+        binding_resolver=resolve,
+        signature_verifier=provider.verify,
+    )
+    with pytest.raises(SdkError, match="maintenance|catch-up|rebuild"):
+        adopt_arrival(
+            vertex, selected_head=migration.head, reviewed_text=reviewed,
+            reviewed_sha256=hashlib.sha256(reviewed.encode()).hexdigest(),
+            declaration_text=vertex.read_text(), observer="alice", credentials=credentials,
+            registry=registry,
+        )
+    assert "resolve" not in calls and "catch-up" not in calls
+    if maintenance != "missing":
+        assert "closed" in calls
+    assert migration.target_path.read_bytes() == before
+    assert not vertex.with_name(vertex.name + ".arrival-adopt.intent").exists()
+
+
+def test_sdk_retires_proven_superseded_intent_then_adopts_fresh_selected_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import engine.arrival_adoption as engine_adoption
+    from engine.arrival_body import body_of_fact_row
+    from engine.arrival_contract import RecordDraft
+    from sdk import ArrivalRefusal, adopt_arrival, recover_arrival_adoption
+
+    provider, _binding, vertex, reviewed, migration = _mapped_migration_fixture(tmp_path)
+    kwargs = {
+        "selected_head": migration.head,
+        "reviewed_text": reviewed,
+        "reviewed_sha256": hashlib.sha256(reviewed.encode()).hexdigest(),
+        "declaration_text": vertex.read_text(),
+        "observer": "alice",
+        "credentials": provider,
+    }
+    actual_apply = engine_adoption.apply_arrival_adoption
+
+    def stop_after_intent(phase):
+        if phase == "after-intent":
+            raise OSError("reserve the original adoption before any append")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            engine_adoption, "apply_arrival_adoption",
+            lambda registry, plan: actual_apply(registry, plan, failure_hook=stop_after_intent),
+        )
+        with pytest.raises(ArrivalRefusal):
+            adopt_arrival(vertex, **kwargs)
+    intent = vertex.with_name(vertex.name + ".arrival-adopt.intent")
+    assert intent.exists()
+    registry = BackendRegistry.with_builtin_backends()
+    descriptor = descriptor_for(parse_vertex_file(vertex), vertex)
+    assert descriptor is not None
+    ledger, query = registry.open(descriptor)
+    try:
+        body = body_of_fact_row((
+            "interleaved-before-adoption", "concept", 1002.0, "alice", "", "{}", None,
+        ))
+        intervening = ledger.append(migration.head, (RecordDraft("fact", 1002.0, "alice", "", body),))
+    finally:
+        query.close()
+        ledger.close()
+    prefix = migration.target_path.read_bytes()
+    with pytest.raises(ArrivalRefusal, match="superseded.*retired"):
+        recover_arrival_adoption(intent)
+    assert not intent.exists()
+    assert migration.target_path.read_bytes() == prefix
+    kwargs["selected_head"] = intervening.after
+    adopted = adopt_arrival(vertex, **kwargs)
+    assert adopted.commit is not None and adopted.commit.before == intervening.after
+    assert migration.target_path.read_bytes().startswith(prefix)
+    anchors = [
+        row for row in read_facts(vertex, include_internal=True, limit=100).items
+        if row["kind"] == "_decl.genesis"
+    ]
+    assert len(anchors) == 1
+    assert anchors[0]["id"] == migration.lineage

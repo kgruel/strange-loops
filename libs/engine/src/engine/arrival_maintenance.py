@@ -37,6 +37,7 @@ __all__ = [
     "ProjectionMaintenance",
     "ProjectionSyncError",
     "ProjectionSyncResult",
+    "preflight_projection_maintenance",
     "sync_projection",
 ]
 
@@ -179,6 +180,53 @@ def _verify_target(ledger: AttestedLedger, captured: Head, target: Head) -> Head
     return verified
 
 
+def _require_catch_up(
+    registry: BackendRegistry, descriptor: StoreDescriptor, *, rebuild: bool = False
+) -> ProjectionMaintenance:
+    maintenance = registry._maintenance_for(descriptor)
+    try:
+        capabilities = maintenance.capabilities()
+        if rebuild or not capabilities.catch_up:
+            raise NotSupported(
+                "projection rebuild is not supported"
+                if rebuild
+                else f"backend {descriptor.backend!r} does not support projection catch-up"
+            )
+        if capabilities.rebuild:
+            raise TypeError(
+                "first-stage maintenance providers must advertise rebuild=False"
+            )
+        return maintenance
+    except BaseException:
+        _close_quietly(maintenance)
+        raise
+
+
+def preflight_projection_maintenance(
+    registry: BackendRegistry, descriptor: StoreDescriptor, *, through: Head
+) -> None:
+    """Prove catch-up availability at an attested head without mutating derived state."""
+    if descriptor.role not in (Profile.AUTHORITY, Profile.REPLICA):
+        raise NotAuthority(
+            "projection maintenance requires an explicit Authority or Replica role"
+        )
+    ledger, query = registry.open(descriptor)
+    maintenance: ProjectionMaintenance | None = None
+    try:
+        if not isinstance(ledger, AttestedLedger):
+            raise TypeError("BackendRegistry.open must return an AttestedLedger")
+        captured = _captured_head(ledger)
+        if captured != through:
+            raise HeadMismatch("projection preflight head moved after adoption capture")
+        _verify_target(ledger, captured, through)
+        maintenance = _require_catch_up(registry, descriptor)
+    finally:
+        if maintenance is not None:
+            _close_quietly(maintenance)
+        _close_quietly(query)
+        _close_quietly(ledger)
+
+
 def sync_projection(
     registry: BackendRegistry,
     descriptor: StoreDescriptor,
@@ -208,18 +256,7 @@ def sync_projection(
             ledger, captured, captured if through is None else through
         )
 
-        maintenance = registry._maintenance_for(descriptor)
-        capabilities = maintenance.capabilities()
-        if rebuild or not capabilities.catch_up:
-            raise NotSupported(
-                "projection rebuild is not supported"
-                if rebuild
-                else f"backend {descriptor.backend!r} does not support projection catch-up"
-            )
-        if capabilities.rebuild:
-            raise TypeError(
-                "first-stage maintenance providers must advertise rebuild=False"
-            )
+        maintenance = _require_catch_up(registry, descriptor, rebuild=rebuild)
 
         projected_before, before_generation = _snapshot_state(
             query, ledger, bound=captured

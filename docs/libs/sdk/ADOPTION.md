@@ -17,6 +17,11 @@ operation cannot introduce or replace observer keys, or adopt a changed
 declaration as an incidental part of migration. It checks the selected head,
 registry-forming signatures, declaration identities and captured observer keys
 before signing the new anchor.
+It independently verifies the resulting FACT and ARRIVAL signatures against
+the selected mapped binding's public key; a provider-local verifier cannot
+replace that check.
+It also checks that the selected backend provides projection catch-up before
+resolving signing credentials; the preflight does not advance the projection.
 
 ```python
 from sdk import adopt_arrival
@@ -60,6 +65,12 @@ not re-sign or append a duplicate. If later records exist, `head` still names
 the adoption head; `observed_head` records the later tip. A reconstructed commit
 labels its durability evidence as recovery evidence rather than claiming the
 original append receipt was retained.
+
+If recovery Full-verifies that another record has taken the reserved next
+ordinal, it retires only that provably superseded intent and returns a stale
+refusal. A caller can then prepare a fresh adoption at the new selected head.
+Malformed intents also return a typed SDK refusal and remain in place for
+operator inspection.
 
 The operation reconciles the already-published cache without rewriting it.
 A changed cache or a post-append projection failure leaves a recovery boundary;

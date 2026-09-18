@@ -279,7 +279,7 @@ def build_declaration_anchor_draft(
     documents: Sequence[Mapping[str, Any]],
     fact_signer: Callable[[str, str], str | None],
     arrival_signer: Callable[[str, str], str | None],
-    public_key: str,
+    public_key: str | None = None,
     fact_verify: Callable[[str, str, str], bool] | None = None,
     arrival_verify: Callable[[str, str, str], bool] | None = None,
 ) -> RecordDraft:
@@ -296,8 +296,8 @@ def build_declaration_anchor_draft(
         raise ArrivalInitializationError(
             f"founding observer {observer!r} has no fact signer"
         )
-    if fact_verify is not None and not fact_verify(
-        public_key, inner_signature, inner_digest
+    if fact_verify is not None and (
+        public_key is None or not fact_verify(public_key, inner_signature, inner_digest)
     ):
         raise ArrivalInitializationError("founding fact signer does not match the public key")
     body = body_of_fact_row(
@@ -309,8 +309,8 @@ def build_declaration_anchor_draft(
         raise ArrivalInitializationError(
             f"founding observer {observer!r} has no Arrival signer"
         )
-    if arrival_verify is not None and not arrival_verify(
-        public_key, outer_signature, outer_digest
+    if arrival_verify is not None and (
+        public_key is None or not arrival_verify(public_key, outer_signature, outer_digest)
     ):
         raise ArrivalInitializationError("founding Arrival signer does not match the public key")
     return RecordDraft(

@@ -23,6 +23,7 @@ from engine.arrival_adoption import (
 )
 from engine.arrival_body import body_of_fact_row
 from engine.arrival_contract import Profile, RecordDraft, StoreDescriptor
+from engine.arrival_file_backend import file_projection_path
 from engine.arrival_registry import BackendRegistry
 from engine.credentials import (
     CredentialBindingEvidence,
@@ -87,6 +88,9 @@ def _fixture(tmp_path: Path, *, bad_genesis: bool = False, selected_key: str | N
         "reviewed_sha256": hashlib.sha256(reviewed.encode()).hexdigest(),
         "declaration_text": published, "observer": "alice",
         "credentials": credentials,
+        "fact_verify": lambda key, signature, digest: (
+            key == KEY and signature == f"fact:{digest}"
+        ),
         "arrival_verify": lambda key, signature, digest: (
             key == KEY and signature == f"arrival:{digest}"
         ),
@@ -124,6 +128,20 @@ def test_adoption_appends_one_initializer_anchor_and_syncs(tmp_path: Path, monke
     assert records[1]["body"]["id"] == descriptor.lineage
     assert records[1]["body"]["kind"] == "_decl.genesis"
     assert kwargs["target"].read_text() == kwargs["declaration_text"]
+
+
+def test_successful_maintenance_preflight_does_not_mutate_custody_or_projection(
+    tmp_path: Path,
+) -> None:
+    registry, descriptor, kwargs = _fixture(tmp_path)
+    log = Path(descriptor.location)
+    projection = file_projection_path(log)
+    before = log.read_bytes()
+    assert not projection.exists()
+    plan = prepare_arrival_adoption(registry, descriptor, **kwargs)
+    assert plan.captured_head == kwargs["selected_head"]
+    assert log.read_bytes() == before
+    assert not projection.exists()
 
 
 def test_adoption_recovery_reuses_exact_committed_anchor(tmp_path: Path, monkeypatch) -> None:
@@ -260,7 +278,7 @@ def test_adoption_cas_refuses_changed_head_after_prepare(tmp_path: Path) -> None
         ledger.close()
     with pytest.raises(AdoptionStale):
         apply_arrival_adoption(registry, plan)
-    assert not arrival_adoption_intent_path(kwargs["target"]).exists()
+    assert arrival_adoption_intent_path(kwargs["target"]).exists()
 
 
 @pytest.mark.parametrize("kind", ("overlay", "foreign-genesis", "bad-key"))

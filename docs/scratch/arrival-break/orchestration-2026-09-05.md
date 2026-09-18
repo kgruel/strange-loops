@@ -1,3 +1,24 @@
+## September 18: Fable findings corrected; second review pending
+
+The original Fable review and reproductions are checkpointed in **72fe4781**.
+All five P2 corrections are implemented: independent dual-domain preparation
+verification under the actual mapped key; known appended phase before recovery
+sync; proof-confirmed retirement of superseded intents; strict typed intent
+parsing; and attested nonmutating maintenance preflight before signing.
+
+Sol owns engine corrections and validation, Terra the SDK/domain wiring and
+usage notes, Luna independent recovery fault tests and review, and root the
+real-crypto/public-SDK integration regressions and Fable orchestration. Luna's
+final local review found no unresolved defects. Root's integration checks
+include both invalid signature domains, second-valid-key selection, missing
+and incompatible maintenance, and superseded-intent fresh adoption through the
+SDK. Original process-exit/tampered-intent regressions remain green.
+
+The code is being checkpointed for a second Fable 5.1 high-effort review; this
+entry is not a claim of Fable acceptance. See the
+[remediation report](adoption-fable-remediation-2026-09-18.md).
+No live stores, credentials or writers were changed; nothing pushed or merged.
+
 ## September 18: Fable 5.1 adversarial check — REVISE
 
 User requested a Claude CLI Fable 5.1 review of completed adoption checkpoint

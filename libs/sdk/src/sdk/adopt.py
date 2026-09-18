@@ -202,6 +202,7 @@ def adopt_arrival(
             declaration_text=declaration_text,
             observer=observer,
             credentials=write_credentials,
+            fact_verify=_domain_verifier(FACT_DOMAIN),
             arrival_verify=_domain_verifier(ARRIVAL_DOMAIN),
         )
         raw = apply_arrival_adoption(active_registry, plan)

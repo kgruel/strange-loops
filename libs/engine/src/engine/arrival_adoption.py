@@ -41,7 +41,11 @@ from .arrival_declarations import (
     _write_exclusive_json,
 )
 from .arrival_initialization import build_declaration_anchor_draft
-from .arrival_maintenance import ProjectionSyncResult, sync_projection
+from .arrival_maintenance import (
+    ProjectionSyncResult,
+    preflight_projection_maintenance,
+    sync_projection,
+)
 from .arrival_registry import BackendRegistry
 from .credentials import (
     CapturedSigningContext,
@@ -263,6 +267,7 @@ def prepare_arrival_adoption(
     *, target: Path | str, selected_head: Head,
     reviewed_text: str, reviewed_sha256: str, declaration_text: str,
     observer: str, credentials: WriteCredentials,
+    fact_verify: Callable[[str, str, str], bool],
     arrival_verify: Callable[[str, str, str], bool],
     authored_at: float | None = None,
 ) -> ArrivalAdoptionPlan:
@@ -276,8 +281,8 @@ def prepare_arrival_adoption(
         raise AdoptionPreparationRefused("adopting observer must be explicit")
     if not credentials.mapped or credentials.signature_verifier is None:
         raise AdoptionPreparationRefused("adoption requires pre-created mapped credentials")
-    if not callable(arrival_verify):
-        raise AdoptionPreparationRefused("migration registry requires an ARRIVAL verifier")
+    if not callable(fact_verify) or not callable(arrival_verify):
+        raise AdoptionPreparationRefused("adoption requires public FACT and ARRIVAL verifiers")
     if not all(
         isinstance(value, str)
         for value in (reviewed_text, reviewed_sha256, declaration_text)
@@ -344,6 +349,13 @@ def prepare_arrival_adoption(
         _close(query)
         _close(ledger)
 
+    try:
+        preflight_projection_maintenance(registry, descriptor, through=captured)
+    except Exception as exc:
+        raise AdoptionPreparationRefused(
+            f"required projection maintenance is unavailable at S: {exc}"
+        ) from exc
+
     session = CredentialResolutionSession()
     context = CapturedSigningContext(captured, ((observer, valid),), ())
     namespace = credentials.binding_namespace
@@ -361,18 +373,47 @@ def prepare_arrival_adoption(
         draft = build_declaration_anchor_draft(
             lineage=captured.lineage, authored_at=at, observer=observer,
             documents=documents, fact_signer=_sign(SigningDomain.FACT),
-            arrival_signer=_sign(SigningDomain.ARRIVAL), public_key=valid[0],
+            arrival_signer=_sign(SigningDomain.ARRIVAL),
         )
     except CredentialBindingRefused as exc:
         raise AdoptionPreparationRefused(f"mapped adoption binding refused: {exc}") from exc
     except Exception as exc:
         raise AdoptionPreparationRefused(f"cannot sign adoption anchor: {exc}") from exc
+    bindings = session.evidence
+    if (
+        len(bindings) != 2
+        or bindings[0].request.domain is not SigningDomain.FACT
+        or bindings[1].request.domain is not SigningDomain.ARRIVAL
+        or bindings[0].public_key != bindings[1].public_key
+        or bindings[0].public_key not in valid
+    ):
+        raise AdoptionPreparationRefused("mapped adoption bindings disagree")
+    bound_key = bindings[0].public_key
+    if not isinstance(draft.signature, str) or not isinstance(
+        draft.body.get("signature"), str
+    ):
+        raise AdoptionPreparationRefused("draft signatures are missing")
+    inner_digest = fact_commitment_hash(
+        "_decl.genesis", at, observer, "", draft.body["payload"]
+    )
+    outer_digest = content_commitment("fact", at, observer, "", dict(draft.body))
+    try:
+        fact_ok = fact_verify(bound_key, draft.body["signature"], inner_digest)
+        arrival_ok = arrival_verify(bound_key, draft.signature, outer_digest)
+    except Exception as exc:
+        raise AdoptionPreparationRefused(
+            f"independent adoption signature verification failed: {exc}"
+        ) from exc
+    if not fact_ok or not arrival_ok:
+        raise AdoptionPreparationRefused(
+            "draft signatures do not verify under the selected mapped public key"
+        )
     return ArrivalAdoptionPlan(
         target_path, descriptor, captured.lineage,
         ReadBasis(captured.lineage, captured, None, None), captured, observer,
         reviewed_text, reviewed_sha256, declaration_text,
         hashlib.sha256(published).hexdigest(), documents, draft,
-        _exact_drafts((draft,)), session.evidence,
+        _exact_drafts((draft,)), bindings,
     )
 
 
@@ -474,16 +515,20 @@ def apply_arrival_adoption(
                     intent_path=intent, cause=exc,
                 ) from exc
             if current != plan.captured_head:
-                _remove_intent(intent)
-                raise AdoptionStale("migration head changed before adoption append")
+                raise AdoptionStale(
+                    "migration head changed before adoption append; recover intent "
+                    "to prove whether it is superseded"
+                )
             try:
                 commit = ledger.append(plan.captured_head, (plan.draft,))
             except Exception as exc:
                 from .arrival_contract import ContractRefusal
                 from .arrival_head_seam import NotWitnessed
                 if isinstance(exc, ContractRefusal):
-                    _remove_intent(intent)
-                    raise AdoptionStale(f"adoption CAS refused: {exc}") from exc
+                    raise AdoptionStale(
+                        f"adoption append refused: {exc}; recover intent to "
+                        "establish its disposition"
+                    ) from exc
                 if isinstance(exc, NotWitnessed):
                     data["phase"] = "append-unwitnessed"
                     with suppress(Exception):
@@ -517,41 +562,89 @@ def apply_arrival_adoption(
                        "applied", failure_hook)
 
 
-def _plan_from_intent(data: Mapping[str, Any]) -> ArrivalAdoptionPlan:
-    if data.get("schema") != _SCHEMA:
+def _intent_object(value: Any, label: str) -> Mapping[str, Any]:
+    if not isinstance(value, dict):
+        raise AdoptionApplyError(f"adoption intent {label} must be an object")
+    return value
+
+
+def _intent_string(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise AdoptionApplyError(f"adoption intent {label} must be a nonempty string")
+    return value
+
+
+def _plan_from_intent(data: Any) -> ArrivalAdoptionPlan:
+    root = _intent_object(data, "root")
+    if root.get("schema") != _SCHEMA:
         raise AdoptionApplyError("unsupported adoption intent")
-    captured_data = data["captured_head"]
-    captured = Head(str(captured_data["lineage"]), int(captured_data["ordinal"]),
-                    str(captured_data["record_hash"]))
-    descriptor = _descriptor_from(data["descriptor"])
-    target = Path(data["target"]).resolve()
-    text = data["declaration_text"]
-    digest = data["declaration_sha256"]
-    reviewed_text = data["reviewed_text"]
-    reviewed_sha256 = data["reviewed_sha256"]
-    if hashlib.sha256(text.encode("utf-8")).hexdigest() != digest:
-        raise AdoptionApplyError("adoption intent declaration bytes do not verify")
-    if hashlib.sha256(reviewed_text.encode("utf-8")).hexdigest() != reviewed_sha256:
-        raise AdoptionApplyError("adoption intent reviewed snapshot bytes do not verify")
-    drafts = _drafts_from_exact(data["drafts"], data["exact_drafts"])
-    if len(drafts) != 1 or drafts[0].body.get("id") != captured.lineage:
-        raise AdoptionApplyError("adoption intent has no exact lineage anchor")
-    evidence = tuple(
-        CredentialBindingEvidence(
-            CredentialRequest(
-                item["request"]["namespace"], item["request"]["observer"],
-                SigningDomain(item["request"]["domain"]),
-                CredentialPurpose(item["request"]["purpose"]),
-            ), item["key_ref"], item["algorithm"], item["public_key"],
-            item["provenance"],
-        ) for item in data["bindings"]
-    )
-    return ArrivalAdoptionPlan(
-        target, descriptor, captured.lineage,
-        ReadBasis(captured.lineage, captured, None, None), captured,
-        data["observer"], reviewed_text, reviewed_sha256,
-        text, digest, (), drafts[0], data["exact_drafts"], evidence,
-    )
+    if root.get("phase") not in {
+        "prepared", "append-unknown", "append-unwitnessed", "appended",
+        "synced", "published",
+    }:
+        raise AdoptionApplyError("adoption intent phase is invalid")
+    try:
+        captured_data = _intent_object(root["captured_head"], "captured head")
+        ordinal = captured_data["ordinal"]
+        if not isinstance(ordinal, int) or isinstance(ordinal, bool) or ordinal < 0:
+            raise AdoptionApplyError("adoption intent captured ordinal is invalid")
+        captured = Head(
+            _intent_string(captured_data["lineage"], "captured lineage"),
+            ordinal,
+            _intent_string(captured_data["record_hash"], "captured hash"),
+        )
+        descriptor_data = _intent_object(root["descriptor"], "descriptor")
+        for field in ("backend", "location", "lineage", "role"):
+            _intent_string(descriptor_data[field], f"descriptor {field}")
+        descriptor = _descriptor_from(descriptor_data)
+        target = Path(_intent_string(root["target"], "target")).resolve()
+        text = _intent_string(root["declaration_text"], "authority text")
+        digest = _intent_string(root["declaration_sha256"], "authority hash")
+        reviewed_text = _intent_string(root["reviewed_text"], "reviewed text")
+        reviewed_sha256 = _intent_string(root["reviewed_sha256"], "reviewed hash")
+        observer = _intent_string(root["observer"], "observer")
+        if hashlib.sha256(text.encode("utf-8")).hexdigest() != digest:
+            raise AdoptionApplyError("adoption intent declaration bytes do not verify")
+        if hashlib.sha256(reviewed_text.encode("utf-8")).hexdigest() != reviewed_sha256:
+            raise AdoptionApplyError("adoption intent reviewed snapshot bytes do not verify")
+        raw_drafts = root["drafts"]
+        if not isinstance(raw_drafts, list):
+            raise AdoptionApplyError("adoption intent drafts must be a list")
+        exact_drafts = _intent_string(root["exact_drafts"], "exact drafts")
+        drafts = _drafts_from_exact(raw_drafts, exact_drafts)
+        if len(drafts) != 1 or drafts[0].body.get("id") != captured.lineage:
+            raise AdoptionApplyError("adoption intent has no exact lineage anchor")
+        raw_bindings = root["bindings"]
+        if not isinstance(raw_bindings, list):
+            raise AdoptionApplyError("adoption intent bindings must be a list")
+        evidence = []
+        for index, raw in enumerate(raw_bindings):
+            item = _intent_object(raw, f"binding {index}")
+            request = _intent_object(item["request"], f"binding {index} request")
+            evidence.append(CredentialBindingEvidence(
+                CredentialRequest(
+                    _intent_string(request["namespace"], "binding namespace"),
+                    _intent_string(request["observer"], "binding observer"),
+                    SigningDomain(_intent_string(request["domain"], "binding domain")),
+                    CredentialPurpose(_intent_string(request["purpose"], "binding purpose")),
+                ),
+                _intent_string(item["key_ref"], "binding key ref"),
+                _intent_string(item["algorithm"], "binding algorithm"),
+                _intent_string(item["public_key"], "binding public key"),
+                _intent_string(item["provenance"], "binding provenance"),
+            ))
+        if descriptor.lineage != captured.lineage:
+            raise AdoptionApplyError("adoption intent descriptor and captured lineage disagree")
+        return ArrivalAdoptionPlan(
+            target, descriptor, captured.lineage,
+            ReadBasis(captured.lineage, captured, None, None), captured,
+            observer, reviewed_text, reviewed_sha256,
+            text, digest, (), drafts[0], exact_drafts, tuple(evidence),
+        )
+    except AdoptionApplyError:
+        raise
+    except Exception as exc:
+        raise AdoptionApplyError(f"malformed adoption intent: {exc}") from exc
 
 
 def _revalidate_reserved(
@@ -724,18 +817,23 @@ def recover_arrival_adoption(
                         intent_path=intent_path, cause=exc,
                     ) from exc
             else:
-                if current.ordinal < predecessor.ordinal + 1 or not _record_matches_draft(
-                    ledger.read(predecessor.ordinal + 1), plan.draft
-                ):
-                    raise AdoptionStale("reserved adoption draft is absent at its expected ordinal")
+                if current.ordinal < predecessor.ordinal + 1:
+                    raise AdoptionStale("reserved adoption has no successor at S+1")
                 adoption_head = ledger.head_at(
                     Watermark(plan.lineage, predecessor.ordinal + 1)
                 )
                 if ledger.verify(Full(through=adoption_head)) != adoption_head:
                     raise AdoptionStale("reserved adoption suffix is not Full-verified")
+                successor = ledger.read(predecessor.ordinal + 1)
+                if not _record_matches_draft(successor, plan.draft):
+                    _remove_intent(intent_path)
+                    raise AdoptionStale(
+                        "a different Full-verified record occupies S+1; "
+                        "superseded adoption intent retired"
+                    )
                 commit = Commit(
                     before=predecessor,
-                    records=(ledger.read(predecessor.ordinal + 1),),
+                    records=(successor,),
                     after=adoption_head,
                     durability=DurabilityReceipt(
                         ledger.capabilities().durability,
@@ -743,6 +841,15 @@ def recover_arrival_adoption(
                     ),
                 )
                 current = adoption_head
+                data["phase"] = "appended"
+                try:
+                    _replace_json(intent_path, data)
+                except Exception as exc:
+                    raise AdoptionCommittedIncomplete(
+                        "adoption row is committed but appended phase recording failed",
+                        phase="appended", head=current, commit=commit,
+                        intent_path=intent_path, cause=exc,
+                    ) from exc
         finally:
             _close(query)
             _close(ledger)

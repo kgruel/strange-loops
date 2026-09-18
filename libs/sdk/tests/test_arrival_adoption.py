@@ -8,9 +8,11 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
 from engine.arrival_adoption import AdoptionRecoveryRequired
 from engine.arrival_contract import Head, Profile, StoreDescriptor
 from engine.credentials import WriteCredentials
+from sign import ed25519
 
 from sdk import (
     ArrivalRefusal,
@@ -112,6 +114,7 @@ def test_adoption_forwards_the_reviewed_and_published_snapshots_with_mapped_bind
     assert calls["declaration_text"] == declaration_text
     assert calls["observer"] == "alice"
     assert calls["credentials"].mapped is True
+    assert callable(calls["fact_verify"])
     assert callable(calls["arrival_verify"])
     assert calls["descriptor"].role is Profile.AUTHORITY
     assert result.fact_id == "lineage-a"
@@ -119,6 +122,47 @@ def test_adoption_forwards_the_reviewed_and_published_snapshots_with_mapped_bind
     assert result.reviewed_sha256 == hashlib.sha256(reviewed_text.encode()).hexdigest()
     assert result.declaration_sha256 == hashlib.sha256(declaration_text.encode()).hexdigest()
     assert result.as_dict()["intent_path"].endswith(".arrival-adopt.intent")
+
+
+def test_sdk_passes_independent_fact_and_arrival_verifiers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target, declaration_text = _target(tmp_path)
+    reviewed_text = declaration_text.replace(
+        'store "ledger.arrival" backend="file" lineage="lineage-a" role="authority"',
+        'store "legacy.jsonl"',
+    )
+    key = ed25519.load_or_generate(tmp_path / "public-verifier-key")
+    calls: dict[str, object] = {}
+    module = ModuleType("engine.arrival_adoption")
+
+    def prepare(_registry, _descriptor, **kwargs):
+        calls.update(kwargs)
+        return SimpleNamespace(target_path=target)
+
+    module.prepare_arrival_adoption = prepare
+    module.apply_arrival_adoption = lambda _registry, _plan: _raw_result(target)
+    monkeypatch.setitem(sys.modules, "engine.arrival_adoption", module)
+
+    adopt_arrival(
+        target,
+        selected_head=Head("lineage-a", 3, "head-before"),
+        reviewed_text=reviewed_text,
+        reviewed_sha256=hashlib.sha256(reviewed_text.encode()).hexdigest(),
+        declaration_text=declaration_text,
+        observer="alice",
+        credentials=_mapped_credentials(),
+    )
+
+    digest = "reviewed-adoption-digest"
+    fact_signature = ed25519.sign(key, digest.encode(), domain=FACT_DOMAIN)
+    arrival_signature = ed25519.sign(key, digest.encode(), domain=ARRIVAL_DOMAIN)
+    fact_verify = calls["fact_verify"]
+    arrival_verify = calls["arrival_verify"]
+    assert fact_verify(key.public_b64, fact_signature, digest)
+    assert arrival_verify(key.public_b64, arrival_signature, digest)
+    assert not fact_verify(key.public_b64, arrival_signature, digest)
+    assert not arrival_verify(key.public_b64, fact_signature, digest)
 
 
 def test_adoption_refuses_legacy_signers_before_engine_import(tmp_path: Path) -> None:
@@ -190,3 +234,19 @@ def test_preappend_recovery_requirement_retains_its_intent_coordinate(tmp_path: 
     assert isinstance(normalized, ArrivalRefusal)
     assert normalized.source_type == "AdoptionRecoveryRequired"
     assert normalized.details["intent_path"] == str(intent)
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["[]", "null", '"not an intent"', '{"descriptor":"not a descriptor"}'],
+)
+def test_malformed_adoption_intent_stays_in_the_sdk_error_family(
+    tmp_path: Path, content: str
+) -> None:
+    intent = tmp_path / "adopt.vertex.arrival-adopt.intent"
+    intent.write_text(content, encoding="utf-8")
+
+    with pytest.raises(ArrivalRefusal) as raised:
+        recover_arrival_adoption(intent)
+
+    assert raised.value.source_type == "AdoptionApplyError"

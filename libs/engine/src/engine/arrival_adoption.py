@@ -82,6 +82,10 @@ class AdoptionApplyError(ArrivalError):
 class AdoptionStale(AdoptionApplyError):
     """The selected head or reviewed cache changed."""
 
+    def __init__(self, message: str, *, intent_path: Path | None = None) -> None:
+        super().__init__(message)
+        self.intent_path = intent_path
+
 
 class AdoptionRecoveryRequired(AdoptionApplyError):
     """A durable preappend intent needs explicit recovery."""
@@ -517,8 +521,19 @@ def apply_arrival_adoption(
             if current != plan.captured_head:
                 raise AdoptionStale(
                     "migration head changed before adoption append; recover intent "
-                    "to prove whether it is superseded"
+                    "to prove whether it is superseded",
+                    intent_path=intent,
                 )
+            try:
+                preflight_projection_maintenance(
+                    registry, plan.descriptor, through=plan.captured_head
+                )
+            except Exception as exc:
+                raise AdoptionRecoveryRequired(
+                    "adoption intent is durable but required projection maintenance "
+                    "is unavailable before append",
+                    intent_path=intent, cause=exc,
+                ) from exc
             try:
                 commit = ledger.append(plan.captured_head, (plan.draft,))
             except Exception as exc:
@@ -527,7 +542,8 @@ def apply_arrival_adoption(
                 if isinstance(exc, ContractRefusal):
                     raise AdoptionStale(
                         f"adoption append refused: {exc}; recover intent to "
-                        "establish its disposition"
+                        "establish its disposition",
+                        intent_path=intent,
                     ) from exc
                 if isinstance(exc, NotWitnessed):
                     data["phase"] = "append-unwitnessed"
@@ -762,19 +778,32 @@ def recover_arrival_adoption(
 ) -> ArrivalAdoptionResult:
     """Reconcile the exact reserved row; never re-sign or append a duplicate."""
     intent_path = Path(intent).resolve()
-    try:
-        data = json.loads(intent_path.read_text(encoding="utf-8"))
-        plan = _plan_from_intent(data)
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise AdoptionApplyError(f"cannot read adoption intent: {exc}") from exc
-    if intent_path != arrival_adoption_intent_path(plan.target_path):
-        raise AdoptionApplyError("adoption intent path does not match its target")
+    suffix = ".arrival-adopt.intent"
+    if (
+        not intent_path.name.endswith(suffix)
+        or len(intent_path.name) <= len(suffix)
+    ):
+        raise AdoptionApplyError("adoption intent path has an invalid suffix")
+    target_path = intent_path.with_name(intent_path.name[:-len(suffix)])
     if not callable(fact_verify) or not callable(arrival_verify):
         raise AdoptionApplyError("recovery requires public FACT and ARRIVAL verifiers")
-    with _declaration_lock(plan.target_path):
+    with _declaration_lock(target_path):
+        try:
+            data = json.loads(intent_path.read_text(encoding="utf-8"))
+            plan = _plan_from_intent(data)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise AdoptionApplyError(f"cannot read adoption intent: {exc}") from exc
+        if plan.target_path != target_path:
+            raise AdoptionApplyError("adoption intent path does not match its target")
         ledger = query = None
         try:
-            ledger, query = registry.open(plan.descriptor)
+            try:
+                ledger, query = registry.open(plan.descriptor)
+            except Exception as exc:
+                raise AdoptionRecoveryRequired(
+                    "reserved adoption intent is durable but custody could not be opened",
+                    intent_path=intent_path, cause=exc,
+                ) from exc
             predecessor = ledger.head_at(Watermark(plan.lineage, plan.captured_head.ordinal))
             if predecessor != plan.captured_head:
                 raise AdoptionStale("adoption predecessor hash changed")
@@ -787,12 +816,25 @@ def recover_arrival_adoption(
             if current == predecessor:
                 _require_cache(plan)
                 try:
+                    preflight_projection_maintenance(
+                        registry, plan.descriptor, through=predecessor
+                    )
+                except Exception as exc:
+                    raise AdoptionRecoveryRequired(
+                        "reserved adoption cannot append without required projection "
+                        "maintenance",
+                        intent_path=intent_path, cause=exc,
+                    ) from exc
+                try:
                     commit = ledger.append(predecessor, (plan.draft,))
                 except Exception as exc:
                     from .arrival_contract import ContractRefusal
                     from .arrival_head_seam import NotWitnessed
                     if isinstance(exc, ContractRefusal):
-                        raise AdoptionStale(f"reserved adoption CAS refused: {exc}") from exc
+                        raise AdoptionStale(
+                            f"reserved adoption CAS refused: {exc}",
+                            intent_path=intent_path,
+                        ) from exc
                     if isinstance(exc, NotWitnessed):
                         raise AdoptionUnwitnessed(
                             "reserved adoption committed without a complete witness",

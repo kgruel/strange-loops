@@ -1,0 +1,59 @@
+{
+  "command": [
+    "/Users/kaygee/.local/bin/claude",
+    "-p",
+    "--safe-mode",
+    "--model",
+    "claude-fable-5-1[1m]",
+    "--effort",
+    "high",
+    "--no-session-persistence",
+    "--tools",
+    "",
+    "--output-format",
+    "json"
+  ],
+  "started": "2026-09-18T21:51:33.614629+00:00",
+  "status": "completed",
+  "validation": {
+    "engine": "2638 passed, 1 skipped",
+    "sdk": "609 passed",
+    "repository_excluding_chaos": "115 passed",
+    "scoped_ty_ruff_diff": "passed"
+  },
+  "exit_code": 0,
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 114618,
+      "outputTokens": 15,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.114693,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 22010,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 151423,
+      "webSearchRequests": 0,
+      "costUSD": 4.128979999999999,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 19083,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "subtype": "success",
+  "is_error": false,
+  "source_drift": [],
+  "finished": "2026-09-18T21:56:08.565426+00:00"
+}

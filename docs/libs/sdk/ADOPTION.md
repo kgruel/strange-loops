@@ -58,6 +58,10 @@ from sdk import recover_arrival_adoption
 recovered = recover_arrival_adoption(intent_path)
 ```
 
+A stale apply may leave this intent reserved; use its `intent_path` for explicit
+recovery before attempting a fresh adoption. Maintenance capability is checked
+again before apply or recovery appends, using the registry supplied to that call.
+
 Recovery requires no signing credentials. It either appends the reserved draft
 at its original predecessor or recognizes that exact draft at its expected
 ordinal, synchronizes the projection and checks the published cache. It does
@@ -70,7 +74,8 @@ If recovery Full-verifies that another record has taken the reserved next
 ordinal, it retires only that provably superseded intent and returns a stale
 refusal. A caller can then prepare a fresh adoption at the new selected head.
 Malformed intents also return a typed SDK refusal and remain in place for
-operator inspection.
+operator inspection. Reviewed source, template and parameter pins must remain
+intact during recovery, as they must for normal runtime declaration resolution.
 
 The operation reconciles the already-published cache without rewriting it.
 A changed cache or a post-append projection failure leaves a recovery boundary;

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,11 @@ from engine.arrival_adoption import (
 from engine.arrival_body import body_of_fact_row
 from engine.arrival_contract import Profile, RecordDraft, StoreDescriptor
 from engine.arrival_file_backend import file_projection_path
-from engine.arrival_registry import BackendRegistry
+from engine.arrival_registry import (
+    BackendRegistry,
+    _file_binding,
+    _open_file_backend,
+)
 from engine.credentials import (
     CredentialBindingEvidence,
     ResolvedCredential,
@@ -110,6 +115,14 @@ def _recovery_kwargs():
     }
 
 
+def _registry_without_maintenance() -> BackendRegistry:
+    registry = BackendRegistry()
+    registry.register(
+        "file", _open_file_backend, binding_provider=_file_binding,
+    )
+    return registry
+
+
 def test_adoption_appends_one_initializer_anchor_and_syncs(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     registry, descriptor, kwargs = _fixture(tmp_path)
@@ -142,6 +155,64 @@ def test_successful_maintenance_preflight_does_not_mutate_custody_or_projection(
     assert plan.captured_head == kwargs["selected_head"]
     assert log.read_bytes() == before
     assert not projection.exists()
+
+
+@pytest.mark.parametrize("operation", ("apply", "recover"))
+def test_missing_maintenance_refuses_before_append_and_retains_intent(
+    tmp_path: Path, operation: str,
+) -> None:
+    registry, descriptor, kwargs = _fixture(tmp_path)
+    plan = prepare_arrival_adoption(registry, descriptor, **kwargs)
+    intent = arrival_adoption_intent_path(kwargs["target"])
+    if operation == "recover":
+        def interrupt(phase):
+            if phase == "after-intent":
+                raise OSError("reserved")
+        with pytest.raises(AdoptionRecoveryRequired):
+            apply_arrival_adoption(registry, plan, failure_hook=interrupt)
+        def action():
+            return recover_arrival_adoption(
+                _registry_without_maintenance(), intent, **_recovery_kwargs()
+            )
+    else:
+        def action():
+            return apply_arrival_adoption(_registry_without_maintenance(), plan)
+    with pytest.raises(AdoptionRecoveryRequired) as caught:
+        action()
+    assert caught.value.intent_path == intent
+    assert intent.exists()
+    assert len(tuple(ArrivalLog(Path(descriptor.location)).walk())) == 1
+    recovered = recover_arrival_adoption(registry, intent, **_recovery_kwargs())
+    assert recovered.head.ordinal == 1
+
+
+def test_recovery_reads_replacement_intent_only_after_entering_lock(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from engine import arrival_adoption
+
+    registry, descriptor, kwargs = _fixture(tmp_path)
+    plan = prepare_arrival_adoption(registry, descriptor, **kwargs)
+    intent = arrival_adoption_intent_path(kwargs["target"])
+    def interrupt(phase):
+        if phase == "after-intent":
+            raise OSError("reserved")
+    with pytest.raises(AdoptionRecoveryRequired):
+        apply_arrival_adoption(registry, plan, failure_hook=interrupt)
+    replacement = b"[]\n"
+    original_lock = arrival_adoption._declaration_lock
+
+    @contextmanager
+    def replace_on_lock(target):
+        with original_lock(target):
+            intent.write_bytes(replacement)
+            yield
+
+    monkeypatch.setattr(arrival_adoption, "_declaration_lock", replace_on_lock)
+    with pytest.raises(AdoptionApplyError):
+        recover_arrival_adoption(registry, intent, **_recovery_kwargs())
+    assert intent.read_bytes() == replacement
+    assert len(tuple(ArrivalLog(Path(descriptor.location)).walk())) == 1
 
 
 def test_adoption_recovery_reuses_exact_committed_anchor(tmp_path: Path, monkeypatch) -> None:
@@ -276,8 +347,9 @@ def test_adoption_cas_refuses_changed_head_after_prepare(tmp_path: Path) -> None
     finally:
         query.close()
         ledger.close()
-    with pytest.raises(AdoptionStale):
+    with pytest.raises(AdoptionStale) as caught:
         apply_arrival_adoption(registry, plan)
+    assert caught.value.intent_path == arrival_adoption_intent_path(kwargs["target"])
     assert arrival_adoption_intent_path(kwargs["target"]).exists()
 
 

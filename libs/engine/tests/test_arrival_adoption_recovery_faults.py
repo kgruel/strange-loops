@@ -11,7 +11,11 @@ import pytest
 import engine.arrival_adoption as adoption
 from engine.arrival import ArrivalLog, content_commitment
 from engine.arrival_contract import RecordDraft
-from engine.arrival_registry import BackendRegistry
+from engine.arrival_registry import (
+    BackendRegistry,
+    _file_binding,
+    _open_file_backend,
+)
 
 _HELPERS_SPEC = importlib.util.spec_from_file_location(
     "_arrival_adoption_helpers", Path(__file__).with_name("test_arrival_adoption.py")
@@ -47,10 +51,20 @@ class _LostReturnLedger:
 class _LostReturnRegistry:
     def __init__(self, registry: BackendRegistry) -> None:
         self._registry = registry
+        self._opens = 0
 
     def open(self, descriptor):
         ledger, query = self._registry.open(descriptor)
+        self._opens += 1
+        # apply opens custody first, then its maintenance preflight opens an
+        # attested handle.  Keep that second handle intact so the fault is
+        # injected at the append response rather than at preflight.
+        if self._opens == 2:
+            return ledger, query
         return _LostReturnLedger(ledger), query
+
+    def __getattr__(self, name):
+        return getattr(self._registry, name)
 
 
 def _append_interleaved(registry, descriptor, selected_head):
@@ -178,16 +192,51 @@ def test_transient_recovery_refusal_retains_intent(
         raise OSError("temporary backend outage")
 
     monkeypatch.setattr(registry, "open", transient_open)
-    with pytest.raises(OSError, match="temporary backend outage"):
+    with pytest.raises(adoption.AdoptionRecoveryRequired) as refused:
         adoption.recover_arrival_adoption(
             registry, intent, **_recovery_kwargs()
         )
+    assert isinstance(refused.value.cause, OSError)
+    assert "temporary backend outage" in str(refused.value.cause)
     assert intent.exists()
     monkeypatch.setattr(registry, "open", original_open)
     recovered = adoption.recover_arrival_adoption(
         registry, intent, **_recovery_kwargs()
     )
     assert recovered.commit is not None
+    assert not intent.exists()
+
+
+def test_recovery_preflights_maintenance_before_append_and_builtin_retry_succeeds(
+    tmp_path: Path,
+) -> None:
+    registry, descriptor, kwargs = _fixture(tmp_path)
+    plan = adoption.prepare_arrival_adoption(registry, descriptor, **kwargs)
+    intent = _reserve(registry, plan)
+
+    # Recovery is a separate process boundary.  A registry that can open
+    # custody but has no projection-maintenance authority must refuse before
+    # the reserved anchor is appended, while leaving the durable intent for a
+    # later retry with the complete registry.
+    incomplete = BackendRegistry()
+    incomplete.register(
+        "file", _open_file_backend, binding_provider=_file_binding
+    )
+    with pytest.raises(adoption.AdoptionRecoveryRequired) as refused:
+        adoption.recover_arrival_adoption(
+            incomplete, intent, **_recovery_kwargs()
+        )
+    assert refused.value.intent_path == intent
+    assert _record_count(descriptor) == 1
+    assert intent.exists()
+
+    recovered = adoption.recover_arrival_adoption(
+        registry, intent, **_recovery_kwargs()
+    )
+    assert recovered.commit is not None
+    assert recovered.commit.before == kwargs["selected_head"]
+    assert recovered.commit.after.ordinal == kwargs["selected_head"].ordinal + 1
+    assert _record_count(descriptor) == 2
     assert not intent.exists()
 
 

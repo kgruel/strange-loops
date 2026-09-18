@@ -50,3 +50,15 @@ was introduced. Local intent-coordinate tamper protection beyond the existing
 content-signature contract remains an explicitly separate threat-model question.
 The second Fable packet includes the original findings, triage, changed code,
 tests, and the supporting code omitted from the first packet.
+
+## Second-pass follow-up
+
+Fable's second review accepted F1–F4 and found one remaining P2: recovery
+could use a registry without maintenance and append before refusing. Both apply
+and recovery now preflight their actual registry immediately before append.
+Failure retains the intent and returns a typed precommit recovery error.
+Recovery also loads the intent under its declaration lock, exposes retained
+stale intent paths, and wraps storage-open failures without obscuring any commit.
+Pinned source drift requirements are documented. Luna's independent follow-up
+found no remaining blockers; targeted SDK/migration checks passed (24 tests).
+A final focused Fable closure pass reviews these corrections.

@@ -1,0 +1,13 @@
+{
+  "status": "resolved-by-correction",
+  "primary_verdict": "REVISE prose instructions",
+  "fable_verdict": "REVISE",
+  "accepted": [
+    "B1 execution instructions"
+  ],
+  "disputed": [
+    "B2 alleged absent fields: actual receipt disproves"
+  ],
+  "runtime_changed": false,
+  "correction": "../atlas-greenfield-guide-correction-2026-09-07/triage-status.json"
+}

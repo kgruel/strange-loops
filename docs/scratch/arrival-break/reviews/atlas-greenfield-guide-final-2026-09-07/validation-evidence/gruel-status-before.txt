@@ -1,0 +1,2 @@
+?? .loops/audit/
+?? .loops/homelab-audit.vertex

@@ -1,0 +1,14 @@
+{
+  "status": "complete",
+  "fable_verdict": "ACCEPT",
+  "primary_verdict": "ACCEPT",
+  "closed": [
+    "B1"
+  ],
+  "withdrawn_by_reviewer": [
+    "B2"
+  ],
+  "remaining_blockers": [],
+  "runtime_changed": false,
+  "command_bytes_changed": false
+}

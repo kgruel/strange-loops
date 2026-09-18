@@ -1,0 +1,1 @@
+5a61c40e7b0c62480fadae44dcdff21305024e022bde2bf1caaf0f3e368cddd5  architecture.json

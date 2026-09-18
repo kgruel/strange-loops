@@ -1,0 +1,131 @@
+set -euo pipefail
+umask 077
+export LOOPS_CHECKOUT="$HOME/Code/loops-wt/arrival-finish"
+cd "$HOME/Code/gruel.network/docs/atlas"
+test -f architecture.json
+export ATLAS_WORK="$(mktemp -d "${TMPDIR:-/tmp}/atlas-loops.XXXXXX")"
+export UV_PROJECT_ENVIRONMENT="$ATLAS_WORK/venv"
+export XDG_STATE_HOME="$ATLAS_WORK/state"
+export XDG_CONFIG_HOME="$ATLAS_WORK/config"
+export LOOPS_HOME="$ATLAS_WORK/loops-config"
+export ATLAS_KEYS="$ATLAS_WORK/credentials"
+export ATLAS_VERTEX="$ATLAS_WORK/atlas.vertex"
+
+uv sync --project "$LOOPS_CHECKOUT" --package loops-min --no-dev
+export LOOPS_MIN="$UV_PROJECT_ENVIRONMENT/bin/loops-min"
+cp architecture.json "$ATLAS_WORK/architecture.json"
+printf 'Workspace: %s\n' "$ATLAS_WORK"
+"$LOOPS_MIN" credential-create "$ATLAS_KEYS" \
+  --namespace atlas-demo --observer atlas-guide --token atlas-guide-key-v1 \
+  > "$ATLAS_WORK/binding.json"
+
+atlas_write() {
+  "$LOOPS_MIN" "$@" \
+    --credential-root "$ATLAS_KEYS" \
+    --credential-namespace atlas-demo --receipt-observer atlas-guide
+}
+
+atlas_write init "$ATLAS_VERTEX" --name atlas-notes \
+  --location "$ATLAS_WORK/atlas.arrival" --observer atlas-guide --strict \
+  > "$ATLAS_WORK/init.json"
+"$LOOPS_MIN" inspect "$ATLAS_VERTEX" > "$ATLAS_WORK/inspect-initial.json"
+python3 - <<'PY'
+import os
+from pathlib import Path
+
+work = Path(os.environ["ATLAS_WORK"])
+text = Path(os.environ["ATLAS_VERTEX"]).read_text()
+prefix, _ = text.split("\nloops {", 1)  # This walkthrough's fresh scaffold only.
+proposal = prefix + '''
+loops {
+  atlas.snapshot {
+    fold { snapshots "by" "scope" }
+  }
+  atlas.note {
+    fold { notes "by" "subject" }
+  }
+}
+'''
+(work / "proposed.vertex").write_text(proposal)
+PY
+
+atlas_write declaration "$ATLAS_VERTEX" \
+  --proposed-file "$ATLAS_WORK/proposed.vertex" --observer atlas-guide \
+  > "$ATLAS_WORK/declaration.json"
+python3 - <<'PY'
+import hashlib
+import json
+import os
+from pathlib import Path
+
+work = Path(os.environ["ATLAS_WORK"])
+raw = (work / "architecture.json").read_bytes()
+graph = json.loads(raw)
+assert graph["schema_version"] == 1
+assert graph["scope"] == "photographs" and graph["state"] == "configured"
+unknown = next(u for u in graph["unknowns"]
+               if u["subject"] == "mount:immich-photos" and u["field"] == "backing")
+snapshot_id = "atlas-snapshot-" + graph["revision"]
+note = {
+    "subject": unknown["subject"], "snapshot_fact_id": snapshot_id,
+    "status": "question", "message": unknown["reason"],
+}
+batch = [
+    {"id": snapshot_id, "kind": "atlas.snapshot", "observer": "atlas-guide",
+     "origin": "docs/atlas/architecture.json",
+     "payload": {"scope": graph["scope"], "graph": graph,
+                 "input_sha256": hashlib.sha256(raw).hexdigest()}},
+    {"id": "atlas-note-1", "kind": "atlas.note", "observer": "atlas-guide",
+     "origin": "atlas-greenfield-guide", "payload": note},
+]
+(work / "batch.json").write_text(json.dumps(batch))
+note.update(status="follow-up",
+            message="Inspect the family VM filesystem and mount source before naming the backing.")
+(work / "follow-up.json").write_text(json.dumps(note))
+PY
+
+atlas_write emit-batch "$ATLAS_VERTEX" \
+  --facts-json "$(cat "$ATLAS_WORK/batch.json")" > "$ATLAS_WORK/batch-receipt.json"
+"$LOOPS_MIN" state "$ATLAS_VERTEX" --kind atlas.note \
+  > "$ATLAS_WORK/notes-before.json"
+atlas_write emit "$ATLAS_VERTEX" atlas.note --observer atlas-guide \
+  --origin atlas-greenfield-guide --id atlas-note-2 \
+  --payload-json "$(cat "$ATLAS_WORK/follow-up.json")" \
+  > "$ATLAS_WORK/follow-up-receipt.json"
+
+"$LOOPS_MIN" state "$ATLAS_VERTEX" --kind atlas.note \
+  > "$ATLAS_WORK/notes-after.json"
+"$LOOPS_MIN" state "$ATLAS_VERTEX" --kind atlas.snapshot \
+  > "$ATLAS_WORK/snapshot-state.json"
+"$LOOPS_MIN" facts "$ATLAS_VERTEX" --kind atlas.note --order oldest --limit 10 \
+  > "$ATLAS_WORK/note-history.json"
+
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+work = Path(os.environ["ATLAS_WORK"])
+def result(name):
+    envelope = json.loads((work / name).read_text())
+    assert envelope["ok"] is True
+    return envelope["result"]
+
+subject = "mount:immich-photos"
+before = result("notes-before.json")["sections"]["atlas.note"]["notes"][subject]
+after = result("notes-after.json")["sections"]["atlas.note"]["notes"][subject]
+history = result("note-history.json")
+assert before["status"] == "question" and after["status"] == "follow-up"
+assert history["truncated"] is False
+assert [fact["id"] for fact in history["items"]] == ["atlas-note-1", "atlas-note-2"]
+snapshot = result("snapshot-state.json")["sections"]["atlas.snapshot"]["snapshots"]["photographs"]
+assert snapshot["graph"] == json.loads((work / "architecture.json").read_text())
+print("Latest note:", after["message"])
+print("History:", len(history["items"]), "notes; captured graph preserved intact")
+PY
+"$LOOPS_MIN" inspect "$ATLAS_VERTEX" > "$ATLAS_WORK/inspect-final.json"
+"$LOOPS_MIN" verify "$ATLAS_VERTEX" > "$ATLAS_WORK/verify.json"
+"$LOOPS_MIN" sync "$ATLAS_VERTEX" > "$ATLAS_WORK/sync.json"
+"$LOOPS_MIN" export "$ATLAS_VERTEX" "$ATLAS_WORK/captured.jsonl" \
+  > "$ATLAS_WORK/export.json"
+printf 'Receipts, declaration, store, and captured prefix: %s\n' "$ATLAS_WORK"

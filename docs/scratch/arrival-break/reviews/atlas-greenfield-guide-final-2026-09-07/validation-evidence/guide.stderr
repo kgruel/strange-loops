@@ -1,0 +1,20 @@
+Using CPython 3.13.11
+Creating virtual environment at: /var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T//atlas-loops.Yj1epI/venv
+Resolved 48 packages in 34ms
+Installed 16 packages in 26ms
+ + atoms==0.1.0 (from file:///Users/kaygee/Code/loops-wt/arrival-finish/libs/atoms)
+ + cffi==2.1.1
+ + ckdl==1.0
+ + cryptography==50.0.1
+ + custody==0.1.0 (from file:///Users/kaygee/Code/loops-wt/arrival-finish/libs/custody)
+ + engine==0.1.0 (from file:///Users/kaygee/Code/loops-wt/arrival-finish/libs/engine)
+ + lang==0.1.0 (from file:///Users/kaygee/Code/loops-wt/arrival-finish/libs/lang)
+ + loops-min==0.1.0 (from file:///Users/kaygee/Code/loops-wt/arrival-finish/apps/loops-min)
+ + pycparser==3.0
+ + pyjwt==2.13.0
+ + python-ulid==4.0.1
+ + rfc8785==0.1.4
+ + sdk==0.1.0 (from file:///Users/kaygee/Code/loops-wt/arrival-finish/libs/sdk)
+ + sign==0.1.0 (from file:///Users/kaygee/Code/loops-wt/arrival-finish/libs/sign)
+ + store==0.1.0 (from file:///Users/kaygee/Code/loops-wt/arrival-finish/libs/store)
+ + typing-extensions==4.16.0

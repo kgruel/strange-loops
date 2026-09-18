@@ -1,0 +1,47 @@
+{
+  "status": "PASS",
+  "guide_command_blocks": 6,
+  "successful_cli_invocations": 14,
+  "loops_checkpoint": "d4e5792d5dacaaf214251b09a7a609e9140b5eaa",
+  "guide_sha256": "29a72b8b60c7d806145a1e839e6d6dc1ee471ae1853fe7f3dc9b128cc20aefa8",
+  "executed_script_sha256": "bdcedaf583e0bff24fe457dde222626101312de6d49fcac5a1386b6d759c67bd",
+  "current_bash_blocks_match_executed_script": true,
+  "atlas_revision": "13deac5f206a220fbe79019b121bd38d120cdef33b82d4d450ff8f5d3bce8724",
+  "atlas_input_sha256": "5a61c40e7b0c62480fadae44dcdff21305024e022bde2bf1caaf0f3e368cddd5",
+  "atlas_entities": 13,
+  "atlas_relationships": 18,
+  "atlas_sources": 20,
+  "heads": [
+    {
+      "lineage": "01M1X6YR1Y0DH5J1VD29JWEBKS",
+      "ordinal": 1,
+      "record_hash": "2c69f50a163ffebe0ab26ffbebffb6874ac97ce6758f03cfd622bf7d4d64d048"
+    },
+    {
+      "lineage": "01M1X6YR1Y0DH5J1VD29JWEBKS",
+      "ordinal": 2,
+      "record_hash": "efbc88db2fadda39189896d6c26d611f6da1a59f1a464dad15f794d458c79f1a"
+    },
+    {
+      "lineage": "01M1X6YR1Y0DH5J1VD29JWEBKS",
+      "ordinal": 3,
+      "record_hash": "a605f9d1e8bcf487e03b83609b83d82f51d933f986f1e081d25c5ec1c9b91c4f"
+    },
+    {
+      "lineage": "01M1X6YR1Y0DH5J1VD29JWEBKS",
+      "ordinal": 4,
+      "record_hash": "65c5700f24ba631ff7c2c8992cc64a9fd6e7d0a441294b83283fc1826491f7ab"
+    }
+  ],
+  "batch_and_followup_signed_witnessed": true,
+  "graph_preserved": true,
+  "both_note_payloads_preserved": true,
+  "latest_note": "follow-up",
+  "final_read_verify_sync_export_heads_agree": true,
+  "export_equals_captured_ledger": true,
+  "export_bytes": 19082,
+  "export_sha256": "8ffcdeb01a62c6701a6c4ec97d7bb6f67f6745a5421ed61ef8aefe201e00cd1f",
+  "gruel_git_status_unchanged": true,
+  "atlas_input_bytes_unchanged": true,
+  "scratch_workspace": "/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/atlas-loops.Yj1epI"
+}

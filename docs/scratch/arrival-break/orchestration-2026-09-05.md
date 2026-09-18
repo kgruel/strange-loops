@@ -1,3 +1,41 @@
+## September 7: Atlas greenfield CLI guide tested and accepted
+
+Checkpoint **d4e5792d** committed both prior accepted slices (setup/recovery and
+migration descriptor publication). Nothing pushed. The subsequent user request
+for a focused greenfield how-to is complete as uncommitted documentation only:
+[guide](../../guides/atlas-greenfield-cli.md), linked from apps/loops-min/README.md,
+plus [native replay record](atlas-greenfield-guide-2026-09-07.md) and review evidence.
+No runtime fixes were needed.
+
+Root authored the guide, Terra audited Atlas's generated configuration contract,
+Sol reviewed the CLI/instructions, Luna executed its six Bash blocks as a script
+from ~/Code/gruel.network/docs/atlas, and root checked exact receipt/data/export
+evidence. Fresh isolated UV environment and roots; **14 successful CLI calls**.
+The example captures the complete photograph graph as a fact, then folds notes
+by subject while retaining both question/follow-up payloads in history. Exact
+init1 → declaration2 → atomic batch3 → follow-up4 commit continuity, per-item
+signed/stored/witnessed evidence, final read/verify/sync/export head agreement,
+and byte-identical captured export all passed. Existing Atlas browser, generated
+inputs and stores were untouched by this task; no gruel code was committed or
+pushed. A later concurrent edit to scripts/generate-docs.py was left alone.
+
+Fable-low initially requested script-vs-interactive instruction clarity; fixed
+in prose without changing executed commands. Its second claim that declaration
+head/phase fields were missing was contradicted by native output; Fable withdrew
+it on correction. Final Fable-low and primary **ACCEPT**, no blockers. Current
+six Bash blocks still match the native script exactly. The guide correctly limits
+verification, export, recovery examples and future Atlas integration claims.
+Private keys, stores, complete fixture receipts and virtual environments are not
+in the repository; only selected text evidence is archived. No jobs remain.
+
+Next: checkpoint the guide when requested. The remaining runtime implementation
+work is still the reviewed append-forward declaration adoption ceremony and
+recovery, then mapped SDK integration and a representative-copy migration
+rehearsal. Fresh greenfield init already supplies the declaration anchor; the
+how-to does not depend on that future adoption path.
+
+Earlier entries below preserve their status at the time of writing.
+
 ## September 7: checkpoint setup/recovery and migration publication
 
 This checkpoint includes both accepted slices below: SDK-owned credential

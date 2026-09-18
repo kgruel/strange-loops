@@ -1,0 +1,49 @@
+{
+  "schema": "loops.sdk/declaration-edit/v2",
+  "status": "applied",
+  "phase": "published",
+  "head": {
+    "lineage": "01M1X6YR1Y0DH5J1VD29JWEBKS",
+    "ordinal": 2,
+    "record_hash": "efbc88db2fadda39189896d6c26d611f6da1a59f1a464dad15f794d458c79f1a"
+  },
+  "commit": {
+    "after": {
+      "lineage": "01M1X6YR1Y0DH5J1VD29JWEBKS",
+      "ordinal": 2,
+      "record_hash": "efbc88db2fadda39189896d6c26d611f6da1a59f1a464dad15f794d458c79f1a"
+    },
+    "before": {
+      "lineage": "01M1X6YR1Y0DH5J1VD29JWEBKS",
+      "ordinal": 1,
+      "record_hash": "2c69f50a163ffebe0ab26ffbebffb6874ac97ce6758f03cfd622bf7d4d64d048"
+    },
+    "durability": {
+      "mechanism": "advisory flock, one write, one fsync, on local POSIX storage",
+      "profile": "host"
+    },
+    "record_count": 1
+  },
+  "all_result_keys": [
+    "basis",
+    "captured_head",
+    "changes",
+    "commit",
+    "fact_ids",
+    "file_written",
+    "generation_after",
+    "generation_before",
+    "head",
+    "intent_path",
+    "lineage",
+    "mode",
+    "phase",
+    "read_path",
+    "reason",
+    "schema",
+    "status",
+    "store",
+    "target_path",
+    "vertex_path"
+  ]
+}

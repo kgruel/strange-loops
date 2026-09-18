@@ -1,0 +1,88 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07",
+  "due_at": "2026-09-07T06:02:53.148416+00:00",
+  "baseline": "d4e5792d",
+  "scope": "Atlas greenfield CLI how-to and native replay",
+  "jobs": [
+    {
+      "name": "final",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/final-prompt.txt",
+      "sha256": "75e0530016a3372eea4b65c6442dc933e2677abca5f3830f488c045debc72caa",
+      "sources": {
+        "docs/guides/atlas-greenfield-cli.md": "29a72b8b60c7d806145a1e839e6d6dc1ee471ae1853fe7f3dc9b128cc20aefa8",
+        "apps/loops-min/README.md": "0df0a7c8062abe56eda5b0b6558dfe8d7dd9f5db6b54ec060cc708be588e6ecf",
+        "apps/loops-min/src/loops_min/main.py": "fd6919ab21f61285c7e4f81d823d812bddad06b772f9215ea61b2254a71c8e62",
+        "docs/scratch/arrival-break/atlas-greenfield-guide-2026-09-07.md": "fc6a66fde12423259dc6f5126f64309fe7ad686f1bb119ac43d4a50cdccfad3e",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/guide.sh.txt": "bdcedaf583e0bff24fe457dde222626101312de6d49fcac5a1386b6d759c67bd",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/guide.stdout": "e6ce31b0ef0e4cbe2844d98b1b6850b7ef4402eef979bee2755075e276973733",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/guide.stderr": "e86d60cb84d413e498115a363c1bfea492b711ca64adea538c7473874843b9fc",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/guide.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/architecture-meta.txt": "24ff8c907c2fbf8f5781b47fbb7b19e8e429e2451b1b18b0d0a75ef7a1427a27",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/architecture-sha.txt": "e795372502744adf73cde95543516fea4d8636c7786a7006e84f5f8c07972024",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/gruel-status-before.txt": "e11c836f519e340940e3773719b1a99ae0d9a30b997fd77f42bbfe472d468758",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/gruel-status-after.txt": "e11c836f519e340940e3773719b1a99ae0d9a30b997fd77f42bbfe472d468758",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/root-check-replay.py.txt": "2cf23282d52d20f4b77bba2dd4744d333c1c61819c2ab20bf627d4ec8db209d9",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/root-replay-audit.json": "b7e77f0dcaab3b282e960d68475455b58f98d29c63e0db1e88ab5f162b9e1b4c"
+      },
+      "status": "reviewed-awaiting-triage",
+      "started_at": "2026-09-07T06:03:12.414368+00:00",
+      "effort": "low",
+      "source_drift": [],
+      "command": [
+        "/Users/kaygee/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--model",
+        "claude-fable-5-1[1m]",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--output-format",
+        "json"
+      ],
+      "returncode": 0,
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 21186,
+          "outputTokens": 14,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.021256,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 3478,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 31799,
+          "webSearchRequests": 0,
+          "costUSD": 0.8099,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 2627,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "response_subtype": "success",
+      "finished_at": "2026-09-07T06:04:00.924570+00:00"
+    }
+  ],
+  "status": "reviews-finished-awaiting-triage",
+  "pid": 93799,
+  "updated_at": "2026-09-07T06:04:00.924574+00:00",
+  "started_at": "2026-09-07T06:03:12.414199+00:00",
+  "finished_at": "2026-09-07T06:04:00.925049+00:00"
+}

@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "current_guide_sha256": "975850c63a1b4bd606b011cb2e99af68d12faf2868c3a640f3aca17adac93dbe",
+  "bash_blocks_sha256": "bdcedaf583e0bff24fe457dde222626101312de6d49fcac5a1386b6d759c67bd",
+  "command_bytes_unchanged": true,
+  "original_native_replay_audit": "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/root-replay-audit.json",
+  "scope": "Documentation correction only; original successful native receipt audit is retained, not rerun against a concurrently edited external repository."
+}

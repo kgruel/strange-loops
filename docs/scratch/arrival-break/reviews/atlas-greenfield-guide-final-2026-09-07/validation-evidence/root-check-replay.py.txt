@@ -1,0 +1,118 @@
+from pathlib import Path
+import hashlib
+import json
+import re
+import subprocess
+
+root = Path('/Users/kaygee/Code/loops-wt/arrival-finish')
+replay = Path('/tmp/atlas-guide-replay.KlPLd3')
+work = Path((replay / 'atlas-work.path').read_text().strip())
+guide = root / 'docs/guides/atlas-greenfield-cli.md'
+blocks = re.findall(r'^```bash\n(.*?)^```', guide.read_text(), flags=re.M | re.S)
+executed = (replay / 'guide.sh').read_text()
+assert executed == ''.join(blocks)
+assert (replay / 'guide.exit').read_text().strip() == '0'
+names = ['binding', 'init', 'inspect-initial', 'declaration', 'batch-receipt',
+         'notes-before', 'follow-up-receipt', 'notes-after', 'snapshot-state',
+         'note-history', 'inspect-final', 'verify', 'sync', 'export']
+results = {}
+for name in names:
+    envelope = json.loads((work / (name + '.json')).read_text())
+    assert envelope['ok'] is True
+    results[name] = envelope['result']
+
+def head(value):
+    assert isinstance(value, dict) and set(value) == {'lineage', 'ordinal', 'record_hash'}
+    assert isinstance(value['lineage'], str) and value['lineage']
+    assert type(value['ordinal']) is int and value['ordinal'] >= 0
+    assert re.fullmatch('[0-9a-f]{64}', value['record_hash'])
+    return value
+
+initial = head(results['init']['head'])
+assert results['init']['phase'] == 'published'
+assert results['declaration']['status'] == 'applied'
+previous = initial
+chain = [initial]
+for name in ['declaration', 'batch-receipt', 'follow-up-receipt']:
+    commit = results[name]['commit']
+    assert head(commit['before']) == previous
+    after = head(commit['after'])
+    assert after['lineage'] == initial['lineage']
+    assert after['ordinal'] == previous['ordinal'] + commit['record_count']
+    assert commit['record_count'] == 1
+    previous = after
+    chain.append(after)
+final = previous
+assert [h['ordinal'] for h in chain] == [1, 2, 3, 4]
+batch = results['batch-receipt']
+assert batch['atomic'] is True and batch['atomicity'] == 'single-append'
+assert batch['item_count'] == batch['stored_count'] == 2
+assert batch['witnessed'] is True and batch['projection'] == 'synced'
+for item in batch['items']:
+    assert item['signed'] is item['witnessed'] is item['stored'] is True
+follow = results['follow-up-receipt']
+assert follow['signed'] is follow['witnessed'] is follow['stored'] is True
+assert follow['projection'] == 'synced'
+
+for name in ['notes-after', 'snapshot-state', 'note-history', 'inspect-final']:
+    basis = results[name]['basis']
+    assert head(basis['captured_head']) == head(basis['projected_through']) == final
+assert results['verify']['captured_head'] == results['verify']['verified_through'] == final
+sync = results['sync']
+for key in ['captured_head', 'target', 'projected_before', 'projected_after']:
+    assert head(sync[key]) == final
+assert sync['agreement'] is True
+assert results['inspect-final']['local_status'] == 'matches-effective'
+
+copied = (work / 'architecture.json').read_bytes()
+current = Path('/Users/kaygee/Code/gruel.network/docs/atlas/architecture.json').read_bytes()
+assert copied == current
+graph = json.loads(copied)
+snapshot = results['snapshot-state']['sections']['atlas.snapshot']['snapshots']['photographs']
+assert snapshot['graph'] == graph
+assert snapshot['input_sha256'] == hashlib.sha256(copied).hexdigest()
+before = results['notes-before']['sections']['atlas.note']['notes']['mount:immich-photos']
+after = results['notes-after']['sections']['atlas.note']['notes']['mount:immich-photos']
+assert before['status'] == 'question' and after['status'] == 'follow-up'
+history = results['note-history']
+assert history['truncated'] is False
+assert [f['id'] for f in history['items']] == ['atlas-note-1', 'atlas-note-2']
+first_note = json.loads((work / 'batch.json').read_text())[1]['payload']
+second_note = json.loads((work / 'follow-up.json').read_text())
+assert [f['payload'] for f in history['items']] == [first_note, second_note]
+
+export = results['export']
+assert head(export['head']) == head(export['captured_head']) == final
+wire = (work / 'captured.jsonl').read_bytes()
+assert wire == (work / 'atlas.arrival').read_bytes()
+assert export['byte_count'] == len(wire)
+records = [json.loads(line) for line in wire.splitlines()]
+manifest = export['manifest']
+assert manifest['codec'] == export['codec'] == 'arrival-jsonl-v1'
+assert manifest['count'] == len(records) == 5
+assert manifest['through_ordinal'] == final['ordinal']
+assert manifest['through_record_hash'] == final['record_hash']
+assert manifest['lineage'] == final['lineage']
+assert records[-1]['rh'] == final['record_hash']
+assert wire.endswith(b'\n')
+gruel = Path('/Users/kaygee/Code/gruel.network')
+status = subprocess.check_output(['git', 'status', '--short'], cwd=gruel, text=True)
+assert status == (replay / 'gruel-status-before.txt').read_text()
+summary = {
+    'status': 'PASS', 'guide_command_blocks': len(blocks), 'successful_cli_invocations': len(names),
+    'loops_checkpoint': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),
+    'guide_sha256': hashlib.sha256(guide.read_bytes()).hexdigest(),
+    'executed_script_sha256': hashlib.sha256((replay / 'guide.sh').read_bytes()).hexdigest(),
+    'current_bash_blocks_match_executed_script': True,
+    'atlas_revision': graph['revision'], 'atlas_input_sha256': hashlib.sha256(copied).hexdigest(),
+    'atlas_entities': len(graph['entities']), 'atlas_relationships': len(graph['relationships']),
+    'atlas_sources': len(graph['sources']), 'heads': chain,
+    'batch_and_followup_signed_witnessed': True, 'graph_preserved': True,
+    'both_note_payloads_preserved': True, 'latest_note': 'follow-up',
+    'final_read_verify_sync_export_heads_agree': True,
+    'export_equals_captured_ledger': True, 'export_bytes': len(wire),
+    'export_sha256': hashlib.sha256(wire).hexdigest(),
+    'gruel_git_status_unchanged': True, 'atlas_input_bytes_unchanged': True,
+    'scratch_workspace': str(work),
+}
+print(json.dumps(summary, indent=2))

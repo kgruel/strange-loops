@@ -1,0 +1,19 @@
+{
+  "instruction": "You are Fable 5.1 LOW, reviewing a focused user-facing how-to and its native replay evidence. Return concrete blockers with trigger/consequence/minimal correction, separate optional improvements, and end ACCEPT or REVISE. This is a documentation-only task after Loops checkpoint d4e5792d; no runtime change and no live Atlas integration. The six bash blocks were extracted into one script and executed from ~/Code/gruel.network/docs/atlas using fresh isolated CLI environment/credential/store/witness paths. All14 CLI commands succeeded. Root independently checked non-null exact commit continuity, complete graph/payload history, per-item signing/witness evidence, state/projection/verify/export head agreement, and export bytes/manifest. The checker and native result are included; you did not execute tests. Initial preliminary checker assumptions were corrected, not production defects. Subsequent guide edits were prose only, current six bash blocks match executed script exactly.\nCheck beginner runnable commands and semantic accuracy: mapped namespace/observer vs vertex name, explicit binding before fresh initialization, declaration edit via proposal (split scoped only to generated scaffold), full snapshot retains source index meaning, by-fold follows receipt order, shared key across observers selects one latest value not consensus, observed configured evidence distinct from live health and editorial follow-up. Results differ by operation; no universal signed/commit promise. Verify excludes cryptographic authorship/key trust/projection, successful writers can sync but inspect actual evidence, exit6 not blanket retry permission, stable IDs not unconditional idempotency. Export is captured wire prefix not complete backup or empty-receiver import. Recovery text blocks are reference only, not executed recovery tests. uv sync no frozen intentionally allows resolver because uv.lock gitignored, not a dependency-reproducibility claim. Source Atlas JSON copied/read only, no original stores changed or project push/deployment. Review quality of the focused guide; avoid expanding it into a full operations manual or new CLI features.",
+  "sources": [
+    "docs/guides/atlas-greenfield-cli.md",
+    "apps/loops-min/README.md",
+    "apps/loops-min/src/loops_min/main.py",
+    "docs/scratch/arrival-break/atlas-greenfield-guide-2026-09-07.md",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/guide.sh.txt",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/guide.stdout",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/guide.stderr",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/guide.exit",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/architecture-meta.txt",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/architecture-sha.txt",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/gruel-status-before.txt",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/gruel-status-after.txt",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/root-check-replay.py.txt",
+    "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/root-replay-audit.json"
+  ]
+}

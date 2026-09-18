@@ -98,6 +98,9 @@ The executable is deliberately named `loops-min` while the legacy `loops`
 application remains in the workspace. It has no presentation, storage, or
 legacy CLI dependency.
 
+For a complete fresh-store example with tested commands, see
+[A fresh Loops store for Atlas observations](../../docs/guides/atlas-greenfield-cli.md).
+
 The global `--pretty` option may appear before or after a command. Argument
 errors also use the JSON envelope and exit with status 2. A built-wheel smoke
 can be run from a clean environment by building `loops-min`, installing it

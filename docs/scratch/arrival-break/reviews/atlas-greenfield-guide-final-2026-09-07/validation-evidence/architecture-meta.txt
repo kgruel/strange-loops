@@ -1,0 +1,4 @@
+schema_version 1
+revision 13deac5f206a220fbe79019b121bd38d120cdef33b82d4d450ff8f5d3bce8724
+scope photographs
+state configured

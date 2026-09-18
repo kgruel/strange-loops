@@ -1,0 +1,81 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "low",
+  "worktree": "/Users/kaygee/Code/loops-wt/arrival-finish",
+  "results": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/atlas-greenfield-guide-correction-2026-09-07",
+  "due_at": "2026-09-07T06:06:49.780896+00:00",
+  "baseline": "d4e5792d",
+  "scope": "Atlas guide prose correction",
+  "jobs": [
+    {
+      "name": "correction",
+      "packet": "/Users/kaygee/Code/loops-wt/arrival-finish/docs/scratch/arrival-break/reviews/atlas-greenfield-guide-correction-2026-09-07/correction-prompt.txt",
+      "sha256": "0816d3f2affe5c3cfa9b99d1fc5903c99992d83877a278752596d34e4ed5e8c1",
+      "sources": {
+        "docs/guides/atlas-greenfield-cli.md": "975850c63a1b4bd606b011cb2e99af68d12faf2868c3a640f3aca17adac93dbe",
+        "docs/scratch/arrival-break/atlas-greenfield-guide-2026-09-07.md": "3c44385c6cc39d2ff2f876d4f35f042b1c47511e7380f39e8317c81d094abda9",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/final-findings.md": "1bb3456d481e257a49813555d074129e6422fadefc15d6acfe4771a3f08cd24b",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/primary-triage.md": "934233767b82a08ac4eccabf1264dbf373715804925bb221478cd59c151b2eea",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-correction-2026-09-07/declaration-result-shape.json": "2cba6d08fd0daf3fada320ff24a1f5ad80640fca2c0cd26a9b0c25d2cfe17eca",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-correction-2026-09-07/command-closure-check.json": "4627a95f58dd9cb3e6bebbb8448489dfe109f9ea8e65659d705a2cd1a10e5a96",
+        "docs/scratch/arrival-break/reviews/atlas-greenfield-guide-final-2026-09-07/validation-evidence/root-replay-audit.json": "b7e77f0dcaab3b282e960d68475455b58f98d29c63e0db1e88ab5f162b9e1b4c"
+      },
+      "status": "reviewed-awaiting-triage",
+      "started_at": "2026-09-07T06:06:49.811740+00:00",
+      "effort": "low",
+      "source_drift": [],
+      "command": [
+        "/Users/kaygee/.local/bin/claude",
+        "-p",
+        "--safe-mode",
+        "--model",
+        "claude-fable-5-1[1m]",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+        "--tools",
+        "",
+        "--output-format",
+        "json"
+      ],
+      "returncode": 0,
+      "model_usage": {
+        "claude-haiku-4-5-20251001": {
+          "inputTokens": 9914,
+          "outputTokens": 15,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0,
+          "webSearchRequests": 0,
+          "costUSD": 0.009989,
+          "contextWindow": 200000,
+          "maxOutputTokens": 32000,
+          "thinkingTokens": 0,
+          "canonicalModel": "claude-haiku-4-5",
+          "provider": "firstParty",
+          "costBasis": "list"
+        },
+        "claude-fable-5-1": {
+          "inputTokens": 2,
+          "outputTokens": 1180,
+          "cacheReadInputTokens": 3264,
+          "cacheCreationInputTokens": 13647,
+          "webSearchRequests": 0,
+          "costUSD": 0.33277599999999996,
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "thinkingTokens": 742,
+          "canonicalModel": "claude-fable-5-1",
+          "provider": "firstParty",
+          "costBasis": "list"
+        }
+      },
+      "response_subtype": "success",
+      "finished_at": "2026-09-07T06:07:07.167401+00:00"
+    }
+  ],
+  "status": "reviews-finished-awaiting-triage",
+  "pid": 2067,
+  "updated_at": "2026-09-07T06:07:07.167405+00:00",
+  "started_at": "2026-09-07T06:06:49.811580+00:00",
+  "finished_at": "2026-09-07T06:07:07.167862+00:00"
+}

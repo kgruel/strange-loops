@@ -1,0 +1,128 @@
+"""Isolated primary reproductions for Fable's five findings; no production edits."""
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from dataclasses import replace
+import json, os, runpy
+import engine.arrival_adoption as adoption
+from engine.arrival import ArrivalLog
+from engine.arrival_body import body_of_fact_row
+from engine.arrival_contract import RecordDraft
+from engine.arrival_registry import BackendRegistry, _open_file_backend, _file_binding
+from engine.credentials import ResolvedCredential
+
+repo=Path.cwd()
+helpers=runpy.run_path(str(repo/'libs/engine/tests/test_arrival_adoption.py'))
+fixture=helpers['_fixture']
+verifiers=helpers['_recovery_kwargs']
+results=[]
+
+def setup(root):
+    root.mkdir()
+    for key,folder in [('XDG_STATE_HOME','state'),('XDG_CONFIG_HOME','config'),('LOOPS_HOME','loops')]:
+        os.environ[key]=str(root/folder)
+    return fixture(root)
+
+def reserve(registry, plan):
+    def fail(phase):
+        if phase=='after-intent': raise OSError('reserve-only probe')
+    try: adoption.apply_arrival_adoption(registry,plan,failure_hook=fail)
+    except adoption.AdoptionRecoveryRequired: pass
+    return adoption.arrival_adoption_intent_path(plan.target_path)
+
+def capture(call):
+    try:
+        out=call()
+        return {'returned':type(out).__name__}
+    except Exception as exc:
+        row={'exception':type(exc).__name__,'message':str(exc)}
+        for field in ['phase','head']:
+            if hasattr(exc,field): row[field]=str(getattr(exc,field))
+        commit=getattr(exc,'commit',None)
+        if commit is not None: row['commit_before']=commit.before.ordinal; row['commit_after']=commit.after.ordinal
+        cause=getattr(exc,'cause',None)
+        if cause is not None: row['cause']=type(cause).__name__+': '+str(cause)
+        return row
+
+with TemporaryDirectory(prefix='loops-fable-adoption-probes-') as tmp:
+    root=Path(tmp)
+    # 1: mapped custom provider returns junk and self-approves verification.
+    registry, descriptor, kw=setup(root/'p1')
+    good_resolver=kw['credentials'].binding_resolver
+    def bad_resolver(request):
+        good=good_resolver(request)
+        return ResolvedCredential(good.evidence,lambda _digest:'junk-signature')
+    kw['credentials']=replace(kw['credentials'],binding_resolver=bad_resolver,signature_verifier=lambda *_: True)
+    plan=adoption.prepare_arrival_adoption(registry,descriptor,**kw)
+    def after_append(phase):
+        if phase=='after-append': raise OSError('postcommit probe')
+    applied=capture(lambda:adoption.apply_arrival_adoption(registry,plan,failure_hook=after_append))
+    intent=adoption.arrival_adoption_intent_path(plan.target_path)
+    recovered=capture(lambda:adoption.recover_arrival_adoption(registry,intent,**verifiers()))
+    records=list(ArrivalLog(Path(descriptor.location)).walk())
+    results.append({'finding':1,'apply':applied,'recovery':recovered,'records':len(records),'inner':records[-1]['body']['signature'],'outer':records[-1]['sig']})
+
+    # 2: an actual append succeeds but its return is lost; subsequent sync fails.
+    registry, descriptor, kw=setup(root/'p2')
+    plan=adoption.prepare_arrival_adoption(registry,descriptor,**kw)
+    class LedgerProxy:
+        def __init__(self,ledger): self.ledger=ledger
+        def __getattr__(self,key): return getattr(self.ledger,key)
+        def append(self,*args,**kwargs):
+            self.ledger.append(*args,**kwargs)
+            raise OSError('append committed, response lost')
+    class LostReturnRegistry:
+        def open(self,descriptor):
+            ledger,query=registry.open(descriptor)
+            return LedgerProxy(ledger),query
+    applied=capture(lambda:adoption.apply_arrival_adoption(LostReturnRegistry(),plan))
+    intent=adoption.arrival_adoption_intent_path(plan.target_path)
+    saved=adoption.sync_projection
+    def fail_sync(*args,**kwargs): raise OSError('maintenance offline')
+    adoption.sync_projection=fail_sync
+    try: recovered=capture(lambda:adoption.recover_arrival_adoption(registry,intent,**verifiers()))
+    finally: adoption.sync_projection=saved
+    results.append({'finding':2,'apply':applied,'recovery':recovered,'saved_phase':json.loads(intent.read_text())['phase']})
+
+    # 3: a different record consumes the sole reserved append position.
+    registry, descriptor, kw=setup(root/'p3')
+    plan=adoption.prepare_arrival_adoption(registry,descriptor,**kw)
+    intent=reserve(registry,plan)
+    ledger,query=registry.open(descriptor)
+    try:
+        body=body_of_fact_row(('interleaved','item',3.0,'alice','','{}',None))
+        interleaved=ledger.append(kw['selected_head'],(RecordDraft('fact',3.0,'alice','',body),))
+    finally: query.close(); ledger.close()
+    recovered=capture(lambda:adoption.recover_arrival_adoption(registry,intent,**verifiers()))
+    kw['selected_head']=interleaved.after
+    fresh=adoption.prepare_arrival_adoption(registry,descriptor,**kw)
+    retried=capture(lambda:adoption.apply_arrival_adoption(registry,fresh))
+    results.append({'finding':3,'recovery':recovered,'fresh_apply':retried,'intent_remains':intent.exists()})
+
+    # 4: malformed shape and inconsistent serialized draft taxonomy.
+    registry, descriptor, kw=setup(root/'p4')
+    plan=adoption.prepare_arrival_adoption(registry,descriptor,**kw)
+    intent=reserve(registry,plan); authentic=intent.read_bytes()
+    cases=[]
+    for mutation in ['list','descriptor-string','draft-mismatch']:
+        value=json.loads(authentic)
+        if mutation=='list': value=[]
+        elif mutation=='descriptor-string': value['descriptor']='x'
+        else: value['drafts'][0]['signature']='changed-without-updating-exact'
+        intent.write_text(json.dumps(value))
+        cases.append({'mutation':mutation,**capture(lambda:adoption.recover_arrival_adoption(registry,intent,**verifiers()))})
+    results.append({'finding':4,'cases':cases})
+
+    # 5: otherwise valid registration deliberately omits optional maintenance.
+    registry, descriptor, kw=setup(root/'p5')
+    no_maintenance=BackendRegistry()
+    no_maintenance.register('file',_open_file_backend,binding_provider=_file_binding)
+    plan=adoption.prepare_arrival_adoption(no_maintenance,descriptor,**kw)
+    applied=capture(lambda:adoption.apply_arrival_adoption(no_maintenance,plan))
+    intent=adoption.arrival_adoption_intent_path(plan.target_path)
+    recovered=capture(lambda:adoption.recover_arrival_adoption(no_maintenance,intent,**verifiers()))
+    # Adding the required registration recovers the already committed anchor.
+    fixed_registry=capture(lambda:adoption.recover_arrival_adoption(registry,intent,**verifiers()))
+    results.append({'finding':5,'apply':applied,'recovery':recovered,'recovery_with_maintenance':fixed_registry,'records':len(list(ArrivalLog(Path(descriptor.location)).walk()))})
+
+print(json.dumps(results,indent=2))
+(repo/'docs/scratch/arrival-break/reviews/adoption-fable-2026-09-18/reproduction-results.json').write_text(json.dumps(results,indent=2)+'\n')

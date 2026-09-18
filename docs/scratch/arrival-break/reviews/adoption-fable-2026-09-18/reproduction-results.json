@@ -1,0 +1,97 @@
+[
+  {
+    "finding": 1,
+    "apply": {
+      "exception": "AdoptionCommittedIncomplete",
+      "message": "adoption committed but append phase recording failed",
+      "phase": "appended",
+      "head": "Head(lineage='01J00000000000000000000000', ordinal=1, record_hash='5bea2c1093e028145ee626b8df8497d4e544f37351aa072e00b14ae9864c6623')",
+      "commit_before": 0,
+      "commit_after": 1,
+      "cause": "OSError: postcommit probe"
+    },
+    "recovery": {
+      "exception": "AdoptionApplyError",
+      "message": "reserved FACT signature does not verify"
+    },
+    "records": 2,
+    "inner": "junk-signature",
+    "outer": "junk-signature"
+  },
+  {
+    "finding": 2,
+    "apply": {
+      "exception": "AdoptionOutcomeUnknown",
+      "message": "adoption append outcome is unknown",
+      "head": "Head(lineage='01J00000000000000000000000', ordinal=0, record_hash='b2372a7e2329facad51a84de11d29b792c98d6b6c81b1185e3225876212c2502')",
+      "cause": "OSError: append committed, response lost"
+    },
+    "recovery": {
+      "exception": "AdoptionCommittedIncomplete",
+      "message": "adoption committed but projection or cache reconciliation remains",
+      "phase": "append-unknown",
+      "head": "Head(lineage='01J00000000000000000000000', ordinal=1, record_hash='4767664956548e03e6a62f986fa0bae66754e2d5ad2b8334e7bf9e2aa7cacf8b')",
+      "commit_before": 0,
+      "commit_after": 1,
+      "cause": "OSError: maintenance offline"
+    },
+    "saved_phase": "append-unknown"
+  },
+  {
+    "finding": 3,
+    "recovery": {
+      "exception": "AdoptionStale",
+      "message": "reserved adoption draft is absent at its expected ordinal"
+    },
+    "fresh_apply": {
+      "exception": "AdoptionApplyError",
+      "message": "unfinished adoption intent exists: /private/var/folders/kc/gvf_th792ydbdzvtns23cx580000gn/T/loops-fable-adoption-probes-_0bavzw5/p3/copied.vertex.arrival-adopt.intent"
+    },
+    "intent_remains": true
+  },
+  {
+    "finding": 4,
+    "cases": [
+      {
+        "mutation": "list",
+        "exception": "AttributeError",
+        "message": "'list' object has no attribute 'get'"
+      },
+      {
+        "mutation": "descriptor-string",
+        "exception": "AttributeError",
+        "message": "'str' object has no attribute 'get'"
+      },
+      {
+        "mutation": "draft-mismatch",
+        "exception": "DeclarationApplyError",
+        "message": "declaration intent draft bytes do not verify"
+      }
+    ]
+  },
+  {
+    "finding": 5,
+    "apply": {
+      "exception": "AdoptionCommittedIncomplete",
+      "message": "adoption committed but projection or cache reconciliation remains",
+      "phase": "appended",
+      "head": "Head(lineage='01J00000000000000000000000', ordinal=1, record_hash='4767664956548e03e6a62f986fa0bae66754e2d5ad2b8334e7bf9e2aa7cacf8b')",
+      "commit_before": 0,
+      "commit_after": 1,
+      "cause": "NotSupported: backend 'file' does not provide projection maintenance"
+    },
+    "recovery": {
+      "exception": "AdoptionCommittedIncomplete",
+      "message": "adoption committed but projection or cache reconciliation remains",
+      "phase": "appended",
+      "head": "Head(lineage='01J00000000000000000000000', ordinal=1, record_hash='4767664956548e03e6a62f986fa0bae66754e2d5ad2b8334e7bf9e2aa7cacf8b')",
+      "commit_before": 0,
+      "commit_after": 1,
+      "cause": "NotSupported: backend 'file' does not provide projection maintenance"
+    },
+    "recovery_with_maintenance": {
+      "returned": "ArrivalAdoptionResult"
+    },
+    "records": 2
+  }
+]

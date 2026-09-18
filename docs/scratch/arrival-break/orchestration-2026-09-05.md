@@ -1,3 +1,25 @@
+## September 18: Fable 5.1 adversarial check — REVISE
+
+User requested a Claude CLI Fable 5.1 review of completed adoption checkpoint
+**69852066**. The high-effort fixed-source review returned **REVISE**, five P2
+findings and no P1. Primary reproduced all five in isolated temporary fixtures:
+custom-provider signatures can pass apply but fail independent recovery;
+reconciled commits retain an unknown phase on subsequent sync failure;
+provably superseded intents block fresh adoption; malformed intent JSON escapes
+the adoption/SDK error family; missing maintenance capability is discovered
+only after append. The last case recovers once maintenance is registered,
+so its impact is narrower than the review's “unrecoverable” wording.
+
+See [primary triage](reviews/adoption-fable-2026-09-18/primary-triage.md),
+[unaltered Fable findings](reviews/adoption-fable-2026-09-18/findings.md), and
+[native reproductions](reviews/adoption-fable-2026-09-18/reproduction-results.json).
+Model usage verifies Fable 5.1; reviewed source hashes match the checkpoint.
+The focused baseline remained green (27 passed), illustrating the missing
+failure-path coverage. No runtime changes, fixes, commit or push were made
+in this review pass. Next: remediate and verify these findings before resuming
+the representative-copy rehearsal work. Earlier acceptance below describes
+its earlier review scope and is superseded by this adversarial check.
+
 ## September 18: explicit declaration adoption accepted
 
 The tested Atlas guide and its existing review receipts are checkpointed in

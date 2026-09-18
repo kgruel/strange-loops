@@ -1,0 +1,8 @@
+{
+  "sdk_status": "applied",
+  "commit_before": 2,
+  "commit_after": 3,
+  "inner_signature_verifies": false,
+  "outer_signature_verifies": false,
+  "read_summary_succeeds": true
+}

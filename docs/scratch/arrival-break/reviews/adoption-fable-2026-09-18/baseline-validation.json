@@ -1,0 +1,5 @@
+{
+  "command": "uv run pytest libs/engine/tests/test_arrival_adoption.py libs/sdk/tests/test_arrival_adoption.py tests/test_arrival_migration_boundary.py -q",
+  "result": "27 passed in 1.55s",
+  "head": "69852066833a87ad1d6a84fd97ae9d21ff26bdfe"
+}

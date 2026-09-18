@@ -1,0 +1,30 @@
+[
+  {
+    "input": "list",
+    "exception": "AttributeError",
+    "sdk_error": false,
+    "message": "'list' object has no attribute 'get'",
+    "intent_unchanged": true
+  },
+  {
+    "input": "null",
+    "exception": "AttributeError",
+    "sdk_error": false,
+    "message": "'NoneType' object has no attribute 'get'",
+    "intent_unchanged": true
+  },
+  {
+    "input": "string",
+    "exception": "AttributeError",
+    "sdk_error": false,
+    "message": "'str' object has no attribute 'get'",
+    "intent_unchanged": true
+  },
+  {
+    "input": "missing_schema",
+    "exception": "ArrivalRefusal",
+    "sdk_error": true,
+    "message": "unsupported adoption intent",
+    "intent_unchanged": true
+  }
+]

@@ -1,0 +1,32 @@
+"""Confirm finding 1 through the public SDK with real migration signatures."""
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import hashlib,json,os,runpy
+from sdk import MappedCredentialProvider,adopt_arrival,read_summary
+from engine.credentials import CredentialRequest,CredentialPurpose,SigningDomain,ResolvedCredential,WriteCredentials
+from engine.admission import fact_commitment_hash
+from engine.arrival import content_commitment
+from migrate.sidecar import run_migration
+helpers=runpy.run_path('tests/test_arrival_migration_boundary.py')
+with TemporaryDirectory(prefix='loops-fable-sdk-signature-') as tmp:
+ root=Path(tmp)
+ for key,name in [('XDG_STATE_HOME','state'),('XDG_CONFIG_HOME','config'),('LOOPS_HOME','loops')]: os.environ[key]=str(root/name)
+ (root/'data').mkdir()
+ source=root/'data/legacy.jsonl'; helpers['_write_jsonl'](source)
+ provider=MappedCredentialProvider(root/'credentials',namespace='review',receipt_observer='alice')
+ created=provider.create_binding('alice',token='review-alice')
+ vertex=root/'alice.vertex'; helpers['_write_vertex'](vertex,created.public_key,source.name)
+ reviewed=vertex.read_text()
+ signer=provider.resolve(CredentialRequest(provider.namespace,'alice',SigningDomain.ARRIVAL,CredentialPurpose.INITIALIZATION))
+ migration=run_migration(source,vertex,store_dir=root/'data',signer=lambda _observer,digest:signer.sign_digest(digest))
+ def bad_resolver(request):
+  genuine=provider.resolve(request)
+  return ResolvedCredential(genuine.evidence,lambda _digest:'junk-signature')
+ credentials=WriteCredentials(binding_namespace=provider.namespace,binding_resolver=bad_resolver,signature_verifier=lambda *_:True)
+ result=adopt_arrival(vertex,selected_head=migration.head,reviewed_text=reviewed,reviewed_sha256=hashlib.sha256(reviewed.encode()).hexdigest(),declaration_text=vertex.read_text(),observer='alice',credentials=credentials)
+ record=json.loads(migration.target_path.read_text().splitlines()[-1]); body=record['body']
+ inner=fact_commitment_hash(body['kind'],body['ts'],body['observer'],body['origin'],body['payload'])
+ outer=content_commitment(record['k'],record['at'],record['observer'],record['origin'],body)
+ evidence={'sdk_status':result.status,'commit_before':result.commit.before.ordinal,'commit_after':result.commit.after.ordinal,'inner_signature_verifies':provider.verify(SigningDomain.FACT,created.public_key,body['signature'],inner),'outer_signature_verifies':provider.verify(SigningDomain.ARRIVAL,created.public_key,record['sig'],outer),'read_summary_succeeds':read_summary(vertex).basis.captured_head==result.head}
+print(json.dumps(evidence,indent=2))
+Path('docs/scratch/arrival-break/reviews/adoption-fable-2026-09-18/sdk-signature-probe.json').write_text(json.dumps(evidence,indent=2)+'\n')

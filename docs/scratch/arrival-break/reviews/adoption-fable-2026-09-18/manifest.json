@@ -1,0 +1,31 @@
+{
+  "model": "claude-fable-5-1[1m]",
+  "effort": "high",
+  "head": "69852066833a87ad1d6a84fd97ae9d21ff26bdfe",
+  "parent": "870095a7",
+  "packet_sha256": "a7c50208b9f6b2192c5c2316de7252b248dd837b29917035a4bac69c387277e7",
+  "packet_bytes": 255122,
+  "sources": {
+    "docs/scratch/arrival-break/consistency-c9-migration-adoption-design-2026-09-06.md": "b9738eb9f1dbf441caf55353ef58e5dca63635058b67687870b842b7c0fdbf6e",
+    "docs/libs/sdk/ADOPTION.md": "3f7c1f96fe2686d48ff8e46f9d248cdb602246d89e7957657be88b03126f7a94",
+    "libs/engine/src/engine/arrival_adoption.py": "13fa6b5f7a8204a2ffe467648cafdf01be54a56063a9d772eeec9d3ad274f0ee",
+    "libs/engine/src/engine/arrival_initialization.py": "2b4fe37743c0fd21987a5177eb79e9f27e936284f716a796615cc48b51ab3389",
+    "libs/engine/src/engine/credentials.py": "6773a4aa60db1767a0c26ad7d344e294b65bd9c99bdaa0b82c4aefff40121882",
+    "libs/engine/src/engine/arrival_maintenance.py": "bcec160590cb9d3d18797e63171e6651dd6118e49077c111ee94d9749a06d8ed",
+    "libs/sdk/src/sdk/adopt.py": "e1c1cfffbcf9b80bc33c35aee5960bd9ca85c98ec90cdf5bcada0a4a65fa9ee2",
+    "libs/sdk/src/sdk/errors.py": "ec27755dac5c7e8d820f51aeb5bb76d50293a04f388ac19778b6782ad9989868",
+    "libs/engine/tests/test_arrival_adoption.py": "76cc4033c7e740a48bc7755784da76d3d54654262c27e28e829bc634bd21dbcd",
+    "libs/sdk/tests/test_arrival_adoption.py": "d2ab5ecee4bd51cac04c525727b6685507ad156e3a1c6ca281c7f17608ce0618",
+    "tests/test_arrival_migration_boundary.py": "705103ed46d6be3a241405f881e166e491e0e8dc3109804af97e6f1c9d483326",
+    "libs/engine/src/engine/arrival_declarations.py": "3caf30f5a3c249586cba05ea03a9b6b9efc0c259f17d465e1b8ecfca091a15f1",
+    "libs/engine/src/engine/arrival.py": "8e37f3cbbcf652133ee23db9edf724635e896f13ce42051c6ee8f3b63064846c",
+    "libs/engine/src/engine/arrival_contract.py": "4859b8935a34c4ee08fb0cd75064bdd1360ce85e43647263ae08be86ddef2a1d",
+    "libs/engine/src/engine/arrival_head_seam.py": "98aa31cc74654852f64f74b8a5d2465ab9efb0022f4d018c1c31ed40f334393b",
+    "libs/engine/src/engine/arrival_registry.py": "33e80522d0919a05ced14360c6bf28a3bb049a7f7fda7d12eb11b49f302a2113",
+    "libs/sdk/src/sdk/types.py": "7f0daa5ad98610fdee5fd26787ce25e39278ef67ac2f17221bcdf4f19140ba21",
+    "libs/sdk/src/sdk/target.py": "5e7dbeb993dc0788d242749b7730419e349af8418d4b659134d7180c72841dc8",
+    "libs/custody/src/custody/signing.py": "8a8f506b35c67b671c7714fbf11cfbdaa86c4a14c3cc4a3d429fc8b05a338710",
+    "libs/engine/src/engine/declaration.py": "565a1b661ccaae1ed21ae38b53c245a4811c6629ac4143a2dd1ec399a0161b1b"
+  },
+  "scope": "explicit declaration adoption and authenticated recovery"
+}

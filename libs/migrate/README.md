@@ -47,3 +47,26 @@ See the [publication report](../../docs/scratch/arrival-break/consistency-c9-mig
 and [adoption design](../../docs/scratch/arrival-break/consistency-c9-migration-adoption-design-2026-09-06.md).
 The historical sidecar design is recorded in
 [the slice 4 proposal](../../docs/scratch/arrival-break/slice4-design-proposal.md).
+
+## Offline copy rehearsal
+
+Repository-local `scripts/arrival_rehearsal.py` runs the migration/report/adoption/
+read/write/export checks against already-copied inputs under an explicit private
+sandbox. `scripts/arrival_rehearsal_recovery.py` exercises both durable adoption
+interruption points on separate prefix copies with signing credentials offline.
+Both accept `--help`; they are rehearsal tools, not a live cutover command.
+
+The loops store rehearsal found two material constraints:
+
+- Empty historical observer labels are refused. The separately authorized
+  `scripts/prepare_legacy_unattributed.py` preparation policy maps only unsigned
+  flat facts with exactly empty observers to `legacy/unattributed` and produces
+  a row/hash audit manifest. It never runs implicitly during migration, and
+  its output is a distinct source. The migration report certifies that prepared
+  source; the preparation manifest links it to the untouched archive.
+- Preserved legacy boundary ticks can predate declaration adoption and prevent
+  ordinary writes under the continuity contract even when reads and export work.
+  A successful adoption is not by itself proof of a writable migrated store.
+
+See the [real-store rehearsal report](../../docs/scratch/arrival-break/loops-real-store-rehearsal-2026-09-18.md)
+for the exercised scope, evidence, and remaining boundary-policy decision.

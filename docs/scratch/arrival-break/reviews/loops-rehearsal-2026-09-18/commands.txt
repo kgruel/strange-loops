@@ -1,0 +1,12 @@
+# Run from /Users/kaygee/Code/loops-wt/arrival-finish
+# Root is an already verified private copy, not the live .loops directory.
+uv run python scripts/prepare_legacy_unattributed.py /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/input/project.jsonl /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/prepared/project.jsonl /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/prepared/manifest.json
+
+# Copied vertex store residence was explicitly changed to the prepared input.
+uv run python scripts/arrival_rehearsal.py --sandbox /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627 --vertex /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/work/.loops/project.vertex --source /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/prepared/project.jsonl --legacy-key-dir /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/work/.loops/keys --output /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/rehearsal-run-1 --observer project --emit-kind log --emit-payload-json '{"message":"Arrival isolated copy rehearsal only; not live project history","rehearsal_only":true}'
+
+uv run python scripts/arrival_rehearsal_recovery.py --sandbox /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627 --evidence /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/rehearsal-run-1/evidence.json --output /Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/recovery-run-1 --observer project
+
+# These are historical invocations, not idempotent commands: output paths must
+# be fresh, and the main runner publishes the copied vertex descriptor.
+uv run pytest tests/ --ignore=tests/chaos -q --tb=short

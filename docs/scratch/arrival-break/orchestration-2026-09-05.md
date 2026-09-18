@@ -1,3 +1,32 @@
+## September 18: real loops-store rehearsal complete; write policy unresolved
+
+Rehearsed an isolated copy of the active oldest loops JSONL store (204,426,871
+bytes, 4,357 facts and 121 ticks). Standard inventory first refused 982 unsigned
+empty-observer facts. The user explicitly approved an audited separate
+`legacy/unattributed` preparation: IDs/payloads/order preserved, other 3,496
+lines byte-identical, original archive retained. No core migration rule changed.
+
+The prepared copy migrated with zero drops, verified its signed report at S=4483,
+adopted at A=4484, and passed ordinary reads, Full verification and exact export.
+Real subprocess recovery at after-intent and after-append passed on separate
+prefix forks without signing credentials and without duplicate anchors.
+
+Ordinary emit refused before custody with `BoundaryContinuityRefused`: historical
+owned vertex ticks predate the adopted declaration. This is the existing C6
+contract, not an exception to bypass. User choice is pending: an explicit reviewed
+legacy-continuity bridge, a new boundary epoch with defined initial state, or
+deferring write policy. Do not claim the loops store is ready for writable cutover.
+
+Reusable tools are in `scripts/prepare_legacy_unattributed.py`,
+`scripts/arrival_rehearsal.py`, and `scripts/arrival_rehearsal_recovery.py`.
+Validation: 126 repository tests passed, Ruff clean, independent Luna review
+clear. The live source and vertex hashes are unchanged. One early synthetic
+recovery test wrote default-state witness metadata for its temporary lineage;
+the isolation bug is fixed and its evidence retained in the report.
+
+See [real-store rehearsal report](loops-real-store-rehearsal-2026-09-18.md).
+Private payloads/keys remain outside the repository. Nothing pushed or merged.
+
 ## September 18: adoption remediation accepted and checkpointed
 
 Corrections are checkpointed in **7ede817a** and **c5eb5041** on `arrival/finish`.

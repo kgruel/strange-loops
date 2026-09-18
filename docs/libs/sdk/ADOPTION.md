@@ -82,3 +82,11 @@ A changed cache or a post-append projection failure leaves a recovery boundary;
 a durable append is not rolled back. Process-exit tests cover reservation and
 append boundaries, not arbitrary power loss. Live writer coordination and a
 representative user-store rehearsal remain separate from this SDK operation.
+
+Adoption alone does not prove continuity for older boundary ticks. If preserved
+legacy ticks would be consumed as current loop resets or vertex periods but
+predate the adopted declaration, ordinary writes can refuse with
+`BoundaryContinuityRefused`. Migration, adoption, reads and export can succeed
+while writes remain unavailable. The loops real-store rehearsal demonstrated
+this case; do not bypass the continuity check or silently discard those ticks.
+A reviewed boundary cutover policy is separate work.

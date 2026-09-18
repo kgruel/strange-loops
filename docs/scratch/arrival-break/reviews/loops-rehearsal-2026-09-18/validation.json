@@ -1,0 +1,17 @@
+{
+  "baseline": "381f121d450983463e7e6db05f5d01b5ce3dd087",
+  "sources": {
+    "scripts/arrival_rehearsal.py": "9bbab3018877c945a97d768cbdba2f7dae13b64487b8386958e0b123606be6a3",
+    "scripts/arrival_rehearsal_recovery.py": "7541f6a20c8c4211f8a0cb8ab99d6376f701860b810a2489ac6af0b95f64a516",
+    "scripts/prepare_legacy_unattributed.py": "e4be5507a8420a385fddb210efaa32579dec154467e34a59e8e023d73ce80d47",
+    "tests/test_arrival_rehearsal_runner.py": "cdd422bf18e533e8d7548574e4f159e14a3fda853c517f1f283a50e7fb3a099b",
+    "tests/test_arrival_rehearsal_recovery.py": "05024c36c5e5f04ce90067f68d9fd7eeb8b62933a76e06e1ab5a4cd4b3410441",
+    "tests/test_legacy_unattributed_preparation.py": "b01c19ea786a85e92d5fc15e667541e378e45f214467b671908480ef2cdace6e"
+  },
+  "validation": {
+    "repository_excluding_chaos": "126 passed",
+    "focused_new": "11 passed",
+    "ruff": "passed",
+    "independent_review": "Luna no blockers; artifact acceptance documentation clarified"
+  }
+}

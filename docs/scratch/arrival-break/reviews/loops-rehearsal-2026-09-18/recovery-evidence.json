@@ -1,0 +1,38 @@
+{
+  "forks": [
+    {
+      "head": {
+        "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+        "ordinal": 4484,
+        "record_hash": "03e274a28bbcf6b9451626395871501d6ee33cdc66b22d0b4004a1b61dec2b6f"
+      },
+      "phase": "after-intent",
+      "pre_adoption_error": "SdkError",
+      "prefix_sha256": "6eaed9c5cbb0ba3b4c6f52a5d8a930c802b0fc680cca0d93e444d7e60dd3b00f",
+      "second_recovery_error": "ArrivalRefusal",
+      "selected_head": {
+        "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+        "ordinal": 4483,
+        "record_hash": "2f79be01f4cb7cf8b30bb2fbb62bcbaceb7c8889031bd9b7c3cd46eab988a0db"
+      }
+    },
+    {
+      "head": {
+        "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+        "ordinal": 4484,
+        "record_hash": "1bc724022e0c7f87a3262ca4a08325c6ad128d3ccf18e00c431dcc87ade35182"
+      },
+      "phase": "after-append",
+      "pre_adoption_error": "SdkError",
+      "prefix_sha256": "6eaed9c5cbb0ba3b4c6f52a5d8a930c802b0fc680cca0d93e444d7e60dd3b00f",
+      "second_recovery_error": "ArrivalRefusal",
+      "selected_head": {
+        "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+        "ordinal": 4483,
+        "record_hash": "2f79be01f4cb7cf8b30bb2fbb62bcbaceb7c8889031bd9b7c3cd46eab988a0db"
+      }
+    }
+  ],
+  "schema": "loops.rehearsal/arrival-recovery/v1",
+  "status": "complete"
+}

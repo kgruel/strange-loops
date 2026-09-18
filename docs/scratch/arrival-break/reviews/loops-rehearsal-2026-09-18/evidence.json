@@ -1,0 +1,276 @@
+{
+  "snapshot.json": {
+    "root": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627",
+    "live_source": "/Users/kaygee/Code/loops/.loops/data/project.jsonl",
+    "live_vertex": "/Users/kaygee/Code/loops/.loops/project.vertex",
+    "source_sha256": "1baa08419b856a52692100d8ea670a12482d80f95ce8a8d3193f194ac4c5347e",
+    "vertex_sha256": "3a2264100e1e17174f883970290bd8a314ca91eca0d36d4ec53fc11ffbf8479b",
+    "source_bytes": 204426871,
+    "copied_source": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/input/project.jsonl",
+    "copied_vertex": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/work/.loops/project.vertex",
+    "copied_legacy_keys": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/work/.loops/keys",
+    "snapshot_verified": true,
+    "copied_key_public_matches_declared_project": true
+  },
+  "forensic-census.json": {
+    "counts": {
+      "lines": 4478,
+      "lines_fact": 4357,
+      "rows": 4478,
+      "facts": 4357,
+      "empty_observer": 982,
+      "empty_unsigned": 982,
+      "lines_tick": 121,
+      "ticks": 121
+    },
+    "empty_observer_kinds": {
+      "well": 1,
+      "decision": 219,
+      "change": 30,
+      "thread": 144,
+      "session": 69,
+      "task": 59,
+      "log": 18,
+      "metric": 5,
+      "observation": 58,
+      "hypothesis": 1,
+      "loops": 2,
+      "friction": 36,
+      "seal": 21,
+      "cite": 7,
+      "observation/test": 3,
+      "observation/architecture": 1,
+      "decision/design": 1,
+      "retrospective": 5,
+      "observation/consumer-evidence": 1,
+      "plan": 16,
+      "finding": 269,
+      "design": 16
+    },
+    "observer_census": {
+      "": 982,
+      "provenance": 28,
+      "kyle": 97,
+      "loops-claude": 531,
+      "meta-claude": 160,
+      "kyle/loops-claude": 2301,
+      "kyle/meta-claude": 5,
+      "tester": 2,
+      "project": 216,
+      "rebirth": 1,
+      "relay": 8,
+      "kyle/fable": 19,
+      "kyle/siftd-codex": 7
+    },
+    "id_eras": {
+      "canonical-ulid": 4357
+    },
+    "empty_observer_first_lines": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      35,
+      36,
+      37,
+      38
+    ]
+  },
+  "additional-census.json": {
+    "fact_kind_counts": {
+      "well": 1,
+      "decision": 830,
+      "change": 61,
+      "thread": 879,
+      "log": 154,
+      "task": 221,
+      "handoff": 4,
+      "session": 685,
+      "observation": 338,
+      "metric": 5,
+      "ping": 6,
+      "cite": 57,
+      "plan": 33,
+      "hypothesis": 44,
+      "loops": 2,
+      "friction": 270,
+      "friction:emit-receipt-on-write": 1,
+      "seal": 123,
+      "tick.session": 2,
+      "tick.project": 214,
+      "rebirth": 1,
+      "design": 77,
+      "retrospective": 14,
+      "finding": 329,
+      "observation/test": 3,
+      "observation/architecture": 1,
+      "decision/design": 1,
+      "observation/consumer-evidence": 1
+    },
+    "fact_signatures": {
+      "unsigned": 3090,
+      "signed": 1267
+    },
+    "duplicate_ids": 0,
+    "declaration_rows": []
+  },
+  "prepared/independent-check.json": {
+    "changed_only_observer": 982,
+    "unchanged_lines_byte_identical": 3496,
+    "prepared_inventory_passed": true,
+    "total_rows": 4478,
+    "ticks": 121,
+    "manifest_sha256": "d6db177325ba4a50539504efb834dfce8310082d2a34c6446c465ebf82b748ca"
+  },
+  "rehearsal-run-1/evidence.json": {
+    "adoption": {
+      "fact_id_equals_lineage": true,
+      "head": {
+        "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+        "ordinal": 4484,
+        "record_hash": "6f2d115cc1a1271b6b3974a634183be341a5f7775218d7193455c3431a17ee90"
+      },
+      "phase": "published",
+      "projected_after": {
+        "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+        "ordinal": 4484,
+        "record_hash": "6f2d115cc1a1271b6b3974a634183be341a5f7775218d7193455c3431a17ee90"
+      }
+    },
+    "copied_source": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/prepared/project.jsonl",
+    "copied_vertex": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/work/.loops/project.vertex",
+    "error_type": "ArrivalRefusal",
+    "inventory": {
+      "batch_line_count": 0,
+      "content_sha256": "2d23788b2e6e501bead9179f2eda3a4eb13759af64227e93b7271501f7ee9df4",
+      "file_sha256": "e90c51f0929f2cfdb2d46c636845eb57b366e5432bf5c734f6b88619c5215933",
+      "format": "jsonl-canonical",
+      "id_era_census": {
+        "canonical-ulid": 4357,
+        "lowercase-ulid": 0,
+        "other": 0
+      },
+      "observer_census": {
+        "kyle": 97,
+        "kyle/fable": 19,
+        "kyle/loops-claude": 2301,
+        "kyle/meta-claude": 5,
+        "kyle/siftd-codex": 7,
+        "legacy/unattributed": 982,
+        "loops-claude": 531,
+        "meta-claude": 160,
+        "project": 216,
+        "provenance": 28,
+        "rebirth": 1,
+        "relay": 8,
+        "tester": 2
+      },
+      "per_kind_counts": {
+        "change": 61,
+        "cite": 57,
+        "decision": 830,
+        "decision/design": 1,
+        "design": 77,
+        "finding": 329,
+        "friction": 270,
+        "friction:emit-receipt-on-write": 1,
+        "handoff": 4,
+        "hypothesis": 44,
+        "log": 154,
+        "loops": 2,
+        "metric": 5,
+        "observation": 338,
+        "observation/architecture": 1,
+        "observation/consumer-evidence": 1,
+        "observation/test": 3,
+        "ping": 6,
+        "plan": 33,
+        "rebirth": 1,
+        "retrospective": 14,
+        "seal": 123,
+        "session": 685,
+        "task": 221,
+        "thread": 879,
+        "tick.project": 214,
+        "tick.session": 2,
+        "well": 1
+      },
+      "tick_count": 121,
+      "total_lines": 4478,
+      "total_rows": 4478
+    },
+    "migration": {
+      "dropped_unit_count": 0,
+      "keyless_declared_observer_count": 0,
+      "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+      "prefix_byte_count": 205664608,
+      "prefix_sha256": "6eaed9c5cbb0ba3b4c6f52a5d8a930c802b0fc680cca0d93e444d7e60dd3b00f",
+      "report_sha256": "37ebb90fca7f80924e29c500d81968c781a808b72696d1722e76e3e5999f360f",
+      "selected_head": {
+        "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+        "ordinal": 4483,
+        "record_hash": "2f79be01f4cb7cf8b30bb2fbb62bcbaceb7c8889031bd9b7c3cd46eab988a0db"
+      },
+      "target_path": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/rehearsal-run-1/stores/01M2V9XXFKB3XG5HPPBAJ9F1FM.arrival",
+      "undeclared_row_observer_count": 7
+    },
+    "output": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/rehearsal-run-1",
+    "reads_at_A": {
+      "declaration_status": "store",
+      "fact_total": 4357,
+      "head": {
+        "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+        "ordinal": 4484,
+        "record_hash": "6f2d115cc1a1271b6b3974a634183be341a5f7775218d7193455c3431a17ee90"
+      },
+      "sample_fact_count": 1,
+      "summary_basis": {
+        "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+        "ordinal": 4484,
+        "record_hash": "6f2d115cc1a1271b6b3974a634183be341a5f7775218d7193455c3431a17ee90"
+      },
+      "tick_total": 121
+    },
+    "rehearsal_only": true,
+    "report_verified_at_S": true,
+    "reviewed_snapshot": {
+      "path": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/rehearsal-run-1/reviewed.vertex",
+      "sha256": "ad6d2fd3c0091844b6bdb2094425affe953a7cf5565c9b5bffe7ce0b5d04c619"
+    },
+    "sandbox": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627",
+    "schema": "loops.rehearsal/arrival/v1",
+    "source_sha256_after": "e90c51f0929f2cfdb2d46c636845eb57b366e5432bf5c734f6b88619c5215933",
+    "source_sha256_before": "e90c51f0929f2cfdb2d46c636845eb57b366e5432bf5c734f6b88619c5215933",
+    "source_unchanged": true,
+    "stage": "rehearsal-only-emit",
+    "status": "refused"
+  },
+  "rehearsal-run-1/readonly-export-evidence.json": {
+    "head": {
+      "lineage": "01M2V9XXFKB3XG5HPPBAJ9F1FM",
+      "ordinal": 4484,
+      "record_hash": "6f2d115cc1a1271b6b3974a634183be341a5f7775218d7193455c3431a17ee90"
+    },
+    "byte_count": 205671254,
+    "sha256": "5c19381fffa4d4f23471e622a03773a82119f23d53f4b0470b8bfc56b2cad86b",
+    "exact_stream_match": true,
+    "migration_prefix_unchanged": true,
+    "migration_report_unchanged": true
+  },
+  "prepared_manifest_sha256": "d6db177325ba4a50539504efb834dfce8310082d2a34c6446c465ebf82b748ca",
+  "write_refusal": {
+    "type": "ArrivalRefusal",
+    "reason": "vertex-period tick predates declaration genesis",
+    "source_type": "BoundaryContinuityRefused",
+    "effects": {
+      "custody": {
+        "state": "not-attempted",
+        "attempt": "not-entered"
+      }
+    },
+    "phase": "prepare",
+    "tick_ordinal": 2307
+  }
+}

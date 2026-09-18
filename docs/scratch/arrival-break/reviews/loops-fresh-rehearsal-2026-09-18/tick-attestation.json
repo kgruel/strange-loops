@@ -1,0 +1,19 @@
+{
+  "schema": "loops.rehearsal/tick-attestation/v1",
+  "mode": "read-only supplementary attestation of the original recorded commit range",
+  "original_commit_records_retained": false,
+  "verified_head": {
+    "lineage": "01M2VCBPYRT63W2FKA54PVKP7D",
+    "ordinal": 4486,
+    "record_hash": "288cb73f9488f56448ea1c1f78e852cd157f1e5f620173cb866aaf87bafcafa2"
+  },
+  "target_sha256_unchanged": "73b678adb57c28869d8a7482e6a244280ec7e32a2474a2d6ad5f909a712df5d8",
+  "tick": {
+    "id": "01M2VCFQH5KZJMWSJJNN98KAN1",
+    "physical_matches_commit": null,
+    "tick_signature_verified": true,
+    "outer_arrival_absent": true,
+    "prev_hash_matches_prior_tick": true,
+    "prior_tick_id": "01M1A0PSSZ16X9V9JMHEBBXXD9"
+  }
+}

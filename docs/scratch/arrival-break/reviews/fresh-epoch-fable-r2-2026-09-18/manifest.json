@@ -1,0 +1,23 @@
+{
+  "head": "72faf1d5de071aef91b9de4865fa16f671525f5e",
+  "baseline": "72faf1d5",
+  "sources": {
+    "apps/loops/src/loops/commands/store.py": "69fb8f37ef2ebdce4a5cd5fa55227378947dd95f4964c103a604bbb4292842c7",
+    "apps/loops/tests/test_store_absorb.py": "b7d856dc7de32fe3ccfdb9186048dc505d802ae4923b4fe97a782d7742bc991c",
+    "docs/libs/sdk/ADOPTION.md": "4605441ff68062c1e033e84dff8dcd7831c9a06c959bbb56a345d984486805c8",
+    "docs/scratch/arrival-break/adoption-fresh-runtime-epoch-design-2026-09-18.md": "2446a743978c07afcc1d454f8fb2728f85541e775764bdd04ccc5342072bddfe",
+    "docs/scratch/arrival-break/consistency-c6-boundary-design-2026-09-06.md": "2de10d655da0a6cbd8705d637f80ddbfdb32b5e2f26851fbec685c4370c5d7c2",
+    "libs/engine/src/engine/runtime_write.py": "a927998c556fc929a49414ce61893e376cf0b949a66927b7324d4f6a49e0627f",
+    "libs/engine/tests/test_runtime_write.py": "67777113a6edd90c7724881e4063428f73f10ef1d4fd2c7b422e08f7c33dbeed",
+    "libs/lang/src/lang/document.py": "6673be579141dc2ac6b7a7bcbf8665b4d2de6dbe7ec8493944bea8e5a94aded0",
+    "scripts/arrival_rehearsal.py": "7487bc09a9e7746861aaea6f9be467a713d958639605367a0d90ae68c3ceafc9",
+    "tests/test_arrival_migration_boundary.py": "5172e099926fe379759c9d379e224ef102da8dee5653a0442552a671111d84f7",
+    "tests/test_arrival_rehearsal_runner.py": "e21ac72ef3a8997594bc02be48b570230ce83075042b5c4288de098b85d34234",
+    "libs/engine/src/engine/arrival_adoption.py": "7dfaa4d9741a97cb3c8ee48a2218bc508fe3f1434184bea9a37da50dfd3c8fd9",
+    "libs/engine/src/engine/declaration.py": "272b022a3aa818c3a2b87760101fe9d66b83a10396bce69a277f5ce2f25eaae9",
+    "libs/engine/src/engine/arrival_store.py": "379d1c75bb2472c34c3268954796e9160b8041ce3e4072c4d5907e46f545c350",
+    "docs/scratch/arrival-break/reviews/fresh-epoch-fable-2026-09-18/findings.md": "7511205c1213d1d94d93c4020cabe0a162afeac47a1ac741d2a8ceda85d3dc62"
+  },
+  "packet_sha256": "f5e9de8c6019a33d5117e79807aeb429475d7d57351668ffd0b062b1c01af08c",
+  "packet_bytes": 614650
+}

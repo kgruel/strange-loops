@@ -69,9 +69,10 @@ SDK prepare/recovery paths independently verify both domains before publishing
 the anchor; deliberately false low-level injected verifiers/raw ledger writes
 remain the existing trusted low-level API boundary.
 
-Recovery takes no caller-supplied epoch override. It derives the reserved mode
-from the authenticated exact draft, reconstructs the same canonical payload,
-and independently verifies both signature domains. Marker tampering cannot
+Recovery takes no caller-supplied epoch override. It reads the reserved mode
+from the intent field, cross-checks it against the exact draft payload,
+reconstructs the same canonical payload, and independently verifies both
+signature domains. Marker tampering cannot
 change the epoch while retaining authentic signatures. Results expose the mode
 and anchor; `head` and Commit(S,A) retain their existing meanings.
 

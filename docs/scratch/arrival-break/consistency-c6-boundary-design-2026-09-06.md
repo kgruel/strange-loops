@@ -161,6 +161,13 @@ or far in the future. `TickRequest` defaults to `since=0`; the validator must
 explicitly request the full timestamp range. Existing hydration/pending
 timestamp selection is a separate policy and must not be widened accidentally.
 
+The later fresh-epoch adoption implementation made that split explicit. Strict
+runtime hydration and pending-boundary execution still select ticks with
+`ts >= 0`, preserving the previous `TickRequest()` reset behavior. Continuity
+evidence and physical tick predecessor/window calculations select the full
+receipt prefix, including negative event times. An explicitly fresh runtime
+epoch selects post-anchor ticks by receipt ordinal, including negative times.
+
 Use documents as the common target input for all three entrypoints. The result
 includes the target's provable runtime names and unresolved-generator flag.
 Apply C5 reservation to provable names, including literal generated loops,

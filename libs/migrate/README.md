@@ -56,7 +56,7 @@ sandbox. `scripts/arrival_rehearsal_recovery.py` exercises both durable adoption
 interruption points on separate prefix copies with signing credentials offline.
 Both accept `--help`; they are rehearsal tools, not a live cutover command.
 
-The loops store rehearsal found two material constraints:
+The loops store rehearsal established these constraints:
 
 - Empty historical observer labels are refused. The separately authorized
   `scripts/prepare_legacy_unattributed.py` preparation policy maps only unsigned
@@ -66,7 +66,15 @@ The loops store rehearsal found two material constraints:
   source; the preparation manifest links it to the untouched archive.
 - Preserved legacy boundary ticks can predate declaration adoption and prevent
   ordinary writes under the continuity contract even when reads and export work.
-  A successful adoption is not by itself proof of a writable migrated store.
+  Explicit `--runtime-epoch fresh` adoption starts declared initial execution
+  state after the adoption ordinal and enabled writes on the loops copy. Strict
+  remains the default; historical facts/ticks stay queryable in either mode.
+- Observer mapping changes fact hashes. On the loops copy it invalidated 39
+  retained historical tick-window commitments; the original archive passes.
+  Migration preserves the prepared facts and old tick rows without rewriting
+  commitments. Full Arrival verification is not a clean historical tick audit.
+  Keep the original archive and mapping manifest, and settle transformed-history
+  verification policy before live cutover.
 
 See the [real-store rehearsal report](../../docs/scratch/arrival-break/loops-real-store-rehearsal-2026-09-18.md)
-for the exercised scope, evidence, and remaining boundary-policy decision.
+for the exercised scope, evidence, and remaining historical-commitment limitation.

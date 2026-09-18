@@ -1,3 +1,31 @@
+## September 18: fresh loops epoch rehearsed; historical mapping caveat
+
+The chosen initial state is implemented: declared fold initial values, zero
+boundary counters, no inherited runtime period/reset/pending work. Only receipts
+after adoption A enter fresh execution; complete historical queries, ID checks,
+and physical tick-chain links remain preserved. Strict behavior stays default.
+
+The audited loops copy migrated with zero drops, adopted fresh at A=4484, asserted
+empty declared state while retaining 4357 facts/121 ticks, then wrote a signed
+seal plus tick through 4486. Full Arrival verification and exact export passed.
+Both process-exit recovery checkpoints passed without signing credentials.
+
+**Remaining live-cutover issue:** raw original history passes tick-chain audit.
+Mapping 982 unsigned empty observers changes their fact hashes, so 39 retained
+historical tick-window commitments fail over prepared facts. Migration preserves
+prepared rows exactly; independent complete audit finds no post-A chain failures.
+No old commitments were rewritten. Keep original archive and mapping manifest;
+transformed-history verification needs an explicit policy before live cutover.
+
+Fable accepted the core epoch implementation and original four P2 corrections.
+Final tick signature/predecessor evidence passed on the unchanged real copy.
+The final Fable call hit its session limit; Luna independently reviewed that
+tick-attestation delta with no P1/P2 blocker. Engine
+2650 passed/1 skipped, SDK 614, lang 721, repository 132, CLI absorb 23 passed.
+See [rehearsal report](loops-real-store-rehearsal-2026-09-18.md) and
+[epoch design](adoption-fresh-runtime-epoch-design-2026-09-18.md).
+Live source/vertex unchanged; no push, merge, release, or live cutover.
+
 ## September 18: explicit fresh execution epoch implemented; review pending
 
 The user chose a new boundary epoch at adoption after the strict loops rehearsal

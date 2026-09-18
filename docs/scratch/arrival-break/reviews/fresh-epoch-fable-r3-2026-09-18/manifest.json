@@ -1,0 +1,17 @@
+{
+  "head": "72faf1d5de071aef91b9de4865fa16f671525f5e",
+  "baseline": "72faf1d5",
+  "sources": {
+    "scripts/arrival_rehearsal.py": "df4a0d41464dc2a369ab298a1169df58cebedf2ecfb92d59ee5be8c22efdd338",
+    "tests/test_arrival_rehearsal_runner.py": "e0cb8691a8394b69e9d4d8bed5094e4f6de88216638ce24d9009219e4ec95a3e",
+    "libs/engine/src/engine/row_commitment.py": "feaa42f3b287d130cb072453b0a4f8993b03ee7c44ff12d2a89724110301957f",
+    "libs/engine/src/engine/arrival_projection.py": "932d50fa5c84c364bf817f4f97804cb89f89d8011c24916f48a30e50af247aec",
+    "libs/engine/src/engine/arrival_contract.py": "4859b8935a34c4ee08fb0cd75064bdd1360ce85e43647263ae08be86ddef2a1d",
+    "libs/engine/src/engine/runtime_write.py": "a927998c556fc929a49414ce61893e376cf0b949a66927b7324d4f6a49e0627f",
+    "libs/engine/tests/test_runtime_write.py": "4aaf012b7574b2ddf788061d2a8855dc5c4c6faee62eb6cd57a89e150ba2d192",
+    "tests/test_arrival_migration_boundary.py": "416b4ea0d2b43764508b2f7b95e774222f6f4a4f138fdf01f70528b65982df07",
+    "docs/scratch/arrival-break/reviews/fresh-epoch-fable-r2-2026-09-18/findings.md": "c49d2551ea0e60ba096223972fdf3400d78040e1fa0fed9e6d6b17e4ca79cde6"
+  },
+  "packet_sha256": "63ab3cd7eb560c57043482a36c30072c85193f20d581696bbe086a7b4051ea83",
+  "packet_bytes": 323568
+}

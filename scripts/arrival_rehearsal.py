@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import tempfile
+from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -206,10 +207,14 @@ def _verify_signature(key: str, signature: str, digest: str, domain: str) -> boo
     return ed25519.verify(public, signature, digest.encode(), domain=domain)
 
 
-def _verify_rehearsal_emit(fact_id: str, commit: Any, public_key: str) -> None:
+def _verify_rehearsal_emit(
+    vertex: Path, fact_id: str, commit: Any, public_key: str
+) -> None:
     from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
     from engine.admission import fact_commitment_hash
     from engine.arrival import content_commitment
+    from engine.arrival_registry import BackendRegistry, descriptor_for
+    from lang import parse_vertex_file
 
     matching = [
         record
@@ -220,7 +225,21 @@ def _verify_rehearsal_emit(fact_id: str, commit: Any, public_key: str) -> None:
     ]
     if len(matching) != 1:
         raise RehearsalRefused("exact ordinary commit lacks one emitted fact")
-    record = matching[0]
+    committed = matching[0]
+    ordinal = committed.get("ord")
+    if not isinstance(ordinal, int):
+        raise RehearsalRefused("emitted fact has no physical Arrival ordinal")
+    descriptor = descriptor_for(parse_vertex_file(vertex), vertex)
+    if descriptor is None:
+        raise RehearsalRefused("emitted target lost its Arrival descriptor")
+    ledger, query = BackendRegistry.with_builtin_backends().open(descriptor)
+    try:
+        record = ledger.read(ordinal)
+    finally:
+        _close(query)
+        _close(ledger)
+    if record != committed:
+        raise RehearsalRefused("committed emitted fact differs from its physical Arrival row")
     body = record["body"]
     assert isinstance(body, dict)
     inner = body.get("signature")
@@ -237,6 +256,114 @@ def _verify_rehearsal_emit(fact_id: str, commit: Any, public_key: str) -> None:
         raise RehearsalRefused("rehearsal FACT signature did not verify")
     if not _verify_signature(public_key, outer, arrival_digest, ARRIVAL_DOMAIN):
         raise RehearsalRefused("rehearsal ARRIVAL signature did not verify")
+
+
+def attest_tick_commit(
+    vertex: Path | str,
+    *,
+    first_ordinal: int,
+    last_ordinal: int,
+    public_key: str,
+    expected_tick_id: str | None = None,
+    committed_records: tuple[Mapping[str, Any], ...] | None = None,
+) -> dict[str, Any]:
+    """Re-attest one physical tick in a bounded ordinary commit range.
+
+    This helper reads only the supplied ordinal range and its immediate prior
+    tick chain. It does not require a historical deep audit, so an operator
+    can use it to supplement an already completed rehearsal artifact.
+    """
+    from custody.signing import TICK_DOMAIN
+    from engine.arrival_registry import BackendRegistry, descriptor_for
+    from engine.row_commitment import tick_commitment_hash, tick_row_hash
+    from lang import parse_vertex_file
+
+    if first_ordinal < 0 or last_ordinal < first_ordinal:
+        raise RehearsalRefused("tick attestation range is invalid")
+    target = Path(vertex).resolve()
+    descriptor = descriptor_for(parse_vertex_file(target), target)
+    if descriptor is None:
+        raise RehearsalRefused("tick attestation target has no Arrival descriptor")
+    ledger, query = BackendRegistry.with_builtin_backends().open(descriptor)
+    try:
+        # Arrival ``read`` verifies from the beginning on every call.  Scan
+        # once through this bounded prefix instead, retaining only the one
+        # predecessor needed for the tick-chain assertion.
+        prior: dict[str, Any] | None = None
+        ticks: list[dict[str, Any]] = []
+        reached_last = False
+        for record in ledger.scan():
+            ordinal = record.get("ord")
+            if not isinstance(ordinal, int):
+                raise RehearsalRefused("physical tick range has a malformed ordinal")
+            if ordinal > last_ordinal:
+                break
+            if record.get("k") == "tick":
+                if ordinal < first_ordinal:
+                    prior = dict(record)
+                else:
+                    ticks.append(dict(record))
+            if ordinal == last_ordinal:
+                reached_last = True
+                break
+    finally:
+        _close(query)
+        _close(ledger)
+    if not reached_last:
+        raise RehearsalRefused("tick attestation range is not a physical prefix")
+    if len(ticks) != 1:
+        raise RehearsalRefused("expected exactly one tick in the ordinary commit range")
+    tick = ticks[0]
+    if committed_records is not None:
+        committed_ticks = tuple(
+            record for record in committed_records if record.get("k") == "tick"
+        )
+        if len(committed_ticks) != 1 or committed_ticks[0] != tick:
+            raise RehearsalRefused(
+                "physical tick differs from the committed ordinary records"
+            )
+    body = tick.get("body")
+    if not isinstance(body, dict):
+        raise RehearsalRefused("physical tick body is malformed")
+    tick_id = body.get("id")
+    if not isinstance(tick_id, str) or (expected_tick_id is not None and tick_id != expected_tick_id):
+        raise RehearsalRefused("physical tick id differs from the committed receipt")
+    fields = (
+        "id", "name", "ts", "since", "origin", "payload", "prev_hash",
+        "window_start", "fact_cursor", "window_hash",
+    )
+    if any(field not in body for field in fields):
+        raise RehearsalRefused("physical tick lacks signed fields")
+    signature = body.get("signature")
+    if not isinstance(signature, str):
+        raise RehearsalRefused("physical tick lacks its TICK signature")
+    tick_row = tuple(body[field] for field in fields)
+    if not _verify_signature(
+        public_key, signature, tick_commitment_hash(tick_row), TICK_DOMAIN
+    ):
+        raise RehearsalRefused("physical tick TICK signature did not verify")
+    expected_prev_hash = None
+    prior_id = None
+    if prior is not None:
+        prior_body = prior.get("body")
+        if not isinstance(prior_body, dict) or any(field not in prior_body for field in fields):
+            raise RehearsalRefused("prior physical tick body is malformed")
+        prior_signature = prior_body.get("signature")
+        prior_row = tuple(prior_body[field] for field in fields) + (prior_signature,)
+        expected_prev_hash = tick_row_hash(prior_row)
+        prior_id = prior_body.get("id")
+    if body["prev_hash"] != expected_prev_hash:
+        raise RehearsalRefused("physical tick prev_hash does not name the latest prior tick")
+    if tick.get("sig") is not None:
+        raise RehearsalRefused("tick outer Arrival signature is not part of the current wire")
+    return {
+        "id": tick_id,
+        "physical_matches_commit": None if committed_records is None else True,
+        "tick_signature_verified": True,
+        "outer_arrival_absent": True,
+        "prev_hash_matches_prior_tick": True,
+        "prior_tick_id": prior_id,
+    }
 
 
 def _exact_export(vertex: Path, output: Path, head: Any) -> dict[str, Any]:
@@ -301,6 +428,7 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
         from custody.signing import ARRIVAL_DOMAIN
         from engine.arrival_contract import Full
         from engine.arrival_registry import BackendRegistry, descriptor_for
+        from engine.compiler import compile_vertex
         from lang import parse_vertex_file
         from migrate.inventory import inventory
         from migrate.sidecar import run_migration, verify_migration_report
@@ -315,6 +443,7 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
             sync_target,
             verify_target,
         )
+        from sdk.read import _serialize_fold_section
         from sign import ed25519
 
         evidence["stage"] = "inventory"
@@ -410,7 +539,9 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
         _save(evidence_path, evidence)
         _progress("importing copied key and adopting reviewed declaration")
         provider = MappedCredentialProvider(
-            output / "credentials", namespace="arrival-rehearsal",
+            output / "credentials",
+            namespace="arrival-rehearsal",
+            receipt_observer=args.observer,
         )
         imported = provider.import_legacy(
             vertex, args.observer, token=f"rehearsal-{before[:24]}"
@@ -426,6 +557,8 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
         )
         if adopted.commit is None or adopted.commit.before != migration.head:
             raise RehearsalRefused("adoption did not report Commit(S,A)")
+        if adopted.runtime_epoch != args.runtime_epoch:
+            raise RehearsalRefused("adoption result runtime epoch differs from request")
         a = adopted.commit.after
         evidence["adoption"] = {
             "head": _head(a), "fact_id_equals_lineage": adopted.fact_id == migration.lineage,
@@ -445,13 +578,44 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
         page = read_facts(vertex, limit=1)
         state = read_state(vertex)
         state_epoch = state.generation.get("runtime_epoch")
+        expected_epoch = (
+            {"mode": "fresh", "anchor_ordinal": a.ordinal}
+            if args.runtime_epoch == "fresh"
+            else {"mode": "strict", "anchor_ordinal": None}
+        )
+        if state_epoch != expected_epoch:
+            raise RehearsalRefused("adopted state runtime epoch does not match adoption")
+        expected_kinds = dict(inv.per_kind_counts)
+        for dropped in migration.exceptions.dropped_units:
+            for kind in dropped.fact_kinds:
+                remaining = expected_kinds.get(kind)
+                if remaining is None:
+                    raise RehearsalRefused("dropped migration unit has no inventoried kind")
+                if remaining == 1:
+                    del expected_kinds[kind]
+                else:
+                    expected_kinds[kind] = remaining - 1
+        observed_kinds = {
+            kind: int(values["count"])
+            for kind, values in summary.kinds.items()
+        }
+        if (
+            observed_kinds != expected_kinds
+            or summary.fact_total != sum(expected_kinds.values())
+            or summary.tick_total != inv.tick_count
+        ):
+            raise RehearsalRefused("adopted history differs from the inventoried migration")
+        initial_state_matches_declared: bool | None = None
+        if args.runtime_epoch == "fresh":
+            declared_initial = {
+                name: _serialize_fold_section(spec.replay([]))
+                for name, spec in compile_vertex(declared).items()
+            }
+            initial_state_matches_declared = state.sections == declared_initial
+            if not initial_state_matches_declared:
+                raise RehearsalRefused("fresh state at adoption differs from declared initial values")
         if not isinstance(state_epoch, dict):
             raise RehearsalRefused("adopted state lacks runtime-epoch evidence")
-        if args.runtime_epoch == "fresh" and state_epoch != {
-            "mode": "fresh",
-            "anchor_ordinal": a.ordinal,
-        }:
-            raise RehearsalRefused("fresh state epoch does not begin at adoption head")
         state_sections = json.dumps(
             state.sections,
             sort_keys=True,
@@ -472,12 +636,14 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
             "head": _head(a), "declaration_status": inspected.status,
             "fact_total": summary.fact_total, "tick_total": summary.tick_total,
             "sample_fact_count": len(page.items),
+            "history_matches_inventory": True,
             "summary_basis": None if summary.basis is None else _head(
                 summary.basis.captured_head
             ),
             "runtime_state": {
                 "runtime_epoch": state_epoch,
                 "sections_sha256": hashlib.sha256(state_sections).hexdigest(),
+                "declared_initial": initial_state_matches_declared,
             },
         }
 
@@ -494,7 +660,19 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
         )
         if not emitted.stored or not emitted.signed or emitted.commit is None:
             raise RehearsalRefused("rehearsal emit lacks a signed custody commit")
-        _verify_rehearsal_emit(emitted.id, emitted.commit, pair.public_b64)
+        _verify_rehearsal_emit(vertex, emitted.id, emitted.commit, pair.public_b64)
+        tick_evidence = None
+        if args.expect_tick:
+            if emitted.tick_id is None:
+                raise RehearsalRefused("expected rehearsal emit to append one tick")
+            tick_evidence = attest_tick_commit(
+                vertex,
+                first_ordinal=emitted.commit.before.ordinal + 1,
+                last_ordinal=emitted.commit.after.ordinal,
+                public_key=pair.public_b64,
+                expected_tick_id=emitted.tick_id,
+                committed_records=emitted.commit.records,
+            )
         synced = sync_target(vertex)
         final_head = emitted.commit.after
         if synced.projected_after != final_head:
@@ -505,6 +683,10 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
             "rehearsal_only": True, "origin": "arrival-rehearsal-only",
             "fact_id": emitted.id, "commit_before": _head(emitted.commit.before),
             "head": _head(final_head), "signed_fact_and_arrival": True,
+            "fact_signature_verified": True,
+            "fact_arrival_signature_verified": True,
+            "physical_fact_matches_commit": True,
+            "tick": tick_evidence,
             "projected_after": _head(synced.projected_after),
             "full_verified": True,
         }
@@ -569,6 +751,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--observer", required=True)
     parser.add_argument("--runtime-epoch", choices=("strict", "fresh"), default="strict")
+    parser.add_argument("--expect-tick", action="store_true")
     parser.add_argument("--emit-kind", required=True)
     parser.add_argument("--emit-payload-json", required=True)
     args = parser.parse_args(argv)

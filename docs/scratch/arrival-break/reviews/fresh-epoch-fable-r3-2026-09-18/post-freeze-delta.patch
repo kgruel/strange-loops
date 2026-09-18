@@ -1,0 +1,22 @@
+--- reviewed/scripts/arrival_rehearsal.py
++++ final/scripts/arrival_rehearsal.py
+@@ -683,6 +683,8 @@
+             "rehearsal_only": True, "origin": "arrival-rehearsal-only",
+             "fact_id": emitted.id, "commit_before": _head(emitted.commit.before),
+             "head": _head(final_head), "signed_fact_and_arrival": True,
++            "fact_signature_verified": True,
++            "fact_arrival_signature_verified": True,
+             "physical_fact_matches_commit": True,
+             "tick": tick_evidence,
+             "projected_after": _head(synced.projected_after),
+--- reviewed/tests/test_arrival_rehearsal_runner.py
++++ final/tests/test_arrival_rehearsal_runner.py
+@@ -112,6 +112,8 @@
+     assert evidence["migration"]["report_unchanged_after_emit"] is True
+     assert evidence["adoption"]["fact_id_equals_lineage"] is True
+     assert evidence["rehearsal_emit"]["signed_fact_and_arrival"] is True
++    assert evidence["rehearsal_emit"]["fact_signature_verified"] is True
++    assert evidence["rehearsal_emit"]["fact_arrival_signature_verified"] is True
+     assert evidence["rehearsal_emit"]["physical_fact_matches_commit"] is True
+     assert evidence["export"]["exact_stream_match"] is True
+     assert evidence["reads_at_A"]["history_matches_inventory"] is True

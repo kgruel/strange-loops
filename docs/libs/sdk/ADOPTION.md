@@ -118,7 +118,9 @@ its generation metadata; aggregate state applies each member's own floor.
 duplicate-ID checks and physical tick predecessor/window hashes also retain
 all history: starting fresh execution does not reset the custody chain.
 
-Recovery derives the policy from the authenticated reserved draft and exposes
-the recovered `runtime_epoch`; it takes no policy override. An existing adopted
+Recovery reads the mode from the intent field, checks it against the exact
+reserved draft payload, and independently verifies the draft's FACT and Arrival
+signatures. It exposes the recovered `runtime_epoch` and takes no policy
+override. An existing adopted
 store cannot be reset by editing its locator or passing a new recovery option.
 Select fresh mode when preparing the explicit adoption of an unadopted copy.

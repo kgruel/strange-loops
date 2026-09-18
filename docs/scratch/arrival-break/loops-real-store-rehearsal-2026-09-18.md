@@ -140,3 +140,88 @@ compatibility contract are defined in the
 [fresh runtime epoch design](adoption-fresh-runtime-epoch-design-2026-09-18.md).
 The strict run above remains immutable evidence. A separate copied descriptor,
 migration and explicit fresh adoption will exercise the selected behavior.
+
+## Fresh epoch rehearsal
+
+The explicit fresh implementation is checkpointed at `72faf1d5`; subsequent
+review corrections retain strict hydration compatibility and strengthen the
+rehearsal assertions. A new isolated migration/adoption completed using the same
+audited prepared input, with zero dropped units. Its lineage is
+`01M2VCBPYRT63W2FKA54PVKP7D`, selected S=4,483, and adoption A=4,484.
+
+At A, all 4,357 historical facts and 121 ticks remain queryable. The runner
+asserts their per-kind/count agreement with inventory, the signed fresh epoch,
+and exact equality of current fold sections with the declaration's zero-input
+initial values. Initial state sections SHA-256:
+`3491b909f8bf4c11c8fc8d8d241ca0bb60801eb6d0b21304ea8693093b6a8c36`.
+
+One explicitly labeled rehearsal-only `seal` fact then committed with a new tick,
+ending at ordinal 4,486. The emitted fact was reread from physical custody,
+matched to the returned commit, and verified in both signature domains. Full
+verification passed. Exact export contains 205,673,522 bytes, SHA-256
+`73b678adb57c28869d8a7482e6a244280ec7e32a2474a2d6ad5f909a712df5d8`.
+The migrated prefix and signed report remain unchanged.
+
+The first fresh attempt adopted and read successfully but refused the seal before
+append because the harness omitted the receipt observer. That copy and its
+unchanged-custody evidence are retained. The harness now binds the selected
+observer for receipts, with a subprocess fact-plus-tick regression. The successful
+run uses a separate descriptor and output directory.
+
+[Fresh run evidence](reviews/loops-fresh-rehearsal-2026-09-18/evidence.json) and
+[preservation checks](reviews/loops-fresh-rehearsal-2026-09-18/preservation-check.json)
+contain metadata only. Crash recovery and deep-audit follow-up are recorded below. The original strict run remains unchanged historical evidence.
+
+### Fresh recovery and historical commitment limitation
+
+Both fresh recovery forks passed actual process termination after intent and
+after append. With copied credentials offline, each recovered the reserved fresh
+anchor exactly once at S+1; second recovery refused without changing bytes. See
+[recovery evidence](reviews/loops-fresh-rehearsal-2026-09-18/recovery-evidence.json).
+
+Post-write reads report 4,358 user facts and 122 ticks. The full physical/index
+comparison passes. The deeper historical tick-window audit **does not pass**:
+39 old window commitments no longer match the prepared facts. A complete
+read-only comparison established:
+
+- The retained original archive passes all 121 historical tick-chain checks.
+- The authorized mapping changes exactly 982 fact hashes because observer is
+  part of the hashed fact. IDs/order/payloads are preserved; all tick rows are
+  unchanged.
+- Those changes affect 39 historical windows. Each passes against the original
+  facts and fails against the prepared facts.
+- Migration preserves all prepared fact hashes and all 121 old tick rows.
+  Its computed historical windows match the prepared input exactly.
+- The newly emitted tick passes its chain/window checks.
+
+This is an audited transformation consequence, not a fresh-epoch reset of custody
+or an existing defect in the original archive. The signed migration report
+certifies the prepared input; it does not make the original window commitments
+valid over changed facts. No tick commitment or historical signature was
+rewritten. The original archive and separate mapping manifest remain necessary
+provenance. See [full comparison](reviews/loops-fresh-rehearsal-2026-09-18/window-diagnostic.json)
+and [deep-audit result](reviews/loops-fresh-rehearsal-2026-09-18/postcheck.json).
+
+**Current outcome:** fresh adoption, initial state, writes, exact export and
+credential-free recovery work on the loops copy. A clean historical tick audit
+is not achieved after the approved observer mapping. Before live cutover, an
+explicit policy/tooling decision is still needed for representing and verifying
+these transformed historical commitments. Do not label this rehearsal an
+unqualified historical-integrity pass. Live source and vertex remain unchanged;
+no push, merge, release or live cutover occurred.
+
+The supplementary [tick attestation](reviews/loops-fresh-rehearsal-2026-09-18/tick-attestation.json)
+verifies the actual new tick's inner TICK signature and physical predecessor.
+Tick envelopes intentionally have no outer Arrival signature. This was a
+read-only check of the original commit range, with unchanged full-store SHA-256.
+Because the original returned tick Commit record was not saved, the retrospective
+artifact leaves that equality field null; new `--expect-tick` runs check it in
+process. The complete chain comparison independently verifies the new window.
+
+Final review: Fable accepted the core corrections in its second pass. Its final
+focused call hit the CLI session limit; Luna independently closed the remaining
+tick-attestation finding with no P1/P2 blocker. Final tests: engine 2,650 passed,
+1 skipped; repository 132 passed; CLI absorb 23 passed; earlier full SDK 614 and
+lang 721 passed. Scoped lint and whitespace checks pass. The final third-call
+[review receipt and closure](reviews/fresh-epoch-fable-r3-2026-09-18/primary-triage.md)
+distinguish actual review coverage from the refused invocation.

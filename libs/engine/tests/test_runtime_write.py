@@ -48,7 +48,7 @@ from engine.declaration import DeclarationResolutionError
 from engine.handle import WriteCredentials
 from engine.loop import Loop
 from engine.peer import Grant
-from engine.row_commitment import fact_row_hash
+from engine.row_commitment import fact_row_hash, tick_row_hash
 from engine.runtime_write import (
     BatchFactInput,
     OrdinaryWritePlan,
@@ -626,6 +626,50 @@ def test_hydrated_candidate_ignores_stale_runtime_state_and_uses_prior_tick_cont
     assert plan.tick_id is not None
     assert plan.drafts[1].body["payload"] == '{"total": 7}'
     assert plan.drafts[1].body["since"] == 3.0
+
+
+def test_strict_negative_tick_keeps_hydration_policy_and_global_predecessor():
+    head = _head()
+    effective = parse_vertex(
+        'name "effective"\nloops {\n  note {\n'
+        '    fold { total "sum" "amount" }\n'
+        '    boundary every=1\n  }\n}\n'
+    )
+    documents = [document.as_json() for document in vertex_to_documents(effective)]
+    before = Fact(
+        "before", "note", -2.0, "kyle", "", {"amount": 3}, 1, 0,
+        '{"amount":3}',
+    )
+    negative_tick = Tick(
+        id="negative-tick", name="note", ts=-1.0, since=None,
+        origin="effective", payload={"total": 3}, arrival_ordinal=2,
+        arrival_seq=0, payload_text='{"total":3}', prev_hash=None,
+        window_start="", fact_cursor="before", window_hash="prior-window",
+        signature=None,
+    )
+    snapshot = Snapshot(
+        head, facts=(before,), ticks=(negative_tick,), documents=documents,
+    )
+    snapshot._facts = (snapshot.declaration_anchor.genesis, before)
+    basis = ReadBasis(head.lineage, head, head, "test-view")
+    locator = parse_vertex('name "locator"\nloops { note { fold { count "inc" } } }\n')
+
+    candidate = hydrate_arrival_candidate(snapshot, basis, locator)
+    assert candidate.state("note") == {"total": 3}
+    plan = plan_ordinary_write(
+        snapshot, basis, candidate,
+        AtomFact("note", 2.0, {"amount": 4}, observer="kyle"),
+        grant=None, credentials=WriteCredentials(), custodian="kyle",
+        fact_id="after",
+    )
+    expected_predecessor = tick_row_hash((
+        negative_tick.id, negative_tick.name, negative_tick.ts,
+        negative_tick.since, negative_tick.origin, negative_tick.payload_text,
+        negative_tick.prev_hash, negative_tick.window_start,
+        negative_tick.fact_cursor, negative_tick.window_hash,
+        negative_tick.signature,
+    ))
+    assert plan.drafts[1].body["prev_hash"] == expected_predecessor
 
 
 def test_public_hydration_requires_physical_fresh_epoch_anchor():

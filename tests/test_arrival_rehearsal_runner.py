@@ -13,30 +13,45 @@ from sign import ed25519
 RUNNER = Path(__file__).resolve().parents[1] / "scripts" / "arrival_rehearsal.py"
 
 
-def _inputs(tmp_path: Path, *, owned_tick: bool = False) -> tuple[Path, Path, Path, Path]:
+def _inputs(
+    tmp_path: Path,
+    *,
+    owned_tick: bool = False,
+    seal: bool = False,
+    signed_tick: bool = False,
+) -> tuple[Path, Path, Path, Path]:
     sandbox = tmp_path / "isolated"
     source = sandbox / "input" / "legacy.jsonl"
     vertex = sandbox / "work" / ".loops" / "alice.vertex"
     source.parent.mkdir(parents=True)
     vertex.parent.mkdir(parents=True)
+    keys = vertex.parent / "keys"
+    pair = ed25519.load_or_generate(keys)
     rows = [{
             "t": "fact", "id": "01ARZ3NDEKTSV4RRFFQ69G5FA0", "kind": "concept",
             "ts": 1000.0, "observer": "alice", "origin": "legacy",
             "payload": '{"text":"migrated"}',
     }]
-    if owned_tick:
-        rows.append({
+    if owned_tick or signed_tick:
+        tick = {
             "t": "tick", "id": "01ARZ3NDEKTSV4RRFFQ69G5FT1",
-            "name": "alice", "ts": 1001.0, "since": 1000.0,
-            "origin": "alice", "payload": "{}", "prev_hash": None,
-            "window_start": None, "fact_cursor": None, "window_hash": None,
-        })
+            "name": "alice" if owned_tick else "legacy-period",
+            "ts": 1001.0,
+            "since": 1000.0,
+            "origin": "alice" if owned_tick else "legacy",
+            "payload": "{}",
+            "prev_hash": None,
+            "window_start": None,
+            "fact_cursor": "01ARZ3NDEKTSV4RRFFQ69G5FA0" if signed_tick else None,
+            "window_hash": "legacy-window" if signed_tick else None,
+        }
+        if signed_tick:
+            tick["signature"] = "legacy-tick-signature"
+        rows.append(tick)
     source.write_text(
         "".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows),
         encoding="utf-8",
     )
-    keys = vertex.parent / "keys"
-    pair = ed25519.load_or_generate(keys)
     vertex.write_text(
         f'''name "alice"
 store "../../input/legacy.jsonl"
@@ -48,8 +63,9 @@ observers {{
 }}
 
 loops {{
-  {('boundary when="seal"' if owned_tick else '')}
+  {('boundary when="seal"' if owned_tick or seal else '')}
   concept {{ fold {{ items "collect" 100 }} }}
+  {('seal { fold { items "collect" 10 } }' if seal else '')}
 }}
 ''',
         encoding="utf-8",
@@ -57,14 +73,25 @@ loops {{
     return sandbox, vertex, source, keys
 
 
-def _command(sandbox: Path, vertex: Path, source: Path, keys: Path, output: Path) -> list[str]:
+def _command(
+    sandbox: Path,
+    vertex: Path,
+    source: Path,
+    keys: Path,
+    output: Path,
+    *,
+    runtime_epoch: str = "strict",
+    emit_kind: str = "concept",
+    expect_tick: bool = False,
+) -> list[str]:
     return [
         sys.executable, str(RUNNER), "--sandbox", str(sandbox),
         "--vertex", str(vertex), "--source", str(source),
         "--legacy-key-dir", str(keys), "--output", str(output),
-        "--observer", "alice", "--emit-kind", "concept",
+        "--observer", "alice", "--runtime-epoch", runtime_epoch,
+        "--emit-kind", emit_kind,
         "--emit-payload-json", '{"text":"rehearsal"}',
-    ]
+    ] + (["--expect-tick"] if expect_tick else [])
 
 
 def test_rehearsal_migrates_adopts_reads_emits_and_exactly_exports(tmp_path: Path) -> None:
@@ -85,9 +112,60 @@ def test_rehearsal_migrates_adopts_reads_emits_and_exactly_exports(tmp_path: Pat
     assert evidence["migration"]["report_unchanged_after_emit"] is True
     assert evidence["adoption"]["fact_id_equals_lineage"] is True
     assert evidence["rehearsal_emit"]["signed_fact_and_arrival"] is True
+    assert evidence["rehearsal_emit"]["fact_signature_verified"] is True
+    assert evidence["rehearsal_emit"]["fact_arrival_signature_verified"] is True
+    assert evidence["rehearsal_emit"]["physical_fact_matches_commit"] is True
     assert evidence["export"]["exact_stream_match"] is True
+    assert evidence["reads_at_A"]["history_matches_inventory"] is True
+    assert evidence["reads_at_A"]["runtime_state"] == {
+        "runtime_epoch": {"mode": "strict", "anchor_ordinal": None},
+        "sections_sha256": evidence["reads_at_A"]["runtime_state"]["sections_sha256"],
+        "declared_initial": None,
+    }
     assert (output / "reviewed.vertex").is_file()
     assert (output / "final.arrival-jsonl").is_file()
+
+
+def test_fresh_rehearsal_seal_emits_a_signed_fact_and_tick(tmp_path: Path) -> None:
+    sandbox, vertex, source, keys = _inputs(tmp_path, seal=True, signed_tick=True)
+    output = sandbox / "output"
+    result = subprocess.run(
+        _command(
+            sandbox,
+            vertex,
+            source,
+            keys,
+            output,
+            runtime_epoch="fresh",
+            emit_kind="seal",
+            expect_tick=True,
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads((output / "evidence.json").read_text())
+    assert evidence["adoption"]["runtime_epoch"] == "fresh"
+    assert evidence["reads_at_A"]["runtime_state"]["runtime_epoch"] == {
+        "mode": "fresh",
+        "anchor_ordinal": evidence["adoption"]["head"]["ordinal"],
+    }
+    assert evidence["reads_at_A"]["runtime_state"]["declared_initial"] is True
+    assert evidence["rehearsal_emit"]["tick"] == {
+        "id": evidence["rehearsal_emit"]["tick"]["id"],
+        "physical_matches_commit": True,
+        "tick_signature_verified": True,
+        "outer_arrival_absent": True,
+        "prev_hash_matches_prior_tick": True,
+        "prior_tick_id": "01ARZ3NDEKTSV4RRFFQ69G5FT1",
+    }
+    target = Path(evidence["migration"]["target_path"])
+    assert [json.loads(line)["k"] for line in target.read_text().splitlines()][-2:] == [
+        "fact",
+        "tick",
+    ]
 
 
 def test_rehearsal_refuses_paths_outside_sandbox_before_writing(tmp_path: Path) -> None:

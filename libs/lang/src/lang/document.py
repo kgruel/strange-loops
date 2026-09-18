@@ -147,8 +147,9 @@ DECL_LENS_DEFINED = "_decl.lens-defined"
 DECL_TRANSIT = "_decl.transit"
 DECL_MERGED = "_decl.merged"
 
-#: Declaration-protocol version stamped into the genesis payload. A foreign
-#: lineage carrying an unsupported version is treated as entirely inert
+#: Maximum declaration-protocol version this reader understands. Ordinary
+#: initialization still emits v1; v2 is reserved for explicit fresh-epoch
+#: adoption. A foreign lineage carrying an unsupported version is inert
 #: (never partially interpreted) — see SPEC §9.2 / build plan.
 DECLARATION_PROTOCOL_VERSION = 2
 
@@ -482,8 +483,8 @@ def _loop_def_from_payload(p: dict[str, Any]) -> LoopDef:
     boundary = p.get("boundary")
     # `.get()` default keeps §9.2 forward/backward compat: a kind-defined
     # document minted before the lifecycle facet existed simply lacks the key
-    # and projects to `lifecycle=None`. DECLARATION_PROTOCOL_VERSION is unbumped
-    # (additive field — arbiter S5-F3).
+    # and projects to `lifecycle=None`. This field did not bump the declaration
+    # protocol when added (additive field — arbiter S5-F3).
     lc = p.get("lifecycle")
     return LoopDef(
         folds=tuple(_fold_decl_from_json(f) for f in p.get("folds", ())),

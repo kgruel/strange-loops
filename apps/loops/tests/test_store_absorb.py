@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from engine.builder import fold_count, vertex
-from lang.document import DECL_GENESIS, DECLARATION_PROTOCOL_VERSION
+from lang.document import DECL_GENESIS
 from loops.commands.store import _run_absorb
 from sign import ed25519
 
@@ -76,7 +76,7 @@ class TestAbsorbFreshStore:
         assert signature  # genesis MUST be signed
 
         payload = json.loads(payload_text)
-        assert payload["protocol"] == DECLARATION_PROTOCOL_VERSION
+        assert payload["protocol"] == 1
         # Fresh store: nothing predates the genesis.
         assert payload["chain_head"] is None
         assert payload["fact_cursor"] is None
@@ -102,7 +102,7 @@ class TestAbsorbFreshStore:
         rc = _run_absorb(["--observer", "x", "--json"], vertex_path=vpath)
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
-        assert out["protocol"] == DECLARATION_PROTOCOL_VERSION
+        assert out["protocol"] == 1
         assert out["observer"] == "x"
         assert out["signed"] is True
         assert out["dry_run"] is False
@@ -274,6 +274,7 @@ class TestAbsorbDryRun:
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
         assert out["dry_run"] is True
+        assert out["protocol"] == 1
         assert out["lineage"] is None
         assert out["signed"] is True  # would be signed
 

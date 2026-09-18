@@ -600,7 +600,9 @@ raise AssertionError("durable stop phase was not reached")
     monkeypatch.setattr(MappedCredentialProvider, "for_write", refuse_credentials)
     monkeypatch.setattr(MappedCredentialProvider, "resolve", refuse_credentials)
     authentic_intent = intent.read_bytes()
-    mutations = ["binding", "inner-signature", "outer-signature"]
+    mutations = [
+        "binding", "inner-signature", "outer-signature", "epoch-self-consistent",
+    ]
     if runtime_epoch == "fresh":
         mutations.append("epoch-downgrade")
     for mutation in mutations:
@@ -616,6 +618,22 @@ raise AssertionError("durable stop phase was not reached")
             changed["drafts"][0]["body"]["payload"] = json.dumps(
                 payload, ensure_ascii=False, separators=(",", ":"),
             )
+        elif mutation == "epoch-self-consistent":
+            # Both the unsigned intent field and signed draft payload claim the
+            # opposite epoch. Only independent signature verification can
+            # reject this self-consistent mutation.
+            opposite = "strict" if runtime_epoch == "fresh" else "fresh"
+            changed["runtime_epoch"] = opposite
+            payload = json.loads(changed["drafts"][0]["body"]["payload"])
+            if opposite == "fresh":
+                payload["protocol"] = 2
+                payload["runtime_epoch"] = "fresh-after-anchor-v1"
+            else:
+                payload["protocol"] = 1
+                payload.pop("runtime_epoch", None)
+            changed["drafts"][0]["body"]["payload"] = json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":"),
+            )
         else:
             changed["drafts"][0]["signature"] = "bogus"
         # Keep the duplicate draft representations consistent: consistency
@@ -624,8 +642,10 @@ raise AssertionError("durable stop phase was not reached")
             changed["drafts"], ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         )
         intent.write_text(json.dumps(changed))
-        with pytest.raises(SdkError):
+        with pytest.raises(SdkError) as refused:
             recover_arrival_adoption(intent)
+        if mutation == "epoch-self-consistent":
+            assert "reserved FACT signature does not verify" in str(refused.value)
         assert migrated.target_path.read_bytes() == before_recovery
         assert intent.exists()
     intent.write_bytes(authentic_intent)

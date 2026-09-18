@@ -1,0 +1,18 @@
+{
+  "engine_final": "2650 passed, 1 skipped",
+  "sdk_epoch_baseline": "614 passed",
+  "lang_epoch_baseline": "721 passed",
+  "repository_r2": "132 passed",
+  "cli_absorb": "23 passed",
+  "runtime_write": "46 passed",
+  "recovery_mode_tamper": "4 passed",
+  "scoped_ruff": "passed",
+  "diff_check": "passed",
+  "known_preexisting_checks": {
+    "kind_ty": "10 pre-existing diagnostics",
+    "whole_cli_store_ruff": "37 pre-existing diagnostics"
+  },
+  "repository_final": "132 passed",
+  "runner_recovery_final": "6 passed",
+  "runner_ty": "passed"
+}

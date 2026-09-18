@@ -1,0 +1,75 @@
+{
+  "schema": "loops.rehearsal/fresh-postcheck/v1",
+  "fact_total": 4358,
+  "tick_total": 122,
+  "runtime_epoch": {
+    "mode": "fresh",
+    "anchor_ordinal": 4484
+  },
+  "state_sections_sha256": "631f27d05b864ab7640d52933b9c4718a09ce9e120e7cba72e31697d0cb25098",
+  "audit": {
+    "ok": false,
+    "deep": true,
+    "index_behind": false,
+    "checks": [
+      {
+        "check": "index",
+        "ok": true,
+        "detail": "derived index readable",
+        "behind_by": 0,
+        "at_ordinal": -1
+      },
+      {
+        "check": "consumed",
+        "ok": true,
+        "detail": "index has consumed through arrival ordinal 4486",
+        "behind_by": 0,
+        "at_ordinal": 4486
+      },
+      {
+        "check": "rewound",
+        "ok": true,
+        "detail": "no index rows beyond consumed ordinal 4486",
+        "behind_by": 0,
+        "at_ordinal": 4486
+      },
+      {
+        "check": "counts",
+        "ok": true,
+        "detail": "4359 fact(s), 122 tick(s) accounted for",
+        "behind_by": 0,
+        "at_ordinal": -1
+      },
+      {
+        "check": "consumed_edge",
+        "ok": true,
+        "detail": "consumed arrival tick 01M2VCFQH5KZJMWSJJNN98KAN1 at ordinal 4486 matches the index",
+        "behind_by": 0,
+        "at_ordinal": 4486
+      },
+      {
+        "check": "content",
+        "ok": true,
+        "detail": "4359 fact(s) and 122 tick(s) match the log field-for-field, in order",
+        "behind_by": 0,
+        "at_ordinal": -1
+      },
+      {
+        "check": "chain",
+        "ok": false,
+        "detail": "log record at ordinal 2276 (tick 01KTY5RNMJV44K7HZXHAS0SZP6): window_hash mismatch \u2014 facts in the window altered; log record at ordinal 2307 (tick 01KTYGKRYPECR4C1YNKC1QDEZ7): window_hash mismatch \u2014 facts in the window altered; log record at ordinal 2434 (tick 01KV3N9S8CXD85CEESYEWDMBK1): window_hash mismatch \u2014 facts in the window altered; log record at ordinal 2438 (tick 01KV3NMQ05ZAVJH3RHZGH1NMDY): window_hash mismatch \u2014 facts in the window altered; log record at ordinal 2447 (tick 01KV3XE7G569EAY27WDXHXFFTX): window_hash mismatch \u2014 facts in the window altered; log record at ordinal 2801 (tick 01KWCYXWBTRN3WG0YPJ9HBJF68): window_hash mismatch \u2014 facts in the window altered; log record at ordinal 2814 (tick 01KWD71RYTHFG37VXTZVWQMPFG): window_hash mismatch \u2014 facts in the window altered; log record at ordinal 2828 (tick 01KWFN8TC466MJXYD5GG0AZ1DH): window_hash mismatch \u2014 facts in the window altered; log record at ordinal 2905 (tick 01KWMVC5V6VYZYJF16EGB8H7CT): window_hash mismatch \u2014 facts in the window altered; log record at ordinal 2911 (tick 01KWMZ6VYD7QK14KM1QBY0H98N): window_hash mismatch \u2014 facts in the window altered",
+        "behind_by": 0,
+        "at_ordinal": -1
+      }
+    ],
+    "counts": {
+      "facts": 4359,
+      "ticks": 122
+    }
+  },
+  "last_commit_kinds": [
+    "fact",
+    "tick"
+  ],
+  "final_ordinal": 4486
+}

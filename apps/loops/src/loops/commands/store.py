@@ -1243,10 +1243,12 @@ def _absorb_genesis_mode(
     dispatcher can select it when the store has no genesis yet. Its output is
     golden-locked, so the rendering is preserved verbatim.
     """
-    from lang.document import DECLARATION_PROTOCOL_VERSION, genesis_payload
+    from lang.document import genesis_payload
     from custody import fact_signer_for
 
-    documents = genesis_payload(ast)["documents"]
+    declaration_payload = genesis_payload(ast)
+    protocol = declaration_payload["protocol"]
+    documents = declaration_payload["documents"]
     doc_count = len(documents)
 
     def _render(receipt: dict, *, dry_run: bool) -> None:
@@ -1264,7 +1266,7 @@ def _absorb_genesis_mode(
         head_disp = (chain_head[:16] + "…") if chain_head else "(no chained tick)"
         cursor_disp = fact_cursor if fact_cursor else "(empty store)"
         lines = [
-            f"✓ {target_path.stem}: {verb} — protocol v{DECLARATION_PROTOCOL_VERSION}",
+            f"✓ {target_path.stem}: {verb} — protocol v{protocol}",
             lineage_line,
             f"  documents: {doc_count} subject{'s' if doc_count != 1 else ''}",
             f"  pins: chain_head {head_disp} · fact_cursor {cursor_disp}",
@@ -1299,7 +1301,7 @@ def _absorb_genesis_mode(
         _render(
             {
                 "vertex": target_path.stem, "lineage": None,
-                "protocol": DECLARATION_PROTOCOL_VERSION, "documents": doc_count,
+                "protocol": protocol, "documents": doc_count,
                 "chain_head": chain_head, "fact_cursor": fact_cursor,
                 "observer": observer, "signed": True,
             },

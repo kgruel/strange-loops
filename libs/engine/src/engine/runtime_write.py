@@ -957,10 +957,16 @@ def _build_effective_arrival_candidate(
         if runtime_epoch.start_ordinal is None
         or fact.arrival_ordinal > runtime_epoch.start_ordinal
     )
+    # Strict hydration historically used TickRequest() (since=0); keep that
+    # execution policy while full `all_ticks` remains custody-chain evidence.
+    # Fresh epochs instead select by receipt ordinal, including negative time.
     runtime_ticks = tuple(
         tick for tick in all_ticks
-        if runtime_epoch.start_ordinal is None
-        or tick.arrival_ordinal > runtime_epoch.start_ordinal
+        if (
+            tick.ts >= 0.0
+            if runtime_epoch.start_ordinal is None
+            else tick.arrival_ordinal > runtime_epoch.start_ordinal
+        )
     )
     from .arrival_boundary_continuity import (
         BoundaryContinuityConflict,

@@ -1,0 +1,19 @@
+{
+  "reviewer": "luna_adoption_review",
+  "method": "independent complete read-only chain walk; no diagnostic cap",
+  "records": 4487,
+  "facts_including_anchor": 4359,
+  "ticks": 122,
+  "adoption_ordinal": 4484,
+  "post_adoption_tick_ordinals": [
+    4486
+  ],
+  "historical_window_mismatches": 39,
+  "post_adoption_failures": 0,
+  "prev_hash_failures": 0,
+  "window_start_failures": 0,
+  "content_index_agreement": true,
+  "standard_audit_diagnostics_truncated": true,
+  "standard_audit_reported_mismatches": 10,
+  "historical_mismatches_explained_by_audited_observer_mapping": true
+}

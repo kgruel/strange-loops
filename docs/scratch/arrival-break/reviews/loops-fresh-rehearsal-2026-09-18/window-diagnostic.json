@@ -1,0 +1,512 @@
+{
+  "raw": {
+    "record_count": 4478,
+    "fact_count": 4357,
+    "tick_count": 121,
+    "chain_ok": true,
+    "first_breaks": [],
+    "chained_tick_count": 121
+  },
+  "prepared": {
+    "record_count": 4478,
+    "fact_count": 4357,
+    "tick_count": 121,
+    "chain_ok": false,
+    "first_breaks": [
+      {
+        "coordinate": 2271,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2302,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2429,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2433,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2442,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2796,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2809,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2823,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2900,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2906,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      }
+    ],
+    "chained_tick_count": 121
+  },
+  "arrival": {
+    "record_count": 4487,
+    "fact_count": 4359,
+    "tick_count": 122,
+    "chain_ok": false,
+    "first_breaks": [
+      {
+        "coordinate": 2276,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2307,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2434,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2438,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2447,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2801,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2814,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2828,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2905,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      },
+      {
+        "coordinate": 2911,
+        "reason": "window_hash mismatch \u2014 facts in the window altered"
+      }
+    ],
+    "chained_tick_count": 122
+  },
+  "mapping": {
+    "fact_rows_changed_hash": 982,
+    "same_fact_ids_and_order": true,
+    "tick_rows_identical": true,
+    "only_observer_changed": true
+  },
+  "migration": {
+    "historic_tick_rows_identical": true,
+    "historic_tick_count_in_target": 121,
+    "extra_tick_count": 1,
+    "prepared_fact_hashes_present": 4357
+  },
+  "historic_failed_windows": [
+    {
+      "arrival_ordinal": 2276,
+      "raw_line": 2271,
+      "prepared_line": 2271,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2307,
+      "raw_line": 2302,
+      "prepared_line": 2302,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2434,
+      "raw_line": 2429,
+      "prepared_line": 2429,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2438,
+      "raw_line": 2433,
+      "prepared_line": 2433,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2447,
+      "raw_line": 2442,
+      "prepared_line": 2442,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2801,
+      "raw_line": 2796,
+      "prepared_line": 2796,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2814,
+      "raw_line": 2809,
+      "prepared_line": 2809,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2828,
+      "raw_line": 2823,
+      "prepared_line": 2823,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2905,
+      "raw_line": 2900,
+      "prepared_line": 2900,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2911,
+      "raw_line": 2906,
+      "prepared_line": 2906,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 2967,
+      "raw_line": 2962,
+      "prepared_line": 2962,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3261,
+      "raw_line": 3256,
+      "prepared_line": 3256,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3522,
+      "raw_line": 3517,
+      "prepared_line": 3517,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3568,
+      "raw_line": 3563,
+      "prepared_line": 3563,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3699,
+      "raw_line": 3694,
+      "prepared_line": 3694,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3724,
+      "raw_line": 3719,
+      "prepared_line": 3719,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3740,
+      "raw_line": 3735,
+      "prepared_line": 3735,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3754,
+      "raw_line": 3749,
+      "prepared_line": 3749,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3772,
+      "raw_line": 3767,
+      "prepared_line": 3767,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3789,
+      "raw_line": 3784,
+      "prepared_line": 3784,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3803,
+      "raw_line": 3798,
+      "prepared_line": 3798,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3814,
+      "raw_line": 3809,
+      "prepared_line": 3809,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3824,
+      "raw_line": 3819,
+      "prepared_line": 3819,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3839,
+      "raw_line": 3834,
+      "prepared_line": 3834,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3849,
+      "raw_line": 3844,
+      "prepared_line": 3844,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3860,
+      "raw_line": 3855,
+      "prepared_line": 3855,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3877,
+      "raw_line": 3872,
+      "prepared_line": 3872,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3895,
+      "raw_line": 3890,
+      "prepared_line": 3890,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3924,
+      "raw_line": 3919,
+      "prepared_line": 3919,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 3959,
+      "raw_line": 3954,
+      "prepared_line": 3954,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 4005,
+      "raw_line": 4000,
+      "prepared_line": 4000,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 4011,
+      "raw_line": 4006,
+      "prepared_line": 4006,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 4064,
+      "raw_line": 4059,
+      "prepared_line": 4059,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 4081,
+      "raw_line": 4076,
+      "prepared_line": 4076,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 4091,
+      "raw_line": 4086,
+      "prepared_line": 4086,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 4146,
+      "raw_line": 4141,
+      "prepared_line": 4141,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 4160,
+      "raw_line": 4155,
+      "prepared_line": 4155,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 4168,
+      "raw_line": 4163,
+      "prepared_line": 4163,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    },
+    {
+      "arrival_ordinal": 4366,
+      "raw_line": 4361,
+      "prepared_line": 4361,
+      "raw_window_ok": true,
+      "prepared_window_ok": false,
+      "arrival_window_ok": false,
+      "raw_vs_prepared_window_hash_equal": false,
+      "prepared_vs_arrival_window_hash_equal": true
+    }
+  ]
+}

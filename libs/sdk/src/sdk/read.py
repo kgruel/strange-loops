@@ -166,6 +166,7 @@ def _arrival_generation(
     facts: tuple[Fact, ...],
     own_lineage: str,
     declaration_status: str,
+    runtime_epoch: Any,
 ) -> dict[str, Any]:
     """Build the established declaration-generation review fields from one snapshot."""
     documents = vertex_to_documents(ast)
@@ -188,6 +189,10 @@ def _arrival_generation(
         "review_fingerprint": "sha256:"
         + hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
         "decl_head": declaration_head,
+        "runtime_epoch": {
+            "mode": runtime_epoch.mode,
+            "anchor_ordinal": runtime_epoch.start_ordinal,
+        },
     }
 
 
@@ -410,11 +415,22 @@ def _aggregate_state(
 ) -> FoldStateResult:
     """Replay frozen selected streams under recursively inherited fold specs."""
     with open_aggregate_read(target_path, registry=registry) as aggregate:
-        return _aggregate_state_from(aggregate, target_path, kind=kind, observer=observer)
+        return _aggregate_state_from(
+            aggregate,
+            target_path,
+            kind=kind,
+            observer=observer,
+            runtime_epoch_only=True,
+        )
 
 
 def _aggregate_state_from(
-    aggregate: Any, target_path: Path, *, kind: str | None, observer: str | None
+    aggregate: Any,
+    target_path: Path,
+    *,
+    kind: str | None,
+    observer: str | None,
+    runtime_epoch_only: bool = False,
 ) -> FoldStateResult:
     specs = aggregate.specs()
     sections: dict[str, Any] = {}
@@ -422,7 +438,11 @@ def _aggregate_state_from(
         if kind is not None and section_name != kind:
             continue
         payloads: list[dict[str, Any]] = []
-        for fact in aggregate.ordered_for_kind(section_name, observer=observer):
+        for fact in aggregate.ordered_for_kind(
+            section_name,
+            observer=observer,
+            runtime_epoch_only=runtime_epoch_only,
+        ):
             payload = dict(fact.payload)
             payload.update(
                 {
@@ -439,7 +459,18 @@ def _aggregate_state_from(
             vertex_name=aggregate.root.effective_declaration.name,
             target_path=str(target_path),
             declaration_status="aggregate-captured",
-            generation={"status": "aggregate", "member_count": len(aggregate.capture.members)},
+            generation={
+                "status": "aggregate",
+                "member_count": len(aggregate.capture.members),
+                "runtime_epochs": [
+                    {
+                        "lineage": member.basis.lineage,
+                        "mode": member.runtime_epoch.mode,
+                        "anchor_ordinal": member.runtime_epoch.start_ordinal,
+                    }
+                    for member in aggregate.capture.members
+                ],
+            },
             sections=sections,
             aggregate_members=aggregate.member_evidence(),
             aggregate_definitions=aggregate.definition_evidence(),
@@ -960,12 +991,17 @@ def read_state(
                 include_user_facts=True,
                 allow_aggregate=True,
             )
+            runtime_epoch = opened.runtime_epoch()
             if effective_ast.combine is not None or effective_ast.discover is not None:
                 with open_aggregate_read(
                     target_path, registry=registry, opened_root=opened
                 ) as aggregate:
                     return _aggregate_state_from(
-                        aggregate, target_path, kind=kind, observer=observer
+                        aggregate,
+                        target_path,
+                        kind=kind,
+                        observer=observer,
+                        runtime_epoch_only=True,
                     )
             specs = compile_vertex(effective_ast)
             sections: dict[str, Any] = {}
@@ -976,6 +1012,10 @@ def read_state(
                     fact
                     for fact in facts
                     if fact.kind == section_name
+                    and (
+                        runtime_epoch.start_ordinal is None
+                        or fact.arrival_ordinal > runtime_epoch.start_ordinal
+                    )
                     and (observer is None or observer_matches(fact.observer, observer))
                 ]
                 payloads: list[dict[str, Any]] = []
@@ -1000,7 +1040,11 @@ def read_state(
                 target_path=str(target_path),
                 declaration_status=declaration_status,
                 generation=_arrival_generation(
-                    effective_ast, facts, own_lineage, declaration_status
+                    effective_ast,
+                    facts,
+                    own_lineage,
+                    declaration_status,
+                    runtime_epoch,
                 ),
                 sections=sections,
             )

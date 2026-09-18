@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from lang import parse_vertex, validate_vertex, vertex_to_documents
 from lang.document import DECL_OBSERVER_DEFINED
@@ -149,6 +149,7 @@ class ArrivalAdoptionPlan:
     draft: RecordDraft
     exact_drafts: str
     credential_bindings: tuple[CredentialBindingEvidence, ...]
+    runtime_epoch: Literal["strict", "fresh"] = "strict"
 
     @property
     def fact_ids(self) -> tuple[str, ...]:
@@ -172,6 +173,19 @@ class ArrivalAdoptionResult:
     projection: ProjectionSyncResult | None
     credential_bindings: tuple[CredentialBindingEvidence, ...]
     observed_head: Head | None = None
+    runtime_epoch: Literal["strict", "fresh"] = "strict"
+
+
+def _anchor_payload(documents: tuple[Mapping[str, Any], ...], runtime_epoch: str) -> str:
+    if runtime_epoch not in {"strict", "fresh"}:
+        raise AdoptionApplyError("adoption runtime epoch must be strict or fresh")
+    body: dict[str, Any] = {
+        "protocol": 1 if runtime_epoch == "strict" else 2,
+        "documents": [dict(document) for document in documents],
+    }
+    if runtime_epoch == "fresh":
+        body["runtime_epoch"] = "fresh-after-anchor-v1"
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":"))
 
 
 def arrival_adoption_intent_path(target: Path | str) -> Path:
@@ -274,6 +288,7 @@ def prepare_arrival_adoption(
     fact_verify: Callable[[str, str, str], bool],
     arrival_verify: Callable[[str, str, str], bool],
     authored_at: float | None = None,
+    runtime_epoch: Literal["strict", "fresh"] = "strict",
 ) -> ArrivalAdoptionPlan:
     """Capture Full(S), verify the migration registry and sign one exact anchor."""
     target_path = Path(target).resolve()
@@ -287,6 +302,8 @@ def prepare_arrival_adoption(
         raise AdoptionPreparationRefused("adoption requires pre-created mapped credentials")
     if not callable(fact_verify) or not callable(arrival_verify):
         raise AdoptionPreparationRefused("adoption requires public FACT and ARRIVAL verifiers")
+    if runtime_epoch not in {"strict", "fresh"}:
+        raise AdoptionPreparationRefused("adoption runtime epoch must be strict or fresh")
     if not all(
         isinstance(value, str)
         for value in (reviewed_text, reviewed_sha256, declaration_text)
@@ -378,6 +395,7 @@ def prepare_arrival_adoption(
             lineage=captured.lineage, authored_at=at, observer=observer,
             documents=documents, fact_signer=_sign(SigningDomain.FACT),
             arrival_signer=_sign(SigningDomain.ARRIVAL),
+            runtime_epoch=runtime_epoch,
         )
     except CredentialBindingRefused as exc:
         raise AdoptionPreparationRefused(f"mapped adoption binding refused: {exc}") from exc
@@ -417,7 +435,7 @@ def prepare_arrival_adoption(
         ReadBasis(captured.lineage, captured, None, None), captured, observer,
         reviewed_text, reviewed_sha256, declaration_text,
         hashlib.sha256(published).hexdigest(), documents, draft,
-        _exact_drafts((draft,)), bindings,
+        _exact_drafts((draft,)), bindings, runtime_epoch,
     )
 
 
@@ -430,6 +448,7 @@ def _intent_data(plan: ArrivalAdoptionPlan, phase: str) -> dict[str, Any]:
         "reviewed_sha256": plan.reviewed_sha256,
         "declaration_text": plan.declaration_text,
         "declaration_sha256": plan.declaration_sha256,
+        "runtime_epoch": plan.runtime_epoch,
         "drafts": json.loads(plan.exact_drafts), "exact_drafts": plan.exact_drafts,
         "bindings": [
             {"request": {"namespace": evidence.request.namespace,
@@ -451,6 +470,7 @@ def _result(plan: ArrivalAdoptionPlan, status: str, head: Head,
         status, plan.target_path, plan.descriptor, plan.lineage, plan.basis,
         plan.captured_head, head, commit, plan.fact_ids, None, phase,
         file_written, projection, plan.credential_bindings, observed_head,
+        plan.runtime_epoch,
     )
 
 
@@ -493,6 +513,10 @@ def apply_arrival_adoption(
     with _declaration_lock(plan.target_path):
         if _exact_drafts((plan.draft,)) != plan.exact_drafts:
             raise AdoptionApplyError("prepared adoption draft changed")
+        if plan.draft.body.get("payload") != _anchor_payload(
+            plan.documents, plan.runtime_epoch
+        ):
+            raise AdoptionApplyError("prepared adoption epoch differs from signed draft")
         _require_cache(plan)
         intent = arrival_adoption_intent_path(plan.target_path)
         data = _intent_data(plan, "prepared")
@@ -619,6 +643,9 @@ def _plan_from_intent(data: Any) -> ArrivalAdoptionPlan:
         reviewed_text = _intent_string(root["reviewed_text"], "reviewed text")
         reviewed_sha256 = _intent_string(root["reviewed_sha256"], "reviewed hash")
         observer = _intent_string(root["observer"], "observer")
+        runtime_epoch = root.get("runtime_epoch", "strict")
+        if runtime_epoch not in {"strict", "fresh"}:
+            raise AdoptionApplyError("adoption intent runtime epoch is invalid")
         if hashlib.sha256(text.encode("utf-8")).hexdigest() != digest:
             raise AdoptionApplyError("adoption intent declaration bytes do not verify")
         if hashlib.sha256(reviewed_text.encode("utf-8")).hexdigest() != reviewed_sha256:
@@ -656,6 +683,7 @@ def _plan_from_intent(data: Any) -> ArrivalAdoptionPlan:
             ReadBasis(captured.lineage, captured, None, None), captured,
             observer, reviewed_text, reviewed_sha256,
             text, digest, (), drafts[0], exact_drafts, tuple(evidence),
+            runtime_epoch,
         )
     except AdoptionApplyError:
         raise
@@ -731,10 +759,7 @@ def _revalidate_reserved(
             raise AdoptionApplyError("reserved FACT and ARRIVAL bindings disagree")
 
         draft = plan.draft
-        payload = json.dumps(
-            {"protocol": 1, "documents": [dict(document) for document in documents]},
-            ensure_ascii=False, separators=(",", ":"),
-        )
+        payload = _anchor_payload(documents, plan.runtime_epoch)
         body = draft.body
         if (
             draft.kind != "fact" or draft.observer != plan.observer

@@ -10,9 +10,10 @@ from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
 from engine.admission import fact_commitment_hash
 from engine.arrival import ArrivalLog
 from engine.arrival_body import body_of_fact_row, body_of_tick_row
+from engine.arrival_initialization import build_declaration_anchor_draft
 from engine.handle import WriteCredentials
 from lang import genesis_payload, parse_vertex, parse_vertex_file, vertex_to_documents
-from lang.ast import FoldCollect, FoldDecl, LoopDef
+from lang.ast import BoundaryEvery, FoldCollect, FoldDecl, LoopDef
 from lang.vertex_mutation import add_vertex_kind, remove_vertex_kind
 from sign import ed25519
 
@@ -20,12 +21,15 @@ from sdk import (
     ArrivalRefusal,
     add_kind,
     edit_declaration,
+    edit_kind,
     emit_fact,
     export_target,
     init_vertex,
     plan_kind_mutation,
     read_state,
     read_ticks,
+    remove_kind,
+    sync_target,
 )
 
 
@@ -51,6 +55,77 @@ def _ticked_target(tmp_path: Path) -> tuple[Path, Path]:
     sealed = emit_fact(target, "item", {"n": 1}, observer="alice", ts=1.0)
     assert sealed.tick_id is not None
     return target, log_path
+
+
+def _fresh_epoch_ticked_target(tmp_path: Path) -> tuple[Path, object]:
+    """Make an independently signed log with one pre-anchor item tick."""
+    keypair = ed25519.load_or_generate(tmp_path / "fresh-epoch-key")
+
+    def arrival_sign(_observer: str, digest: str) -> str:
+        return ed25519.sign(keypair, digest.encode(), domain=ARRIVAL_DOMAIN)
+
+    def fact_sign(_observer: str, digest: str) -> str:
+        return ed25519.sign(keypair, digest.encode(), domain=FACT_DOMAIN)
+
+    log = ArrivalLog.mint(
+        tmp_path / "fresh-epoch.arrival",
+        observer="alice",
+        signer=arrival_sign,
+        key=keypair.public_b64,
+        at=0.0,
+    )
+    target = tmp_path / "fresh-epoch.vertex"
+    target.write_text(
+        f'name "fresh-epoch"\nstore "{log.path}" backend="file" '
+        f'lineage="{log.lineage()}" role="authority"\n'
+        f'observers {{ alice {{ key "{keypair.public_b64}" }} }}\n'
+        'loops {\n'
+        '  item {\n'
+        '    fold { items "collect" 100 }\n'
+        '    boundary every=1\n'
+        '  }\n'
+        '  keep { fold { items "collect" 10 } }\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    log.append(
+        "tick",
+        body_of_tick_row(
+            ("before-anchor", "item", 1.0, None, "item", "{}", None, None, None, None, None)
+        ),
+        observer="alice",
+        origin="item",
+        at=1.0,
+        signer=arrival_sign,
+    )
+    documents = tuple(
+        document.as_json() for document in vertex_to_documents(parse_vertex_file(target))
+    )
+    anchor = build_declaration_anchor_draft(
+        lineage=log.lineage(),
+        authored_at=2.0,
+        observer="alice",
+        documents=documents,
+        fact_signer=fact_sign,
+        arrival_signer=arrival_sign,
+        runtime_epoch="fresh",
+    )
+    log.append(
+        anchor.kind,
+        dict(anchor.body),
+        observer=anchor.observer,
+        origin=anchor.origin,
+        at=anchor.authored_at,
+        signer=arrival_sign,
+    )
+    sync_target(target)
+    signing = WriteCredentials(fact_signer=fact_sign, arrival_signer=arrival_sign)
+
+    class _Provider:
+        def for_write(self, _target: Path) -> WriteCredentials:
+            return signing
+
+    return target, _Provider()
 
 
 def _ambiguous_vertex_tick_target(tmp_path: Path) -> tuple[Path, Path, WriteCredentials]:
@@ -249,6 +324,38 @@ def test_ticked_retirement_refuses_same_name_readd_without_writing_and_keeps_evi
     fresh = edit_declaration(target, fresh_text, observer="alice")
     assert fresh.commit is not None
     assert log_path.read_bytes().startswith(before_refusal)
+
+
+def test_fresh_epoch_kind_preview_and_edit_ignore_pre_anchor_tick_but_keep_post_anchor_checks(
+    tmp_path: Path,
+) -> None:
+    target, credentials = _fresh_epoch_ticked_target(tmp_path)
+    revised = LoopDef(
+        folds=(FoldDecl("items", FoldCollect(2)),), boundary=BoundaryEvery(2)
+    )
+
+    preview = plan_kind_mutation(target, "edit", "item", revised)
+    assert preview.applicable is True
+    changed = edit_kind(
+        target, "item", revised, observer="alice", credentials=credentials
+    )
+    assert changed.commit is not None
+
+    first = emit_fact(
+        target, "item", {"n": 1}, observer="alice", ts=10.0, credentials=credentials
+    )
+    second = emit_fact(
+        target, "item", {"n": 2}, observer="alice", ts=11.0, credentials=credentials
+    )
+    assert first.tick_id is None
+    assert second.tick_id is not None
+
+    removed = remove_kind(target, "item", observer="alice", credentials=credentials)
+    assert removed.commit is not None
+    with pytest.raises(ArrivalRefusal) as refusal:
+        plan_kind_mutation(target, "add", "item", revised)
+    assert refusal.value.source_type == "DeclarationPreparationRefused"
+    assert refusal.value.details["evidence"]["cause"]["type"] == "BoundaryContinuityConflict"
 
 
 def test_in_place_count_and_fold_edit_inherits_the_sealed_edge(tmp_path: Path) -> None:

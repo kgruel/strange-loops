@@ -795,10 +795,10 @@ class SqliteStore(Generic[T]):
         signed}`` — for legacy modes exactly ``{lineage, protocol,
         documents, chain_head, fact_cursor, observer, signed}``.
         """
-        from lang.document import DECL_GENESIS, DECLARATION_PROTOCOL_VERSION
+        from lang.document import DECL_GENESIS
 
         if protocol is None:
-            protocol = DECLARATION_PROTOCOL_VERSION
+            protocol = 1
 
         # Prepare schema OUTSIDE the transaction (these commit): the genesis
         # write and the chain-head read need the signature and chain columns

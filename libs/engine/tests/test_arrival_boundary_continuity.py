@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -13,7 +15,11 @@ from engine.arrival_boundary_continuity import (
     collect_verified_parameter_rows,
 )
 from engine.arrival_contract import DeclarationAnchor, Fact, Tick
-from engine.declaration import DeclarationResolutionError
+from engine.declaration import (
+    DeclarationResolutionError,
+    UnsupportedProtocol,
+    runtime_epoch_from_anchor,
+)
 
 LINEAGE = "01C6LINEAGE0000000000000000"
 
@@ -482,6 +488,40 @@ def test_pre_genesis_owned_tick_is_unproven():
         (_tick("old", "pulse", -1),),
         target_documents=documents,
     ) == "unproven-loop-role"
+
+
+def test_fresh_epoch_requires_exact_physical_genesis_and_rejects_downgrade():
+    base = _anchor(_vertex_docs(loops=("pulse",)), arrival_ordinal=2)
+    assert base.genesis is not None
+    payload = {
+        "protocol": 2,
+        "documents": base.genesis.payload["documents"],
+        "runtime_epoch": "fresh-after-anchor-v1",
+    }
+    text = json.dumps(payload, separators=(",", ":"))
+    genesis = replace(base.genesis, payload=payload, payload_text=text, signature="inner")
+    anchor = DeclarationAnchor(LINEAGE, genesis)
+    wire = {
+        "k": "fact", "lin": LINEAGE, "ord": 2, "observer": "alice",
+        "origin": "", "sig": "outer", "body": {
+            "id": LINEAGE, "kind": "_decl.genesis", "ts": 0.0,
+            "observer": "alice", "origin": "", "payload": text,
+            "signature": "inner",
+        },
+    }
+    assert runtime_epoch_from_anchor(anchor, wire_record=wire).start_ordinal == 2
+    with pytest.raises(DeclarationResolutionError, match="physical genesis row"):
+        runtime_epoch_from_anchor(anchor)
+    downgraded = replace(
+        genesis,
+        payload={"protocol": 1, "documents": payload["documents"]},
+        payload_text=json.dumps({"protocol": 1, "documents": payload["documents"]}),
+    )
+    with pytest.raises(DeclarationResolutionError, match="differs from physical"):
+        runtime_epoch_from_anchor(DeclarationAnchor(LINEAGE, downgraded), wire_record=wire)
+    malformed = replace(genesis, payload={**payload, "runtime_epoch": "unknown"})
+    with pytest.raises(UnsupportedProtocol, match="exact fresh"):
+        runtime_epoch_from_anchor(DeclarationAnchor(LINEAGE, malformed), wire_record=wire)
 
 
 def test_vertex_document_without_name_is_not_inferred_from_subject():

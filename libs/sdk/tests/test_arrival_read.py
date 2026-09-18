@@ -26,6 +26,7 @@ from engine.arrival_contract import (
     Tick,
     UnknownBackend,
 )
+from engine.declaration import RuntimeEpoch
 from lang import genesis_payload, parse_vertex, parse_vertex_file
 
 from sdk import (
@@ -164,6 +165,9 @@ class _Opened:
     basis: ReadBasis
     closed: bool = False
 
+    def runtime_epoch(self) -> RuntimeEpoch:
+        return RuntimeEpoch("strict", None)
+
     def continuation(self, request: FactRequest, page: FactPage) -> Continuation | None:
         if page.cursor is None or self.basis.projected_through is None:
             return None
@@ -230,6 +234,9 @@ def test_descriptor_reads_share_typed_basis_and_close(
     assert lookup.fact is not None and lookup.fact["id"] == "01FACT"
     assert state.sections["item"]["items"][0]["title"] == "bounded"
     assert state.generation["lineage"] == "decl-lineage"
+    assert state.generation["runtime_epoch"] == {
+        "mode": "strict", "anchor_ordinal": None
+    }
     assert all(call[0] is registry for call in calls)
     assert all(call[2] is ProjectionRequirement.CURRENT for call in calls)
     assert all(item.closed for item in opened)
@@ -239,6 +246,35 @@ def test_descriptor_reads_share_typed_basis_and_close(
         for item in opened
         for request in item.snapshot.requests
     ) == 4
+
+
+def test_arrival_fresh_epoch_filters_runtime_state_but_not_history_reads(
+    arrival_vertex: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    basis = ReadBasis(
+        lineage="physical-lineage",
+        captured_head=Head("physical-lineage", 2, "hash-2"),
+        projected_through=Head("physical-lineage", 2, "hash-2"),
+        view_generation="projection-1",
+    )
+
+    class _FreshOpened(_Opened):
+        def runtime_epoch(self) -> RuntimeEpoch:
+            return RuntimeEpoch("fresh", 1)
+
+    monkeypatch.setattr(
+        "engine.arrival_consumer.open_read",
+        lambda *_args, **_kwargs: _FreshOpened(_Snapshot(arrival_vertex), basis),
+    )
+
+    state = read_state(arrival_vertex, registry=object())  # type: ignore[arg-type]
+    summary = read_summary(arrival_vertex, registry=object())  # type: ignore[arg-type]
+
+    assert state.sections["item"]["items"] == []
+    assert state.generation["runtime_epoch"] == {
+        "mode": "fresh", "anchor_ordinal": 1
+    }
+    assert summary.fact_total == 1
 
 
 def test_arrival_fact_lookup_keeps_internal_namespace_hidden(

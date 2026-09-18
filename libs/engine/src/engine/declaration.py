@@ -82,8 +82,9 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from lang.document import (
     DECL_GENESIS,
@@ -97,6 +98,102 @@ from lang.document import (
 
 from .arrival_contract import DeclarationAnchor, Fact, Head, NotAuthority
 from .residence import resolve_store_path
+
+
+@dataclass(frozen=True)
+class RuntimeEpoch:
+    """Signed own-genesis choice for runtime replay, separate from custody history."""
+
+    mode: Literal["strict", "fresh"]
+    start_ordinal: int | None
+
+
+def _runtime_epoch_payload(payload: Mapping[str, Any], ordinal: int) -> RuntimeEpoch:
+    protocol = payload.get("protocol", 1)
+    if type(protocol) is not int:
+        raise UnsupportedProtocol("declaration genesis protocol must be an integer")
+    if protocol not in (1, 2):
+        raise UnsupportedProtocol(
+            f"genesis protocol {protocol} is unsupported; "
+            f"supported protocols are 1 and {DECLARATION_PROTOCOL_VERSION}"
+        )
+    if protocol == 2:
+        if (
+            set(payload) != {"protocol", "documents", "runtime_epoch"}
+            or payload.get("runtime_epoch") != "fresh-after-anchor-v1"
+            or not isinstance(payload.get("documents"), list)
+        ):
+            raise UnsupportedProtocol("protocol 2 requires the exact fresh-after-anchor-v1 payload")
+        return RuntimeEpoch("fresh", ordinal)
+    if "runtime_epoch" in payload:
+        raise UnsupportedProtocol("runtime epoch marker requires declaration protocol 2")
+    return RuntimeEpoch("strict", None)
+
+
+def runtime_epoch_from_anchor(
+    anchor: DeclarationAnchor,
+    *,
+    wire_record: Mapping[str, Any] | None = None,
+) -> RuntimeEpoch:
+    """Interpret only the own genesis; a fresh marker needs its physical row.
+
+    The wire comparison prevents a modified derived index from inventing an
+    epoch. It does not replace custody's independent head attestation.
+    """
+    genesis = anchor.genesis
+    if (
+        anchor.own_lineage is None or genesis is None
+        or genesis.id != anchor.own_lineage or genesis.kind != DECL_GENESIS
+    ):
+        raise DeclarationResolutionError("runtime epoch requires an own declaration genesis")
+    epoch = _runtime_epoch_payload(genesis.payload, genesis.arrival_ordinal)
+    if wire_record is None:
+        if epoch.mode == "fresh":
+            raise DeclarationResolutionError(
+                "fresh runtime epoch requires its physical genesis row"
+            )
+        return epoch
+    from .arrival_body import rows_of_body
+
+    kind = wire_record.get("k")
+    body = wire_record.get("body")
+    try:
+        rows = tuple(rows_of_body(kind, body)) if kind in {"fact", "batch"} else ()
+    except (TypeError, ValueError) as exc:
+        raise DeclarationResolutionError("physical declaration genesis row is malformed") from exc
+    selected = rows[genesis.arrival_seq] if genesis.arrival_seq < len(rows) else None
+    if (
+        wire_record.get("lin") != anchor.own_lineage
+        or wire_record.get("ord") != genesis.arrival_ordinal
+        or selected != (
+            "fact", (
+                genesis.id, genesis.kind, genesis.ts, genesis.observer,
+                genesis.origin, genesis.payload_text, genesis.signature,
+            ),
+        )
+    ):
+        raise DeclarationResolutionError(
+            "runtime epoch projection differs from physical declaration genesis"
+        )
+    try:
+        physical_payload = json.loads(genesis.payload_text)
+    except (TypeError, ValueError) as exc:
+        raise DeclarationResolutionError(
+            "physical declaration genesis payload is malformed"
+        ) from exc
+    if physical_payload != genesis.payload:
+        raise DeclarationResolutionError("runtime epoch projection payload differs from custody")
+    physical_epoch = _runtime_epoch_payload(physical_payload, genesis.arrival_ordinal)
+    if physical_epoch != epoch:
+        raise DeclarationResolutionError("runtime epoch projection disagrees with custody")
+    if physical_epoch.mode == "fresh" and (
+        kind != "fact"
+        or genesis.arrival_seq != 0
+        or not isinstance(wire_record.get("sig"), str)
+        or not isinstance(genesis.signature, str)
+    ):
+        raise DeclarationResolutionError("fresh runtime epoch genesis is unsigned")
+    return epoch
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from lang.ast import VertexFile
@@ -216,6 +313,7 @@ def validate_arrival_declaration_anchor(anchor: DeclarationAnchor, head: Head) -
             )
         if anchor.genesis.kind != DECL_GENESIS:
             raise NotAuthority("projection declaration anchor is not a genesis fact")
+        _runtime_epoch_payload(anchor.genesis.payload, anchor.genesis.arrival_ordinal)
 
 
 def resolve_declaration_documents_from_snapshot(
@@ -247,11 +345,7 @@ def resolve_declaration_documents_from_snapshot(
             "_decl.genesis row in this snapshot"
         )
     payload = genesis.payload
-    protocol = payload.get("protocol", 1)
-    if protocol > DECLARATION_PROTOCOL_VERSION:
-        raise UnsupportedProtocol(
-            f"genesis protocol {protocol} exceeds supported {DECLARATION_PROTOCOL_VERSION}"
-        )
+    _runtime_epoch_payload(payload, genesis.arrival_ordinal)
     if genesis.arrival_ordinal > max((fact.arrival_ordinal for fact in internal), default=-1):
         return Unhistorized(list(payload.get("documents", ())))
 
@@ -443,12 +537,9 @@ def resolve_declaration_documents(
             )
 
         genesis_payload = json.loads(genesis_payload_text)
-        protocol = genesis_payload.get("protocol", 1)
-        if protocol > DECLARATION_PROTOCOL_VERSION:
+        if _runtime_epoch_payload(genesis_payload, genesis_ordinal).mode == "fresh":
             raise UnsupportedProtocol(
-                f"genesis protocol {protocol} exceeds supported "
-                f"{DECLARATION_PROTOCOL_VERSION} in {store_path} — refusing to "
-                "partially interpret a newer declaration protocol"
+                "fresh runtime epochs require Arrival custody and are unsupported in legacy stores"
             )
 
         if as_of is not None and genesis_ts > as_of:

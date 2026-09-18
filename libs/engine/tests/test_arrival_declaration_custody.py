@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -84,7 +86,7 @@ def _declaration_fixture(tmp_path, *, case: str, changed: bool):
         payload={"protocol": 1, "documents": documents},
         arrival_ordinal=0,
         arrival_seq=0,
-        payload_text="{}",
+        payload_text=json.dumps({"protocol": 1, "documents": documents}),
     )
     represented = Watermark(
         "foreign" if case == "foreign" else captured.lineage,
@@ -122,6 +124,21 @@ def _declaration_fixture(tmp_path, *, case: str, changed: bool):
         def scan(self, **kwargs):
             activity.append("scan")
             return ()
+
+        def read(self, coordinate):
+            current_genesis = snapshot._genesis
+            assert coordinate == current_genesis.arrival_ordinal
+            return {
+                "k": "fact", "lin": captured.lineage, "ord": coordinate,
+                "observer": current_genesis.observer, "origin": current_genesis.origin,
+                "body": {
+                    "id": current_genesis.id, "kind": current_genesis.kind,
+                    "ts": current_genesis.ts,
+                    "observer": current_genesis.observer,
+                    "origin": current_genesis.origin,
+                    "payload": current_genesis.payload_text,
+                },
+            }
 
         def capabilities(self):
             return SimpleNamespace(max_atomic_records=None)
@@ -324,6 +341,13 @@ def test_proposed_declaration_can_repair_ambiguous_effective_history(
         document.as_json()
         for document in vertex_to_documents(parse_vertex(ambiguous, path=target))
     ]
+    snapshot._genesis = replace(
+        snapshot._genesis, payload_text=json.dumps(snapshot._genesis.payload)
+    )
+    snapshot.declaration_anchor = replace(
+        snapshot.declaration_anchor, genesis=snapshot._genesis
+    )
+    snapshot._facts = [snapshot._genesis]
 
     with pytest.raises(
         DeclarationPreparationRefused,

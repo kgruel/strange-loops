@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
 from engine.arrival_contract import Head, Profile
@@ -151,6 +151,7 @@ def _result(
         projection=_projection_dict(raw.projection),
         credential_bindings=_binding_dicts(raw.credential_bindings),
         observed_head=raw.observed_head,
+        runtime_epoch=raw.runtime_epoch,
     )
 
 
@@ -163,6 +164,7 @@ def adopt_arrival(
     declaration_text: str,
     observer: str,
     credentials: CredentialProvider | WriteCredentials,
+    runtime_epoch: Literal["strict", "fresh"] = "strict",
     registry: BackendRegistry | None = None,
 ) -> ArrivalAdoptionResult:
     """Append one reviewed declaration anchor at an explicit migration head.
@@ -177,6 +179,8 @@ def adopt_arrival(
     from .target import _arrival_descriptor
 
     try:
+        if runtime_epoch not in ("strict", "fresh"):
+            raise SdkValueError("runtime_epoch must be 'strict' or 'fresh'")
         vertex_path = Path(target).resolve()
         resolved = _arrival_descriptor(vertex_path)
         if resolved is None:
@@ -204,6 +208,7 @@ def adopt_arrival(
             credentials=write_credentials,
             fact_verify=_domain_verifier(FACT_DOMAIN),
             arrival_verify=_domain_verifier(ARRIVAL_DOMAIN),
+            runtime_epoch=runtime_epoch,
         )
         raw = apply_arrival_adoption(active_registry, plan)
     except Exception as exc:

@@ -150,7 +150,7 @@ DECL_MERGED = "_decl.merged"
 #: Declaration-protocol version stamped into the genesis payload. A foreign
 #: lineage carrying an unsupported version is treated as entirely inert
 #: (never partially interpreted) — see SPEC §9.2 / build plan.
-DECLARATION_PROTOCOL_VERSION = 1
+DECLARATION_PROTOCOL_VERSION = 2
 
 #: The frozen tombstone vocabulary (SPEC §9.2): which ``*-defined`` kind each
 #: subject removal is expressed as. A ``*-defined`` kind ABSENT from this map
@@ -822,7 +822,9 @@ def genesis_payload(ast: VertexFile) -> dict[str, Any]:
     whole (SPEC §9.2). JSON-safe; residence excluded like every document.
     """
     return {
-        "protocol": DECLARATION_PROTOCOL_VERSION,
+        # Ordinary initialization remains v1. Protocol 2 is reserved for an
+        # explicitly selected fresh runtime epoch at migration adoption.
+        "protocol": 1,
         "documents": [d.as_json() for d in vertex_to_documents(ast)],
     }
 

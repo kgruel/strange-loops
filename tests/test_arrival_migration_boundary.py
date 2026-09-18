@@ -43,6 +43,100 @@ from sdk import (
 from sign import ed25519
 
 
+@pytest.mark.parametrize("runtime_epoch", ["strict", "fresh"])
+def test_migrated_owned_ticks_have_an_explicit_execution_epoch(
+    tmp_path: Path, runtime_epoch: str,
+) -> None:
+    """Fresh execution starts empty without severing historical custody."""
+    from engine.canonical_audit import audit_deep
+    from sdk import MappedCredentialProvider, adopt_arrival, export_target, read_state
+
+    data = tmp_path / "data"
+    data.mkdir()
+    provider = MappedCredentialProvider(
+        tmp_path / "credentials", namespace="epoch-rehearsal", receipt_observer="alice",
+    )
+    binding = provider.create_binding("alice", token="epoch-key")
+    source = data / "legacy.jsonl"
+    _write_jsonl(source)
+    rows = [json.loads(line) for line in source.read_text().splitlines()]
+    rows[1].update(name="alice", origin="alice")
+    source.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    original = source.read_bytes()
+    vertex = tmp_path / "alice.vertex"
+    _write_vertex(vertex, binding.public_key, source.name)
+    vertex.write_text(vertex.read_text().replace(
+        "loops {", 'loops {\n  boundary when="seal"\n  seal { fold { items "collect" 10 } }',
+    ))
+    reviewed = vertex.read_text()
+    signer = provider.resolve(CredentialRequest(
+        provider.namespace, "alice", SigningDomain.ARRIVAL,
+        CredentialPurpose.INITIALIZATION,
+    ))
+    assert signer is not None
+    migration = run_migration(
+        source, vertex, store_dir=data,
+        signer=lambda _observer, digest: signer.sign_digest(digest),
+    )
+    assert verify_migration_report(
+        migration.report_path, binding.public_key, verify=_verifier,
+        target_path=migration.target_path,
+    )
+    prefix = migration.target_path.read_bytes()
+    adopted = adopt_arrival(
+        vertex, selected_head=migration.head, reviewed_text=reviewed,
+        reviewed_sha256=hashlib.sha256(reviewed.encode()).hexdigest(),
+        declaration_text=vertex.read_text(), observer="alice", credentials=provider,
+        runtime_epoch=runtime_epoch,
+    )
+    assert adopted.head.ordinal == migration.head.ordinal + 1
+    assert read_summary(vertex).fact_total == 1
+    assert read_summary(vertex).tick_total == 1
+    assert read_fact_by_id(vertex, rows[0]["id"]).fact is not None
+    at_adoption = migration.target_path.read_bytes()
+    if runtime_epoch == "strict":
+        with pytest.raises(SdkError, match="predates declaration genesis"):
+            emit_fact(vertex, "concept", {"text": "new"}, observer="alice", credentials=provider)
+        assert migration.target_path.read_bytes() == at_adoption
+        return
+
+    assert read_state(vertex).sections["concept"]["items"] == []
+    # An old ID remains occupied even though it is excluded from runtime replay.
+    with pytest.raises(SdkError):
+        emit_fact(
+            vertex, "concept", {"text": "different"}, observer="alice",
+            id_override=rows[0]["id"], credentials=provider,
+        )
+    assert migration.target_path.read_bytes() == at_adoption
+    emitted = emit_fact(
+        vertex, "concept", {"text": "new"}, observer="alice", ts=10.0,
+        credentials=provider,
+    )
+    assert emitted.stored and emitted.signed and emitted.witnessed
+    state = read_state(vertex).sections["concept"]["items"]
+    assert [item["text"] for item in state] == ["new"]
+    # A new vertex boundary must keep the physical predecessor, despite fresh state.
+    sealed = emit_fact(
+        vertex, "seal", {"message": "epoch checkpoint"}, observer="alice", ts=-1.0,
+        credentials=provider,
+    )
+    assert sealed.stored and sealed.signed
+    assert read_summary(vertex).tick_total == 2
+    # Even a negative event timestamp remains the latest physical predecessor.
+    emit_fact(
+        vertex, "seal", {"message": "second checkpoint"}, observer="alice", ts=12.0,
+        credentials=provider,
+    )
+    assert read_summary(vertex).tick_total == 3
+    chain = audit_deep(migration.target_path)
+    assert chain.ok, chain.summary()
+    exported = tmp_path / "fresh-export.arrival-jsonl"
+    export_target(vertex, exported)
+    assert exported.read_bytes() == migration.target_path.read_bytes()
+    assert exported.read_bytes().startswith(prefix)
+    assert source.read_bytes() == original
+
+
 @pytest.fixture(autouse=True)
 def _isolate_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep custody and projection state out of the user's environment."""
@@ -435,8 +529,9 @@ def test_copied_migration_adoption_and_mapped_write(
 
 
 @pytest.mark.parametrize("stop_phase", ["after-intent", "after-append"])
+@pytest.mark.parametrize("runtime_epoch", ["strict", "fresh"])
 def test_adoption_process_exit_recovers_reserved_draft_without_credentials(
-    tmp_path: Path, stop_phase: str, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, stop_phase: str, runtime_epoch: str, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Exit a real child process at a durable boundary, then reconcile once."""
     from sdk import MappedCredentialProvider, recover_arrival_adoption
@@ -466,7 +561,7 @@ from pathlib import Path
 import engine.arrival_adoption as engine_adoption
 from engine.arrival_contract import Head
 from sdk import MappedCredentialProvider, adopt_arrival
-target, root, namespace, reviewed, head_json, stop = sys.argv[1:]
+target, root, namespace, reviewed, head_json, stop, runtime_epoch = sys.argv[1:]
 original_apply = engine_adoption.apply_arrival_adoption
 def stop_at(phase):
     if phase == stop:
@@ -479,6 +574,7 @@ adopt_arrival(
     target, selected_head=Head(**json.loads(head_json)), reviewed_text=reviewed,
     reviewed_sha256=hashlib.sha256(reviewed.encode()).hexdigest(),
     declaration_text=Path(target).read_text(), observer="alice", credentials=provider,
+    runtime_epoch=runtime_epoch,
 )
 raise AssertionError("durable stop phase was not reached")
 '''
@@ -486,7 +582,7 @@ raise AssertionError("durable stop phase was not reached")
         [sys.executable, "-c", script, str(vertex), str(provider.root), provider.namespace,
          reviewed, json.dumps({"lineage": migrated.head.lineage,
                                "ordinal": migrated.head.ordinal,
-                               "record_hash": migrated.head.record_hash}), stop_phase],
+                               "record_hash": migrated.head.record_hash}), stop_phase, runtime_epoch],
         capture_output=True, text=True, timeout=30, check=False,
     )
     assert run.returncode == 86, run.stderr
@@ -504,12 +600,22 @@ raise AssertionError("durable stop phase was not reached")
     monkeypatch.setattr(MappedCredentialProvider, "for_write", refuse_credentials)
     monkeypatch.setattr(MappedCredentialProvider, "resolve", refuse_credentials)
     authentic_intent = intent.read_bytes()
-    for mutation in ("binding", "inner-signature", "outer-signature"):
+    mutations = ["binding", "inner-signature", "outer-signature"]
+    if runtime_epoch == "fresh":
+        mutations.append("epoch-downgrade")
+    for mutation in mutations:
         changed = json.loads(authentic_intent)
         if mutation == "binding":
             changed["bindings"][0]["public_key"] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
         elif mutation == "inner-signature":
             changed["drafts"][0]["body"]["signature"] = "bogus"
+        elif mutation == "epoch-downgrade":
+            payload = json.loads(changed["drafts"][0]["body"]["payload"])
+            payload["protocol"] = 1
+            payload.pop("runtime_epoch")
+            changed["drafts"][0]["body"]["payload"] = json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":"),
+            )
         else:
             changed["drafts"][0]["signature"] = "bogus"
         # Keep the duplicate draft representations consistent: consistency
@@ -524,6 +630,7 @@ raise AssertionError("durable stop phase was not reached")
         assert intent.exists()
     intent.write_bytes(authentic_intent)
     recovered = recover_arrival_adoption(intent)
+    assert recovered.runtime_epoch == runtime_epoch
     assert recovered.head is not None
     assert recovered.head.ordinal == migrated.head.ordinal + 1
     assert recovered.captured_head == migrated.head

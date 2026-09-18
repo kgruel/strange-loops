@@ -302,7 +302,13 @@ class AggregateRead:
             return children + (member,)
         return children
 
-    def ordered_for_kind(self, kind: str, *, observer: str | None = None) -> list[Fact]:
+    def ordered_for_kind(
+        self,
+        kind: str,
+        *,
+        observer: str | None = None,
+        runtime_epoch_only: bool = False,
+    ) -> list[Fact]:
         specs = self.specs()
         eligible = self._eligible_members(self.root, kind)
         eligible_keys = {_member_key(member) for member in eligible}
@@ -311,6 +317,12 @@ class AggregateRead:
             for observation in self.observations(observer=observer)
             if _member_key(observation.member) in eligible_keys
             and _kind_target(observation.fact.kind, specs) == kind
+            and (
+                not runtime_epoch_only
+                or observation.member.runtime_epoch.start_ordinal is None
+                or observation.fact.arrival_ordinal
+                > observation.member.runtime_epoch.start_ordinal
+            )
         ]
         if len(eligible_keys) <= 1:
             return [item.fact for item in selected]

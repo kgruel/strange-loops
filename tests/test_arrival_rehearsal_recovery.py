@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from sign import ed25519
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,9 +15,11 @@ RUNNER = ROOT / "scripts" / "arrival_rehearsal.py"
 RECOVERY = ROOT / "scripts" / "arrival_rehearsal_recovery.py"
 
 
+@pytest.mark.parametrize("runtime_epoch", ["strict", "fresh"])
 def test_recovery_rehearsal_forks_s_and_recovers_both_durable_boundaries(
     tmp_path: Path,
     monkeypatch,
+    runtime_epoch: str,
 ) -> None:
     outside = tmp_path / "must-stay-unused"
     for name in (
@@ -79,6 +82,8 @@ loops {{ concept {{ fold {{ items "collect" 100 }} }} }}
             str(rehearsal_output),
             "--observer",
             "alice",
+            "--runtime-epoch",
+            runtime_epoch,
             "--emit-kind",
             "concept",
             "--emit-payload-json",
@@ -90,6 +95,12 @@ loops {{ concept {{ fold {{ items "collect" 100 }} }} }}
         timeout=60,
     )
     assert rehearsal.returncode == 0, rehearsal.stderr
+    rehearsal_evidence = json.loads((rehearsal_output / "evidence.json").read_text())
+    state_epoch = rehearsal_evidence["reads_at_A"]["runtime_state"]["runtime_epoch"]
+    assert state_epoch["mode"] == runtime_epoch
+    assert isinstance(rehearsal_evidence["reads_at_A"]["runtime_state"]["sections_sha256"], str)
+    if runtime_epoch == "fresh":
+        assert state_epoch["anchor_ordinal"] == rehearsal_evidence["adoption"]["head"]["ordinal"]
 
     recovery_output = sandbox / "recovery"
     recovered = subprocess.run(
@@ -120,5 +131,6 @@ loops {{ concept {{ fold {{ items "collect" 100 }} }} }}
     for fork in evidence["forks"]:
         assert fork["head"]["ordinal"] == fork["selected_head"]["ordinal"] + 1
         assert fork["pre_adoption_error"] == "SdkError"
+        assert fork["runtime_epoch"] == runtime_epoch
         assert fork["second_recovery_error"]
     assert not outside.exists()

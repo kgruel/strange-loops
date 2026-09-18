@@ -1,3 +1,24 @@
+## September 18: explicit fresh execution epoch implemented; review pending
+
+The user chose a new boundary epoch at adoption after the strict loops rehearsal
+exposed pre-anchor tick refusal. Initial execution state is the declared fold
+identity, zero counters, and no inherited runtime period/pending boundary.
+Historical rows remain queryable/exportable, and global ID checks and tick
+cryptographic chain/window hashes still include the complete history.
+
+The explicit `runtime_epoch="fresh"` adoption option writes signed declaration
+protocol 2 (`fresh-after-anchor-v1`); strict/default initialization stays v1.
+Runtime inputs and current state use receipt ordinals strictly after the own
+anchor. Projection epoch invention/downgrade is checked against the physical
+anchor. Public SDK preparation/recovery independently verifies both signatures.
+Older readers and legacy runtime paths refuse v2 rather than ignore its policy.
+
+Sol implemented engine/lang, Terra SDK/state/aggregate/rehearsal wiring, Luna
+independent epoch tests and review, root migration/tick-audit/recovery integration.
+Code is being frozen for Fable review and a separate fresh-mode real-store run.
+See [epoch design](adoption-fresh-runtime-epoch-design-2026-09-18.md).
+The original strict rehearsal evidence and its refusal are preserved.
+
 ## September 18: real loops-store rehearsal complete; write policy unresolved
 
 Rehearsed an isolated copy of the active oldest loops JSONL store (204,426,871

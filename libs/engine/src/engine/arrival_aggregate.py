@@ -19,6 +19,7 @@ from .arrival_consumer import OpenedRead, open_read
 from .arrival_contract import FactRequest, ReadBasis, StoreDescriptor
 from .arrival_registry import BackendRegistry
 from .declaration import (
+    RuntimeEpoch,
     Unhistorized,
     effective_declaration_from_documents,
     resolve_declaration_documents_from_snapshot,
@@ -131,6 +132,7 @@ class AggregateMember:
     basis: ReadBasis
     effective_declaration: Any
     snapshot: Any
+    runtime_epoch: RuntimeEpoch = RuntimeEpoch("strict", None)
 
 
 @dataclass(frozen=True)
@@ -251,6 +253,7 @@ def _member(
         basis=captured.opened.basis,
         effective_declaration=captured.effective_declaration,
         snapshot=captured.opened.snapshot,
+        runtime_epoch=captured.opened.runtime_epoch(),
     )
 
 

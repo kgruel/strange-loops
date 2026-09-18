@@ -282,9 +282,18 @@ def build_declaration_anchor_draft(
     public_key: str | None = None,
     fact_verify: Callable[[str, str, str], bool] | None = None,
     arrival_verify: Callable[[str, str, str], bool] | None = None,
+    runtime_epoch: str = "strict",
 ) -> RecordDraft:
+    if runtime_epoch not in {"strict", "fresh"}:
+        raise ArrivalInitializationError("unsupported declaration runtime epoch")
+    payload_body: dict[str, Any] = {
+        "protocol": 1 if runtime_epoch == "strict" else 2,
+        "documents": [dict(document) for document in documents],
+    }
+    if runtime_epoch == "fresh":
+        payload_body["runtime_epoch"] = "fresh-after-anchor-v1"
     payload = json.dumps(
-        {"protocol": 1, "documents": [dict(document) for document in documents]},
+        payload_body,
         ensure_ascii=False,
         separators=(",", ":"),
     )

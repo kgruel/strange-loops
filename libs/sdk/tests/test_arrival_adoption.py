@@ -70,6 +70,7 @@ def _raw_result(target: Path):
         projection=None,
         credential_bindings=(),
         observed_head=None,
+        runtime_epoch="strict",
     )
 
 
@@ -114,6 +115,7 @@ def test_adoption_forwards_the_reviewed_and_published_snapshots_with_mapped_bind
     assert calls["declaration_text"] == declaration_text
     assert calls["observer"] == "alice"
     assert calls["credentials"].mapped is True
+    assert calls["runtime_epoch"] == "strict"
     assert callable(calls["fact_verify"])
     assert callable(calls["arrival_verify"])
     assert calls["descriptor"].role is Profile.AUTHORITY
@@ -122,6 +124,60 @@ def test_adoption_forwards_the_reviewed_and_published_snapshots_with_mapped_bind
     assert result.reviewed_sha256 == hashlib.sha256(reviewed_text.encode()).hexdigest()
     assert result.declaration_sha256 == hashlib.sha256(declaration_text.encode()).hexdigest()
     assert result.as_dict()["intent_path"].endswith(".arrival-adopt.intent")
+    assert result.runtime_epoch == "strict"
+
+
+def test_adoption_forwards_the_explicit_fresh_runtime_epoch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target, declaration_text = _target(tmp_path)
+    calls: dict[str, object] = {}
+    module = ModuleType("engine.arrival_adoption")
+
+    def prepare(_registry, _descriptor, **kwargs):
+        calls.update(kwargs)
+        return SimpleNamespace(target_path=target)
+
+    module.prepare_arrival_adoption = prepare
+
+    def apply(_registry, _plan):
+        raw = _raw_result(target)
+        raw.runtime_epoch = "fresh"
+        return raw
+
+    module.apply_arrival_adoption = apply
+    monkeypatch.setitem(sys.modules, "engine.arrival_adoption", module)
+
+    result = adopt_arrival(
+        target,
+        selected_head=Head("lineage-a", 3, "head-before"),
+        reviewed_text=declaration_text,
+        reviewed_sha256=hashlib.sha256(declaration_text.encode()).hexdigest(),
+        declaration_text=declaration_text,
+        observer="alice",
+        credentials=_mapped_credentials(),
+        runtime_epoch="fresh",
+    )
+
+    assert calls["runtime_epoch"] == "fresh"
+    assert result.runtime_epoch == "fresh"
+    assert result.as_dict()["runtime_epoch"] == "fresh"
+
+
+def test_adoption_refuses_unknown_runtime_epoch_before_engine_import(tmp_path: Path) -> None:
+    target, declaration_text = _target(tmp_path)
+
+    with pytest.raises(SdkValueError, match="runtime_epoch"):
+        adopt_arrival(
+            target,
+            selected_head=Head("lineage-a", 3, "head-before"),
+            reviewed_text=declaration_text,
+            reviewed_sha256=hashlib.sha256(declaration_text.encode()).hexdigest(),
+            declaration_text=declaration_text,
+            observer="alice",
+            credentials=_mapped_credentials(),
+            runtime_epoch="not-a-mode",  # type: ignore[arg-type]
+        )
 
 
 def test_sdk_passes_independent_fact_and_arrival_verifiers(

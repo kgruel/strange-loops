@@ -71,6 +71,7 @@ from .credentials import (
 from .declaration import (
     Unhistorized,
     resolve_declaration_documents_from_snapshot,
+    runtime_epoch_from_anchor,
     validate_arrival_declaration_anchor,
     validate_arrival_runtime_identity,
 )
@@ -1015,6 +1016,13 @@ def prepare_declaration_edit(
             continuity_ticks,
             target_documents=proposed_documents,
             verified_params=verified_params,
+            runtime_epoch=runtime_epoch_from_anchor(
+                snapshot.declaration_anchor,
+                wire_record=(
+                    None if snapshot.declaration_anchor.genesis is None
+                    else ledger.read(snapshot.declaration_anchor.genesis.arrival_ordinal)
+                ),
+            ),
         )
         registry_verifier = arrival_verify
         if credentials is not None and credentials.mapped:

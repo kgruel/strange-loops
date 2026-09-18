@@ -132,3 +132,11 @@ policy choice remains pending.
 [preservation checks](reviews/loops-rehearsal-2026-09-18/preservation-check.json)
 contain metadata only; source payloads, per-row audit details and private keys
 remain in the private rehearsal directory.
+
+## Subsequent user decision
+
+The user selected a new boundary epoch at adoption. Its initial state and
+compatibility contract are defined in the
+[fresh runtime epoch design](adoption-fresh-runtime-epoch-design-2026-09-18.md).
+The strict run above remains immutable evidence. A separate copied descriptor,
+migration and explicit fresh adoption will exercise the selected behavior.

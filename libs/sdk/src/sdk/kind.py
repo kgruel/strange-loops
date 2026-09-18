@@ -146,6 +146,7 @@ def _arrival_semantic_preview(
                     opened.snapshot.ticks(TickRequest(since=float("-inf"))),
                     target_documents=proposed_docs,
                     verified_params=verified_params,
+                    runtime_epoch=opened.runtime_epoch(),
                 )
             except BoundaryContinuityConflict as conflict:
                 refusal = DeclarationPreparationRefused(

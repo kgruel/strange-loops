@@ -318,7 +318,8 @@ def test_roundtrip_via_genesis(name: str) -> None:
     text = ALL_CASES[name]
     ast = parse_vertex(text)
     payload = genesis_payload(ast)
-    assert payload["protocol"] == DECLARATION_PROTOCOL_VERSION
+    assert payload["protocol"] == 1
+    assert DECLARATION_PROTOCOL_VERSION >= payload["protocol"]
     projected = documents_to_vertex(
         payload["documents"],
         path=ast.path,

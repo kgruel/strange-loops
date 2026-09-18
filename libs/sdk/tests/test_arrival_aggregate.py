@@ -4,20 +4,25 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from atoms import Fact as AtomFact
 from custody.signing import ARRIVAL_DOMAIN
 from engine.arrival import ArrivalLog
 from engine.arrival_body import body_of_fact_row
+from engine.arrival_contract import Fact, Head, ReadBasis
 from engine.arrival_maintenance import sync_projection
 from engine.arrival_registry import BackendRegistry, descriptor_for
 from engine.arrival_store import ArrivalStore
+from engine.declaration import RuntimeEpoch
 from engine.residence import index_path_for
 from lang import genesis_payload, parse_vertex, parse_vertex_file
 from sign import ed25519
 
 from sdk import read_state, read_summary, read_timeline, sync_target
+from sdk.aggregate import AggregateRead, _Observation
+from sdk.read import _aggregate_state_from
 
 
 def _member(
@@ -341,3 +346,83 @@ def test_mixed_explicit_arrival_and_implicit_storage_refuses(tmp_path: Path) -> 
 
     with pytest.raises(AggregateCaptureRefused, match="without an explicit Arrival descriptor"):
         read_summary(root)
+
+
+def test_aggregate_runtime_epoch_filters_only_fold_state_and_reports_member_basis(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fresh_member = SimpleNamespace(
+        identity=SimpleNamespace(path=(), locator="fresh", role="member"),
+        runtime_epoch=RuntimeEpoch("fresh", 3),
+        basis=ReadBasis(
+            lineage="fresh-lineage",
+            captured_head=Head("fresh-lineage", 4, "fresh-head"),
+            projected_through=Head("fresh-lineage", 4, "fresh-head"),
+            view_generation="fresh-view",
+        ),
+    )
+    before = Fact(
+        id="before",
+        kind="note",
+        ts=1.0,
+        observer="alice",
+        origin="test",
+        payload={"value": "before"},
+        arrival_ordinal=2,
+        arrival_seq=0,
+    )
+    after = Fact(
+        id="after",
+        kind="note",
+        ts=2.0,
+        observer="alice",
+        origin="test",
+        payload={"value": "after"},
+        arrival_ordinal=4,
+        arrival_seq=0,
+    )
+    ordered = object.__new__(AggregateRead)
+    ordered.capture = SimpleNamespace(definitions=(object(),))
+    monkeypatch.setattr(ordered, "specs", lambda: {"note": object()})
+    monkeypatch.setattr(
+        ordered, "_eligible_members", lambda _definition, _kind: (fresh_member,)
+    )
+    monkeypatch.setattr(
+        ordered,
+        "observations",
+        lambda *, observer=None: (
+            _Observation(fresh_member, before),
+            _Observation(fresh_member, after),
+        ),
+    )
+
+    assert [fact.id for fact in ordered.ordered_for_kind("note")] == ["before", "after"]
+    assert [
+        fact.id for fact in ordered.ordered_for_kind("note", runtime_epoch_only=True)
+    ] == ["after"]
+
+    calls: dict[str, bool] = {}
+
+    class _Spec:
+        def replay(self, payloads):
+            return {"count": len(payloads)}
+
+    aggregate = SimpleNamespace(
+        specs=lambda: {"note": _Spec()},
+        ordered_for_kind=lambda _kind, *, observer, runtime_epoch_only: (
+            calls.setdefault("runtime_epoch_only", runtime_epoch_only) and [after]
+        ),
+        root=SimpleNamespace(effective_declaration=SimpleNamespace(name="root")),
+        capture=SimpleNamespace(members=(fresh_member,)),
+        member_evidence=lambda: [],
+        definition_evidence=lambda: [],
+    )
+    state = _aggregate_state_from(
+        aggregate, tmp_path / "root.vertex", kind=None, observer=None, runtime_epoch_only=True
+    )
+
+    assert calls["runtime_epoch_only"] is True
+    assert state.sections["note"]["count"] == 1
+    assert state.generation["runtime_epochs"] == [
+        {"lineage": "fresh-lineage", "mode": "fresh", "anchor_ordinal": 3}
+    ]

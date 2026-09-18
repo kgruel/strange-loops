@@ -206,25 +206,23 @@ def _verify_signature(key: str, signature: str, digest: str, domain: str) -> boo
     return ed25519.verify(public, signature, digest.encode(), domain=domain)
 
 
-def _verify_rehearsal_emit(vertex: Path, fact_id: str, head: Any, public_key: str) -> None:
+def _verify_rehearsal_emit(fact_id: str, commit: Any, public_key: str) -> None:
     from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
     from engine.admission import fact_commitment_hash
     from engine.arrival import content_commitment
-    from engine.arrival_registry import BackendRegistry, descriptor_for
-    from lang import parse_vertex_file
 
-    descriptor = descriptor_for(parse_vertex_file(vertex), vertex)
-    if descriptor is None:
-        raise RehearsalRefused("emitted target lost its Arrival descriptor")
-    ledger, query = BackendRegistry.with_builtin_backends().open(descriptor)
-    try:
-        record = ledger.read(head.ordinal)
-    finally:
-        _close(query)
-        _close(ledger)
+    matching = [
+        record
+        for record in commit.records
+        if record.get("k") == "fact"
+        and isinstance(record.get("body"), dict)
+        and record["body"].get("id") == fact_id
+    ]
+    if len(matching) != 1:
+        raise RehearsalRefused("exact ordinary commit lacks one emitted fact")
+    record = matching[0]
     body = record["body"]
-    if record["k"] != "fact" or body.get("id") != fact_id:
-        raise RehearsalRefused("rehearsal emit is not the final fact record")
+    assert isinstance(body, dict)
     inner = body.get("signature")
     outer = record.get("sig")
     if not isinstance(inner, str) or not isinstance(outer, str):
@@ -312,6 +310,7 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
             emit_fact,
             inspect_declaration,
             read_facts,
+            read_state,
             read_summary,
             sync_target,
             verify_target,
@@ -423,6 +422,7 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
             reviewed_text=reviewed_text, reviewed_sha256=reviewed_sha256,
             declaration_text=vertex.read_text(encoding="utf-8"),
             observer=args.observer, credentials=provider,
+            runtime_epoch=args.runtime_epoch,
         )
         if adopted.commit is None or adopted.commit.before != migration.head:
             raise RehearsalRefused("adoption did not report Commit(S,A)")
@@ -430,6 +430,7 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
         evidence["adoption"] = {
             "head": _head(a), "fact_id_equals_lineage": adopted.fact_id == migration.lineage,
             "phase": adopted.phase,
+            "runtime_epoch": adopted.runtime_epoch,
             "projected_after": None if adopted.projection is None else adopted.projection.get(
                 "projected_after"
             ),
@@ -442,6 +443,22 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
         inspected = inspect_declaration(vertex)
         summary = read_summary(vertex)
         page = read_facts(vertex, limit=1)
+        state = read_state(vertex)
+        state_epoch = state.generation.get("runtime_epoch")
+        if not isinstance(state_epoch, dict):
+            raise RehearsalRefused("adopted state lacks runtime-epoch evidence")
+        if args.runtime_epoch == "fresh" and state_epoch != {
+            "mode": "fresh",
+            "anchor_ordinal": a.ordinal,
+        }:
+            raise RehearsalRefused("fresh state epoch does not begin at adoption head")
+        state_sections = json.dumps(
+            state.sections,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
         if (
             verified_a.verified_through != a
             or summary.basis is None
@@ -458,6 +475,10 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
             "summary_basis": None if summary.basis is None else _head(
                 summary.basis.captured_head
             ),
+            "runtime_state": {
+                "runtime_epoch": state_epoch,
+                "sections_sha256": hashlib.sha256(state_sections).hexdigest(),
+            },
         }
 
         evidence["stage"] = "rehearsal-only-emit"
@@ -473,7 +494,7 @@ def run_rehearsal(args: argparse.Namespace) -> dict[str, Any]:
         )
         if not emitted.stored or not emitted.signed or emitted.commit is None:
             raise RehearsalRefused("rehearsal emit lacks a signed custody commit")
-        _verify_rehearsal_emit(vertex, emitted.id, emitted.commit.after, pair.public_b64)
+        _verify_rehearsal_emit(emitted.id, emitted.commit, pair.public_b64)
         synced = sync_target(vertex)
         final_head = emitted.commit.after
         if synced.projected_after != final_head:
@@ -547,6 +568,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--legacy-key-dir", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--observer", required=True)
+    parser.add_argument("--runtime-epoch", choices=("strict", "fresh"), default="strict")
     parser.add_argument("--emit-kind", required=True)
     parser.add_argument("--emit-payload-json", required=True)
     args = parser.parse_args(argv)

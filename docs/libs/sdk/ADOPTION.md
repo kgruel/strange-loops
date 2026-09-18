@@ -89,4 +89,36 @@ predate the adopted declaration, ordinary writes can refuse with
 `BoundaryContinuityRefused`. Migration, adoption, reads and export can succeed
 while writes remain unavailable. The loops real-store rehearsal demonstrated
 this case; do not bypass the continuity check or silently discard those ticks.
-A reviewed boundary cutover policy is separate work.
+To explicitly begin fresh execution state, select the signed adoption policy:
+
+```python
+result = adopt_arrival(
+    target,
+    selected_head=migration.head,
+    reviewed_text=reviewed_text,
+    reviewed_sha256=reviewed_sha256,
+    declaration_text=published_text,
+    observer="project",
+    credentials=mapped_provider,
+    runtime_epoch="fresh",
+)
+```
+
+The default `runtime_epoch="strict"` preserves the existing continuity checks.
+Fresh mode records declaration protocol 2 and the exact signed marker
+`fresh-after-anchor-v1`; older protocol-1 readers refuse it. It starts execution
+folds at their declared initial values, counters at zero, and period context
+without any old tick. Only facts and ticks received after the adoption anchor
+participate in runtime replay and source cadence, regardless of their event
+timestamps. Post-adoption continuity checks remain in force.
+
+`read_state` reflects this execution epoch and includes mode/anchor evidence in
+its generation metadata; aggregate state applies each member's own floor.
+`read_summary`, fact/tick queries and export retain all historical rows. Global
+duplicate-ID checks and physical tick predecessor/window hashes also retain
+all history: starting fresh execution does not reset the custody chain.
+
+Recovery derives the policy from the authenticated reserved draft and exposes
+the recovered `runtime_epoch`; it takes no policy override. An existing adopted
+store cannot be reset by editing its locator or passing a new recovery option.
+Select fresh mode when preparing the explicit adoption of an unadopted copy.

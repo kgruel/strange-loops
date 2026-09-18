@@ -22,7 +22,6 @@ from lang.document import (
     DECL_LENS_DEFINED,
     DECL_SOURCE_DEFINED,
     DECL_VERTEX_DEFINED,
-    DECLARATION_PROTOCOL_VERSION,
     DEFINED_TO_TOMBSTONE,
     is_internal_kind,
 )
@@ -30,8 +29,9 @@ from lang.document import (
 from .arrival_contract import DeclarationAnchor, Fact, Tick
 from .declaration import (
     DeclarationResolutionError,
+    RuntimeEpoch,
     UnadoptedLineage,
-    UnsupportedProtocol,
+    _runtime_epoch_payload,
 )
 
 __all__ = [
@@ -183,12 +183,7 @@ def declaration_document_revisions(
         raise DeclarationResolutionError(
             "own-lineage declaration marker has no matching genesis"
         )
-    protocol = genesis.payload.get("protocol", 1)
-    if protocol > DECLARATION_PROTOCOL_VERSION:
-        raise UnsupportedProtocol(
-            f"genesis protocol {protocol} exceeds supported "
-            f"{DECLARATION_PROTOCOL_VERSION}"
-        )
+    _runtime_epoch_payload(genesis.payload, genesis.arrival_ordinal)
 
     mapped = _document_map(genesis.payload.get("documents", ()))
     revisions = [
@@ -431,6 +426,7 @@ def analyze_boundary_continuity(
     target_documents: Sequence[Mapping[str, Any]],
     verified_params: Mapping[str, Sequence[Mapping[str, str]]] | None = None,
     compiled_loop_names: Collection[str] | None = None,
+    runtime_epoch: RuntimeEpoch | None = None,
 ) -> BoundaryContinuityResult:
     """Validate every owned edge consumed by the target declaration."""
     verified = verified_params or {}
@@ -483,7 +479,21 @@ def analyze_boundary_continuity(
     own_declaration_by_ordinal = {
         fact.arrival_ordinal: fact for fact in own_declaration_facts
     }
-    owned_ticks = tuple(tick for tick in ticks if tick.origin == target.vertex_name)
+    declared_epoch = _runtime_epoch_payload(
+        anchor.genesis.payload, anchor.genesis.arrival_ordinal
+    ) if anchor.genesis is not None else RuntimeEpoch("strict", None)
+    if declared_epoch.mode == "fresh" and runtime_epoch != declared_epoch:
+        raise DeclarationResolutionError(
+            "fresh boundary continuity requires the physically verified runtime epoch"
+        )
+    owned_ticks = tuple(
+        tick for tick in ticks
+        if tick.origin == target.vertex_name
+        and (
+            declared_epoch.start_ordinal is None
+            or tick.arrival_ordinal > declared_epoch.start_ordinal
+        )
+    )
     for tick in owned_ticks:
         if tick.arrival_ordinal in own_declaration_by_ordinal:
             fact = own_declaration_by_ordinal[tick.arrival_ordinal]

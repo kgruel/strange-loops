@@ -227,6 +227,7 @@ def _child_adopt(
     selected: dict[str, Any],
     observer: str,
     phase: str,
+    runtime_epoch: str,
     env: dict[str, str],
 ) -> subprocess.CompletedProcess[str]:
     args = [
@@ -240,6 +241,7 @@ def _child_adopt(
         json.dumps(selected, separators=(",", ":")),
         observer,
         phase,
+        runtime_epoch,
     ]
     return subprocess.run(
         args, text=True, capture_output=True, check=False, env=env, timeout=600
@@ -295,7 +297,7 @@ def _child_adopt_main(values: list[str]) -> int:
     from engine.arrival_contract import Head
     from sdk import MappedCredentialProvider, adopt_arrival
 
-    vertex, root, namespace, reviewed, selected_json, observer, phase = values
+    vertex, root, namespace, reviewed, selected_json, observer, phase, runtime_epoch = values
     selected = Head(**json.loads(selected_json))
     original_apply = adoption.apply_arrival_adoption
 
@@ -319,6 +321,7 @@ def _child_adopt_main(values: list[str]) -> int:
         declaration_text=Path(vertex).read_text(encoding="utf-8"),
         observer=observer,
         credentials=provider,
+        runtime_epoch=runtime_epoch,
     )
     raise AssertionError("adoption did not reach the requested durable stop")
 
@@ -357,6 +360,7 @@ def _child_recover_main(intent_value: str) -> int:
                 "commit_before": _head_json(recovered.commit.before),
                 "commit_after": _head_json(recovered.commit.after),
                 "summary_head": _head_json(summary.basis.captured_head),
+                "runtime_epoch": recovered.runtime_epoch,
             },
             sort_keys=True,
         )
@@ -412,6 +416,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if not isinstance(observer, str) or not observer:
         raise RecoveryRehearsalRefused("observer must be explicit")
     namespace = args.namespace
+    runtime_epoch = adoption.get("runtime_epoch", "strict")
+    if runtime_epoch not in ("strict", "fresh"):
+        raise RecoveryRehearsalRefused("adoption runtime epoch is malformed")
     prefix_size = evidence["migration"]["prefix_byte_count"]
     prefix_hash = evidence["migration"]["prefix_sha256"]
     assert isinstance(prefix_size, int) and isinstance(prefix_hash, str)
@@ -467,6 +474,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             selected,
             observer,
             phase,
+            runtime_epoch,
             _runtime_env(fork),
         )
         if child.returncode != EXIT_DURABLE_STOP:
@@ -499,6 +507,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             or result.get("commit_before") != selected
             or result.get("commit_after") != head
             or result.get("summary_head") != head
+            or result.get("runtime_epoch") != runtime_epoch
         ):
             raise RecoveryRehearsalRefused(
                 "recovery did not report Commit(S,A) and a current summary"
@@ -522,6 +531,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "selected_head": selected,
                 "head": head,
                 "prefix_sha256": prefix_hash,
+                "runtime_epoch": runtime_epoch,
                 "second_recovery_error": json.loads(second.stdout)["error"],
             }
         )
@@ -546,7 +556,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--namespace", default="arrival-rehearsal")
     parser.add_argument(
         "--child-adopt",
-        nargs=7,
+        nargs=8,
         metavar=(
             "VERTEX",
             "ROOT",
@@ -555,6 +565,7 @@ def main(argv: list[str] | None = None) -> int:
             "HEAD",
             "OBSERVER",
             "PHASE",
+            "RUNTIME_EPOCH",
         ),
     )
     parser.add_argument("--child-recover", metavar="INTENT")

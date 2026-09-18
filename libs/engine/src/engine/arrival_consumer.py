@@ -9,9 +9,10 @@ caller receives no append-capable ledger.
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .arrival_contract import (
+    ArrivalLedger,
     Continuation,
     FactPage,
     FactRequest,
@@ -90,6 +91,18 @@ class OpenedRead:
             request=request,
             cursor=page.cursor,
             view_generation=self.basis.view_generation,
+        )
+
+    def runtime_epoch(self):
+        """Return the own signed epoch from this same attested read basis."""
+        from .declaration import runtime_epoch_from_anchor
+
+        anchor = self.snapshot.declaration_anchor
+        genesis = anchor.genesis
+        if genesis is None:
+            return runtime_epoch_from_anchor(anchor)
+        return runtime_epoch_from_anchor(
+            anchor, wire_record=cast(ArrivalLedger, self._ledger).read(genesis.arrival_ordinal)
         )
 
     def close(self) -> None:

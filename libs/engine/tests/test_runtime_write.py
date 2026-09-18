@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -42,6 +44,7 @@ from engine.credentials import (
     ResolvedCredential,
     SigningDomain,
 )
+from engine.declaration import DeclarationResolutionError
 from engine.handle import WriteCredentials
 from engine.loop import Loop
 from engine.peer import Grant
@@ -66,7 +69,7 @@ from engine.vertex import ReservedKindError, Vertex
 
 
 class Snapshot:
-    def __init__(self, head: Head, *, facts=(), ticks=(), documents=()):
+    def __init__(self, head: Head, *, facts=(), ticks=(), documents=(), anchor_ordinal=0):
         self.represented = Watermark(head.lineage, head.ordinal)
         self.view_generation = "test-view"
         self.declaration_anchor = DeclarationAnchor(
@@ -78,9 +81,9 @@ class Snapshot:
                 observer="kyle",
                 origin="",
                 payload={"protocol": 1, "documents": list(documents)},
-                arrival_ordinal=0,
+                arrival_ordinal=anchor_ordinal,
                 arrival_seq=0,
-                payload_text="{}",
+                payload_text=json.dumps({"protocol": 1, "documents": list(documents)}),
             ),
         )
         self._facts = tuple(facts)
@@ -105,6 +108,23 @@ class Snapshot:
 
 def _head() -> Head:
     return Head("lineage", 4, "head-hash")
+
+
+def _fake_declaration_record(snapshot: Snapshot) -> dict:
+    genesis = snapshot.declaration_anchor.genesis
+    assert genesis is not None
+    body = {
+        "id": genesis.id, "kind": genesis.kind, "ts": genesis.ts,
+        "observer": genesis.observer, "origin": genesis.origin,
+        "payload": genesis.payload_text,
+    }
+    if genesis.signature is not None:
+        body["signature"] = genesis.signature
+    return {
+        "k": "fact", "lin": snapshot.declaration_anchor.own_lineage,
+        "ord": genesis.arrival_ordinal, "observer": genesis.observer,
+        "origin": genesis.origin, "body": body,
+    }
 
 
 def _vertex() -> Vertex:
@@ -608,6 +628,44 @@ def test_hydrated_candidate_ignores_stale_runtime_state_and_uses_prior_tick_cont
     assert plan.drafts[1].body["since"] == 3.0
 
 
+def test_public_hydration_requires_physical_fresh_epoch_anchor():
+    head = _head()
+    effective = parse_vertex(
+        'name "effective"\nloops { note { fold { count "inc" } } }\n'
+    )
+    documents = [document.as_json() for document in vertex_to_documents(effective)]
+    before = Fact("before", "note", 1.0, "kyle", "", {"inc": 9}, 2, 0, '{"inc":9}')
+    after = Fact("after", "note", 2.0, "kyle", "", {"inc": 2}, 4, 0, '{"inc":2}')
+    snapshot = Snapshot(head, documents=documents, anchor_ordinal=3)
+    genesis = snapshot.declaration_anchor.genesis
+    assert genesis is not None
+    payload = {
+        "protocol": 2,
+        "documents": documents,
+        "runtime_epoch": "fresh-after-anchor-v1",
+    }
+    genesis = replace(
+        genesis,
+        payload=payload,
+        payload_text=json.dumps(payload, separators=(",", ":")),
+        signature="fact-signature",
+    )
+    snapshot.declaration_anchor = replace(snapshot.declaration_anchor, genesis=genesis)
+    snapshot._facts = (before, genesis, after)
+    basis = ReadBasis(head.lineage, head, head, "test-view")
+    locator = parse_vertex('name "locator"\nloops { note { fold { count "inc" } } }\n')
+
+    with pytest.raises(DeclarationResolutionError, match="physical genesis row"):
+        hydrate_arrival_candidate(snapshot, basis, locator)
+
+    wire = _fake_declaration_record(snapshot)
+    wire["sig"] = "arrival-signature"
+    candidate = hydrate_arrival_candidate(
+        snapshot, basis, locator, wire_genesis_record=wire
+    )
+    assert candidate.state("note") == {"count": 1}
+
+
 @pytest.mark.parametrize(
     "boundary",
     ("", "boundary after=2", "boundary every=2", 'boundary when="close"'),
@@ -801,7 +859,7 @@ def test_supported_prepare_uses_snapshot_policy_and_genesis_custodian(monkeypatc
         'loops { stale { fold { count "inc" } } }\n'
     )
     documents = [document.as_json() for document in vertex_to_documents(effective)]
-    snapshot = Snapshot(head, documents=documents)
+    snapshot = Snapshot(head, documents=documents, anchor_ordinal=1)
     snapshot._facts = (snapshot.declaration_anchor.genesis,)
 
     class FakeLedger:
@@ -813,8 +871,10 @@ def test_supported_prepare_uses_snapshot_policy_and_genesis_custodian(monkeypatc
             return head
 
         def read(self, coordinate):
-            assert coordinate == 0
-            return {"k": "genesis", "observer": "physical-custodian"}
+            return (
+                {"k": "genesis", "observer": "physical-custodian"}
+                if coordinate == 0 else _fake_declaration_record(snapshot)
+            )
 
         def capabilities(self):
             return SimpleNamespace(max_atomic_records=None)
@@ -860,6 +920,7 @@ def test_supported_prepare_admission_refusal_retains_snapshot_preview_evidence(
     snapshot = Snapshot(
         head,
         documents=[document.as_json() for document in vertex_to_documents(effective)],
+        anchor_ordinal=1,
     )
     snapshot._facts = (snapshot.declaration_anchor.genesis,)
 
@@ -871,7 +932,10 @@ def test_supported_prepare_admission_refusal_retains_snapshot_preview_evidence(
             return head
 
         def read(self, coordinate):
-            return {"k": "genesis", "observer": "physical-custodian"}
+            return (
+                {"k": "genesis", "observer": "physical-custodian"}
+                if coordinate == 0 else _fake_declaration_record(snapshot)
+            )
 
         def capabilities(self):
             return SimpleNamespace(max_atomic_records=None)
@@ -912,11 +976,12 @@ def test_supported_prepare_deduplicates_before_removed_observer_admission(monkey
         'loops { current { fold { count "inc" } } }\n'
     )
     locator = parse_vertex('name "locator"\nloops { stale { fold { count "inc" } } }\n')
-    existing = Fact("retry", "current", 1.0, "removed", "", {}, 1, 0, "{}", None)
+    existing = Fact("retry", "current", 1.0, "removed", "", {}, 2, 0, "{}", None)
     snapshot = Snapshot(
         head,
         facts=(existing,),
         documents=[document.as_json() for document in vertex_to_documents(effective)],
+        anchor_ordinal=1,
     )
     snapshot._facts = (snapshot.declaration_anchor.genesis, existing)
 
@@ -928,7 +993,10 @@ def test_supported_prepare_deduplicates_before_removed_observer_admission(monkey
             return head
 
         def read(self, coordinate):
-            return {"k": "genesis", "observer": "physical-custodian"}
+            return (
+                {"k": "genesis", "observer": "physical-custodian"}
+                if coordinate == 0 else _fake_declaration_record(snapshot)
+            )
 
         def capabilities(self):
             return SimpleNamespace(max_atomic_records=None)
@@ -1345,6 +1413,7 @@ def test_supported_batch_prepares_two_facts_as_one_wire_batch(monkeypatch):
     snapshot = Snapshot(
         head,
         documents=[document.as_json() for document in vertex_to_documents(effective)],
+        anchor_ordinal=1,
     )
     snapshot._facts = (snapshot.declaration_anchor.genesis,)
 
@@ -1356,7 +1425,10 @@ def test_supported_batch_prepares_two_facts_as_one_wire_batch(monkeypatch):
             return head
 
         def read(self, coordinate):
-            return {"k": "genesis", "observer": "custodian"}
+            return (
+                {"k": "genesis", "observer": "custodian"}
+                if coordinate == 0 else _fake_declaration_record(snapshot)
+            )
 
         def capabilities(self):
             return SimpleNamespace(max_atomic_records=None)

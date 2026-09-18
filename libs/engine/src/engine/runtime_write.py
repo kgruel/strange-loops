@@ -12,7 +12,7 @@ from __future__ import annotations
 import copy
 import json
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -396,6 +396,8 @@ class RuntimeCapture:
     _declaration_documents: tuple[dict[str, Any], ...] = field(repr=False, compare=False)
     _facts: tuple[SnapshotFact, ...] = field(repr=False, compare=False)
     _ticks: tuple[SnapshotTick, ...] = field(repr=False, compare=False)
+    _runtime_facts: tuple[SnapshotFact, ...] = field(repr=False, compare=False)
+    _runtime_ticks: tuple[SnapshotTick, ...] = field(repr=False, compare=False)
     _candidate_template: Vertex = field(repr=False, compare=False)
     _post_boundary_candidate_template: Vertex | None = field(
         default=None, repr=False, compare=False
@@ -427,6 +429,11 @@ class RuntimeCapture:
     @property
     def ticks(self) -> tuple[SnapshotTick, ...]:
         return copy.deepcopy(self._ticks)
+
+    @property
+    def runtime_facts(self) -> tuple[SnapshotFact, ...]:
+        """Facts eligible to establish the current runtime epoch's state."""
+        return copy.deepcopy(self._runtime_facts)
 
     @property
     def sources(self) -> tuple[Any, ...]:
@@ -875,11 +882,14 @@ def _build_effective_arrival_candidate(
     locator: VertexFile,
     *,
     fold_overrides: dict[str, FoldOverride] | None = None,
+    wire_genesis_record: Mapping[str, Any] | None = None,
 ) -> tuple[
     Vertex,
     VertexFile,
     tuple[dict[str, Any], ...],
     tuple[Any, ...],
+    tuple[SnapshotFact, ...],
+    tuple[SnapshotTick, ...],
     tuple[SnapshotFact, ...],
     tuple[SnapshotTick, ...],
 ]:
@@ -936,8 +946,22 @@ def _build_effective_arrival_candidate(
         from .executor import validate_dependency_graph
 
         validate_dependency_graph(sources)
-    runtime_ticks = tuple(snapshot.ticks(TickRequest()))
-    continuity_ticks = tuple(snapshot.ticks(TickRequest(since=float("-inf"))))
+    all_ticks = tuple(snapshot.ticks(TickRequest(since=float("-inf"))))
+    continuity_ticks = all_ticks
+    from .declaration import runtime_epoch_from_anchor
+
+    anchor = snapshot.declaration_anchor
+    runtime_epoch = runtime_epoch_from_anchor(anchor, wire_record=wire_genesis_record)
+    runtime_facts = tuple(
+        fact for fact in facts
+        if runtime_epoch.start_ordinal is None
+        or fact.arrival_ordinal > runtime_epoch.start_ordinal
+    )
+    runtime_ticks = tuple(
+        tick for tick in all_ticks
+        if runtime_epoch.start_ordinal is None
+        or tick.arrival_ordinal > runtime_epoch.start_ordinal
+    )
     from .arrival_boundary_continuity import (
         BoundaryContinuityConflict,
         analyze_boundary_continuity,
@@ -958,6 +982,7 @@ def _build_effective_arrival_candidate(
             target_documents=documents,
             verified_params=verified_params,
             compiled_loop_names=set(specs) | {"cite"},
+            runtime_epoch=runtime_epoch,
         )
     except BoundaryContinuityConflict as exc:
         raise BoundaryContinuityRefused(
@@ -980,13 +1005,15 @@ def _build_effective_arrival_candidate(
         template_specs=template_specs or None,
     )
     candidate = materialize_vertex(compiled, fold_overrides=fold_overrides, attach_store=False)
-    candidate.hydrate_snapshot(facts, runtime_ticks)
+    candidate.hydrate_snapshot(runtime_facts, runtime_ticks)
     return (
         candidate,
         effective,
         tuple(copy.deepcopy(documents)),
         tuple(copy.deepcopy(sources)),
         tuple(copy.deepcopy(facts)),
+        tuple(copy.deepcopy(all_ticks)),
+        tuple(copy.deepcopy(runtime_facts)),
         tuple(copy.deepcopy(runtime_ticks)),
     )
 
@@ -997,10 +1024,15 @@ def _hydrate_effective_arrival_candidate(
     locator: VertexFile,
     *,
     fold_overrides: dict[str, FoldOverride] | None = None,
+    wire_genesis_record: Mapping[str, Any] | None = None,
 ) -> tuple[Vertex, VertexFile]:
-    candidate, effective, _documents, _sources, _facts, _ticks = (
+    candidate, effective, _documents, _sources, _facts, _ticks, _runtime_facts, _runtime_ticks = (
         _build_effective_arrival_candidate(
-            snapshot, basis, locator, fold_overrides=fold_overrides
+            snapshot,
+            basis,
+            locator,
+            fold_overrides=fold_overrides,
+            wire_genesis_record=wire_genesis_record,
         )
     )
     return candidate, effective
@@ -1012,10 +1044,15 @@ def hydrate_arrival_candidate(
     locator: VertexFile,
     *,
     fold_overrides: dict[str, FoldOverride] | None = None,
+    wire_genesis_record: Mapping[str, Any] | None = None,
 ) -> Vertex:
     """Build the supported storeless candidate from this bounded snapshot."""
     candidate, _effective = _hydrate_effective_arrival_candidate(
-        snapshot, basis, locator, fold_overrides=fold_overrides
+        snapshot,
+        basis,
+        locator,
+        fold_overrides=fold_overrides,
+        wire_genesis_record=wire_genesis_record,
     )
     return candidate
 
@@ -1079,7 +1116,7 @@ def plan_ordinary_write(
     # the chain calculation: window membership is coordinates, never a
     # backend's event-time or identifier presentation order.
     facts = tuple(sorted(facts, key=lambda row: (row.arrival_ordinal, row.arrival_seq)))
-    ticks = snapshot.ticks(TickRequest())
+    ticks = snapshot.ticks(TickRequest(since=float("-inf")))
     chosen_id = fact_id if fact_id is not None else str(ULID())
     payload_text = _payload_text(fact.payload)
     inner_signature = _author_signature(
@@ -1233,15 +1270,21 @@ def capture_runtime(
             captured_head=captured, requirement=ProjectionRequirement.CURRENT
         )
         basis = _current_write_basis(ledger, snapshot, captured)
-        candidate, effective, documents, sources, facts, ticks = (
+        candidate, effective, documents, sources, facts, ticks, runtime_facts, runtime_ticks = (
             _build_effective_arrival_candidate(
-                snapshot, basis, locator, fold_overrides=fold_overrides
+                snapshot, basis, locator, fold_overrides=fold_overrides,
+                wire_genesis_record=(
+                    None if snapshot.declaration_anchor.genesis is None
+                    else ledger.read(snapshot.declaration_anchor.genesis.arrival_ordinal)
+                ),
             )
         )
         at = time.time() if evaluated_at is None else evaluated_at
         post_boundary_candidate = candidate.detached_copy() if source_mode else None
         pending = (
-            post_boundary_candidate.plan_pending_boundaries(facts, ticks, evaluated_at=at)
+            post_boundary_candidate.plan_pending_boundaries(
+                runtime_facts, runtime_ticks, evaluated_at=at
+            )
             if post_boundary_candidate is not None
             else ()
         )
@@ -1311,6 +1354,8 @@ def capture_runtime(
             _declaration_documents=copy.deepcopy(documents),
             _facts=copy.deepcopy(facts),
             _ticks=copy.deepcopy(ticks),
+            _runtime_facts=copy.deepcopy(runtime_facts),
+            _runtime_ticks=copy.deepcopy(runtime_ticks),
             _candidate_template=candidate.detached_copy(),
             _post_boundary_candidate_template=(
                 None

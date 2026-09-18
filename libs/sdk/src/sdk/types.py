@@ -7,7 +7,7 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from engine.arrival_contract import Commit, Continuation, Head, ReadBasis, StoreDescriptor
 
@@ -1072,6 +1072,7 @@ class ArrivalAdoptionResult:
     projection: dict[str, Any] | None = None
     credential_bindings: list[dict[str, Any]] = field(default_factory=list)
     observed_head: Head | None = None
+    runtime_epoch: Literal["strict", "fresh"] = "strict"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -1094,6 +1095,7 @@ class ArrivalAdoptionResult:
             "projection": _as_serializable(self.projection),
             "credential_bindings": _as_serializable(self.credential_bindings),
             "observed_head": None if self.observed_head is None else asdict(self.observed_head),
+            "runtime_epoch": self.runtime_epoch,
         }
 
 

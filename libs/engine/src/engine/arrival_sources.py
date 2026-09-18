@@ -504,7 +504,7 @@ def prepare_source_invocation(
             index,
             source,
             cadence,
-            capture.facts,
+            capture.runtime_facts,
             evaluated_at=capture.evaluated_at,
             force=force,
         )

@@ -14,6 +14,13 @@ from typing import Any
 
 from engine.admission import AdmissionError
 from engine.arrival import ArrivalError
+from engine.arrival_adoption import (
+    AdoptionCommittedIncomplete,
+    AdoptionOutcomeUnknown,
+    AdoptionRecoveryRequired,
+    AdoptionStale,
+    AdoptionUnwitnessed,
+)
 from engine.arrival_contract import ContractRefusal
 from engine.arrival_declarations import (
     DeclarationCommittedIncomplete,
@@ -464,19 +471,22 @@ def normalize_exception(
         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
     if isinstance(exc, InitializationOutcomeUnknown):
         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
-    if isinstance(exc, (DeclarationOutcomeUnknown, RestoreForwardUnknown)):
+    if isinstance(exc, (AdoptionOutcomeUnknown, DeclarationOutcomeUnknown, RestoreForwardUnknown)):
         return CommittedOutcomeUnknown(str(exc), source_type=type(exc).__name__, details=details)
     if isinstance(exc, InitializationUnwitnessed):
         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
-    if isinstance(exc, DeclarationUnwitnessed):
+    if isinstance(exc, (AdoptionUnwitnessed, DeclarationUnwitnessed)):
         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
     if isinstance(exc, InitializationCommittedIncomplete):
         return CommittedIncomplete(str(exc), source_type=type(exc).__name__, details=details)
-    if isinstance(exc, (DeclarationCommittedIncomplete, RestoreForwardIncomplete)):
+    if isinstance(
+        exc,
+        (AdoptionCommittedIncomplete, DeclarationCommittedIncomplete, RestoreForwardIncomplete),
+    ):
         return CommittedIncomplete(str(exc), source_type=type(exc).__name__, details=details)
     if isinstance(exc, NotWitnessed):
         return CommittedUnwitnessed(str(exc), source_type=type(exc).__name__, details=details)
-    if isinstance(exc, DeclarationStale):
+    if isinstance(exc, (AdoptionRecoveryRequired, AdoptionStale, DeclarationStale)):
         return ArrivalRefusal(str(exc), source_type=type(exc).__name__, details=details)
     if isinstance(exc, BatchPostCommitProjectionFailed):
         return CommittedProjectionFailed(str(exc), source_type=type(exc).__name__, details=details)

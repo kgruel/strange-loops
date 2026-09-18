@@ -1,0 +1,68 @@
+# Adopt a migrated Arrival declaration
+
+`sdk.adopt_arrival` appends the declaration anchor that makes a migrated
+Arrival history usable by ordinary SDK reads and writes. It preserves the
+migration prefix and uses the existing physical lineage. Fresh stores use
+`init_vertex`; stores with an adopted declaration use `edit_declaration`.
+
+The caller supplies two distinct snapshots:
+
+- `reviewed_text` and its `reviewed_sha256`: exact declaration bytes selected
+  for adoption, such as the copied legacy vertex used for migration.
+- `declaration_text`: the current published vertex, naming an explicit backend,
+  physical lineage, and authority role.
+
+Their declaration documents must agree apart from residence. This first
+operation cannot introduce or replace observer keys, or adopt a changed
+declaration as an incidental part of migration. It checks the selected head,
+registry-forming signatures, declaration identities and captured observer keys
+before signing the new anchor.
+
+```python
+from sdk import adopt_arrival
+
+# Keep these snapshots and the report verification receipt from the offline
+# migration workflow. Verify its report at selected_head BEFORE adoption.
+result = adopt_arrival(
+    published_vertex,
+    selected_head=migration.head,
+    reviewed_text=reviewed_text,
+    reviewed_sha256=reviewed_sha256,
+    declaration_text=published_vertex.read_text(encoding="utf-8"),
+    observer="alice",
+    credentials=mapped_provider,
+)
+receipt = result.as_dict()
+```
+
+The mapped binding must already exist and match the observer's captured key
+history. Adoption resolves distinct FACT and ARRIVAL authorship requests;
+neither lookup creates keys nor falls back to legacy credentials. The result
+retains the adoption commit, projection outcome and public binding evidence.
+Migration report verification remains the offline caller's responsibility;
+the report's live-head comparison no longer applies after adoption advances
+the history.
+
+Before appending, the operation durably reserves the exact signed draft in
+`<vertex>.arrival-adopt.intent`. If interrupted, retain the intent and the
+typed error's commit/head evidence, then reconcile explicitly:
+
+```python
+from sdk import recover_arrival_adoption
+
+recovered = recover_arrival_adoption(intent_path)
+```
+
+Recovery requires no signing credentials. It either appends the reserved draft
+at its original predecessor or recognizes that exact draft at its expected
+ordinal, synchronizes the projection and checks the published cache. It does
+not re-sign or append a duplicate. If later records exist, `head` still names
+the adoption head; `observed_head` records the later tip. A reconstructed commit
+labels its durability evidence as recovery evidence rather than claiming the
+original append receipt was retained.
+
+The operation reconciles the already-published cache without rewriting it.
+A changed cache or a post-append projection failure leaves a recovery boundary;
+a durable append is not rolled back. Process-exit tests cover reservation and
+append boundaries, not arbitrary power loss. Live writer coordination and a
+representative user-store rehearsal remain separate from this SDK operation.

@@ -40,6 +40,7 @@ __all__ = [
     "recover_arrival_initialization",
     "arrival_intent_path",
     "new_lineage",
+    "build_declaration_anchor_draft",
 ]
 
 _INTENT_SCHEMA = "loops.engine/arrival-init-intent/v1"
@@ -270,7 +271,7 @@ def _descriptor_from(data: Mapping[str, Any]) -> StoreDescriptor:
     )
 
 
-def _draft(
+def build_declaration_anchor_draft(
     *,
     lineage: str,
     authored_at: float,
@@ -554,7 +555,7 @@ def initialize_arrival(
         public_key, genesis_signature, genesis_digest
     ):
         raise InitializationConflict("founding genesis signer does not match the public key")
-    draft = _draft(
+    draft = build_declaration_anchor_draft(
         lineage=chosen_lineage,
         authored_at=at,
         observer=observer,

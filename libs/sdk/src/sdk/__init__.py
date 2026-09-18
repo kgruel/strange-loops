@@ -5,6 +5,7 @@ Provides high-level, transport-agnostic read, emit, and kind mutation operations
 returning typed result models.
 """
 
+from .adopt import adopt_arrival, recover_arrival_adoption
 from .declare import (
     DeclarationEditResult,
     DeclarationPreviewResult,
@@ -62,6 +63,7 @@ from .transfer import (
 )
 from .types import (
     AdmissionFailed,
+    ArrivalAdoptionResult,
     ArrivalTarget,
     BatchEmitResult,
     CeremonyFailed,
@@ -121,6 +123,8 @@ __all__ = [
     "inspect_declaration",
     "edit_declaration",
     "recover_declaration",
+    "adopt_arrival",
+    "recover_arrival_adoption",
     "read_summary",
     "read_facts",
     "read_state",
@@ -151,6 +155,7 @@ __all__ = [
     "ExportResult",
     "RestoreForwardResult",
     "ArrivalTarget",
+    "ArrivalAdoptionResult",
     "StoreDescriptorInfo",
     "InitVertexResult",
     "DeclarationInspectionResult",

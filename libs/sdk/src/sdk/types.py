@@ -1045,6 +1045,59 @@ class InitVertexResult:
 
 
 @dataclass(frozen=True)
+class ArrivalAdoptionResult:
+    """Outcome of explicitly anchoring a reviewed declaration at one head.
+
+    The reviewed declaration and any migration report remain caller-owned
+    evidence.  This result records only the Arrival append and reconciliation
+    coordinates needed to recover that operation.
+    """
+
+    schema: str = "loops.sdk/arrival-adoption/v1"
+    status: str = ""
+    read_path: str = "arrival"
+    target_path: str = ""
+    store: StoreDescriptorInfo | None = None
+    basis: ReadBasis | None = None
+    lineage: str | None = None
+    captured_head: Head | None = None
+    head: Head | None = None
+    commit: Commit | None = None
+    fact_id: str | None = None
+    intent_path: str | None = None
+    phase: str = ""
+    file_written: bool = False
+    reviewed_sha256: str | None = None
+    declaration_sha256: str | None = None
+    projection: dict[str, Any] | None = None
+    credential_bindings: list[dict[str, Any]] = field(default_factory=list)
+    observed_head: Head | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "status": self.status,
+            "read_path": self.read_path,
+            "target_path": self.target_path,
+            "store": None if self.store is None else asdict(self.store),
+            "basis": None if self.basis is None else asdict(self.basis),
+            "lineage": self.lineage,
+            "captured_head": None if self.captured_head is None else asdict(self.captured_head),
+            "head": None if self.head is None else asdict(self.head),
+            "commit": _commit_dict(self.commit),
+            "fact_id": self.fact_id,
+            "intent_path": self.intent_path,
+            "phase": self.phase,
+            "file_written": self.file_written,
+            "reviewed_sha256": self.reviewed_sha256,
+            "declaration_sha256": self.declaration_sha256,
+            "projection": _as_serializable(self.projection),
+            "credential_bindings": _as_serializable(self.credential_bindings),
+            "observed_head": None if self.observed_head is None else asdict(self.observed_head),
+        }
+
+
+@dataclass(frozen=True)
 class DeclarationInspectionResult:
     """Root declaration evidence without aggregate-member capture.
 

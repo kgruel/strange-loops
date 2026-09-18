@@ -61,6 +61,7 @@ _SCAN_TARGETS = (
     # and widening it to guess at custody would make it a verdict claim.
     "libs/engine/src/engine/admission.py",
     "libs/engine/src/engine/arrival.py",
+    "libs/engine/src/engine/arrival_adoption.py",
     # Wire v1 (slice 1) forked the arrival body encoding out of the legacy
     # line codec. `arrival_body` is NEW and born on the arrival surface, so
     # it joins at birth — the same trigger `arrival_projection` joined on.

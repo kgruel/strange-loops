@@ -7,15 +7,24 @@ runtime or test dependency.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from custody.signing import ARRIVAL_DOMAIN, FACT_DOMAIN
 from engine.arrival_contract import Full
 from engine.arrival_registry import BackendRegistry, descriptor_for
-from engine.credentials import WriteCredentials
+from engine.credentials import (
+    CredentialPurpose,
+    CredentialRequest,
+    SigningDomain,
+    WriteCredentials,
+)
 from lang import parse_vertex_file
 from migrate.sidecar import run_migration, verify_migration_report
 from sdk import (
@@ -294,3 +303,241 @@ def test_migrated_descriptor_reaches_public_sdk_boundary(
     assert outcome.target_path.read_bytes() == ledger_before_refusals
     assert vertex.read_bytes() == descriptor_before_refusals
     assert source.read_bytes() == source_before
+
+
+@pytest.mark.parametrize("source_format", ["jsonl", "sqlite"])
+def test_copied_migration_adoption_and_mapped_write(
+    tmp_path: Path, source_format: str
+) -> None:
+    """Rehearse the explicit source-copy -> migration -> adoption boundary.
+
+    All originals here are synthetic. SQLite is copied through its backup API;
+    the quiescent JSONL fixture is copied byte-for-byte. Report verification is
+    deliberately performed at S, before adoption advances the ledger.
+    """
+    from sdk import MappedCredentialProvider, adopt_arrival, export_target, read_state
+
+    original = tmp_path / "original"
+    (original / "data").mkdir(parents=True)
+    source = original / "data" / f"legacy.{source_format}"
+    (_write_jsonl if source_format == "jsonl" else _write_sqlite)(source)
+    provider = MappedCredentialProvider(
+        tmp_path / "rehearsal-credentials",
+        namespace="adoption-rehearsal",
+        receipt_observer="alice",
+    )
+    binding = provider.create_binding("alice", token="rehearsal-alice")
+    original_vertex = original / "alice.vertex"
+    _write_vertex(original_vertex, binding.public_key, source.name)
+    original_bytes = source.read_bytes()
+    reviewed_bytes = original_vertex.read_bytes()
+    reviewed_hash = hashlib.sha256(reviewed_bytes).hexdigest()
+
+    rehearsal = tmp_path / "rehearsal"
+    (rehearsal / "data").mkdir(parents=True)
+    copied_source = rehearsal / "data" / source.name
+    if source_format == "sqlite":
+        with sqlite3.connect(source) as src, sqlite3.connect(copied_source) as dst:
+            src.backup(dst)
+    else:
+        shutil.copyfile(source, copied_source)
+    vertex = rehearsal / "alice.vertex"
+    vertex.write_bytes(reviewed_bytes)
+    copied_bytes = copied_source.read_bytes()
+    registry_binding = provider.resolve(CredentialRequest(
+        provider.namespace, "alice", SigningDomain.ARRIVAL,
+        CredentialPurpose.INITIALIZATION,
+    ))
+    assert registry_binding is not None
+
+    def migration_signer(observer: str, digest: str) -> str:
+        assert observer == "alice"
+        return registry_binding.sign_digest(digest)
+
+    migrated = run_migration(
+        copied_source, vertex, store_dir=rehearsal / "data", signer=migration_signer,
+    )
+    assert verify_migration_report(
+        migrated.report_path, binding.public_key, verify=_verifier,
+        target_path=migrated.target_path,
+    )
+    report_bytes = migrated.report_path.read_bytes()
+    # External provenance stays outside the declaration's protocol payload.
+    evidence = {
+        "reviewed_sha256": reviewed_hash,
+        "report_sha256": hashlib.sha256(report_bytes).hexdigest(),
+        "report_verified_at": migrated.head.record_hash,
+    }
+    prefix = migrated.target_path.read_bytes()
+    descriptor = resolve_arrival_target(vertex).store
+    published_text = vertex.read_text(encoding="utf-8")
+    sync_target(vertex)
+    with pytest.raises(SdkError, match="adopted declaration|historized"):
+        read_summary(vertex)
+
+    # A caller cannot silently pass revised bytes under the reviewed hash.
+    with pytest.raises(SdkError):
+        adopt_arrival(
+            vertex, selected_head=migrated.head,
+            reviewed_text=reviewed_bytes.decode() + "\n// unreviewed\n",
+            reviewed_sha256=reviewed_hash, declaration_text=published_text,
+            observer="alice", credentials=provider,
+        )
+    assert migrated.target_path.read_bytes() == prefix
+
+    adopted = adopt_arrival(
+        vertex, selected_head=migrated.head, reviewed_text=reviewed_bytes.decode(),
+        reviewed_sha256=reviewed_hash, declaration_text=published_text,
+        observer="alice", credentials=provider,
+    )
+    assert adopted.commit is not None
+    assert adopted.commit.before == migrated.head
+    assert adopted.head == adopted.commit.after
+    assert adopted.head.ordinal == migrated.head.ordinal + 1
+    assert adopted.fact_id == migrated.lineage
+    assert resolve_arrival_target(vertex).store == descriptor
+    after_adoption = migrated.target_path.read_bytes()
+    assert after_adoption.startswith(prefix)
+    assert len(after_adoption.splitlines()) == len(prefix.splitlines()) + 1
+    assert migrated.report_path.read_bytes() == report_bytes
+    assert hashlib.sha256(report_bytes).hexdigest() == evidence["report_sha256"]
+
+    for result in (
+        inspect_declaration(vertex), read_summary(vertex), read_facts(vertex),
+        read_ticks(vertex), read_state(vertex),
+    ):
+        assert result.basis is not None
+        assert result.basis.captured_head == adopted.head
+        json.dumps(result.as_dict(), allow_nan=False)
+    facts = read_facts(vertex, include_internal=True, order="oldest", limit=100)
+    anchors = [row for row in facts.items if row["kind"] == "_decl.genesis"]
+    assert len(anchors) == 1 and anchors[0]["id"] == migrated.lineage
+    original_fact = read_fact_by_id(vertex, "01ARZ3NDEKTSV4RRFFQ69G5FA0")
+    assert original_fact.fact is not None
+
+    receipt = emit_fact(
+        vertex, "concept", {"text": "after adoption"}, observer="alice",
+        id_override="adoption-rehearsal-followup", credentials=provider,
+    )
+    assert receipt.stored and receipt.signed and receipt.witnessed
+    assert receipt.commit is not None and receipt.commit.before == adopted.head
+    final = verify_target(vertex)
+    assert final.verified_through == receipt.commit.after
+    exported = rehearsal / "captured.jsonl"
+    export = export_target(vertex, exported)
+    assert export.head == receipt.commit.after
+    assert exported.read_bytes() == migrated.target_path.read_bytes()
+    for result in (adopted, receipt, final, export):
+        json.dumps(result.as_dict(), allow_nan=False)
+    assert source.read_bytes() == original_bytes
+    assert original_vertex.read_bytes() == reviewed_bytes
+    assert copied_source.read_bytes() == copied_bytes
+
+
+@pytest.mark.parametrize("stop_phase", ["after-intent", "after-append"])
+def test_adoption_process_exit_recovers_reserved_draft_without_credentials(
+    tmp_path: Path, stop_phase: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exit a real child process at a durable boundary, then reconcile once."""
+    from sdk import MappedCredentialProvider, recover_arrival_adoption
+
+    data = tmp_path / "data"
+    data.mkdir()
+    source = data / "legacy.jsonl"
+    _write_jsonl(source)
+    provider = MappedCredentialProvider(
+        tmp_path / "credentials", namespace="interrupted-adoption", receipt_observer="alice",
+    )
+    created = provider.create_binding("alice", token="create-alice")
+    vertex = tmp_path / "alice.vertex"
+    _write_vertex(vertex, created.public_key, source.name)
+    reviewed = vertex.read_text()
+    signed = provider.resolve(CredentialRequest(
+        provider.namespace, "alice", SigningDomain.ARRIVAL, CredentialPurpose.INITIALIZATION,
+    ))
+    assert signed is not None
+    migrated = run_migration(
+        source, vertex, store_dir=data, signer=lambda _observer, digest: signed.sign_digest(digest),
+    )
+    prefix = migrated.target_path.read_bytes()
+    script = r'''
+import hashlib, json, os, sys
+from pathlib import Path
+import engine.arrival_adoption as engine_adoption
+from engine.arrival_contract import Head
+from sdk import MappedCredentialProvider, adopt_arrival
+target, root, namespace, reviewed, head_json, stop = sys.argv[1:]
+original_apply = engine_adoption.apply_arrival_adoption
+def stop_at(phase):
+    if phase == stop:
+        os._exit(86)
+def interrupted(registry, plan):
+    return original_apply(registry, plan, failure_hook=stop_at)
+engine_adoption.apply_arrival_adoption = interrupted
+provider = MappedCredentialProvider(Path(root), namespace=namespace, receipt_observer="alice")
+adopt_arrival(
+    target, selected_head=Head(**json.loads(head_json)), reviewed_text=reviewed,
+    reviewed_sha256=hashlib.sha256(reviewed.encode()).hexdigest(),
+    declaration_text=Path(target).read_text(), observer="alice", credentials=provider,
+)
+raise AssertionError("durable stop phase was not reached")
+'''
+    run = subprocess.run(
+        [sys.executable, "-c", script, str(vertex), str(provider.root), provider.namespace,
+         reviewed, json.dumps({"lineage": migrated.head.lineage,
+                               "ordinal": migrated.head.ordinal,
+                               "record_hash": migrated.head.record_hash}), stop_phase],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert run.returncode == 86, run.stderr
+    intent = vertex.with_name(vertex.name + ".arrival-adopt.intent")
+    assert intent.exists()
+    reserved = json.loads(intent.read_text())["drafts"][0]
+    before_recovery = migrated.target_path.read_bytes()
+    expected_extra = 1 if stop_phase == "after-append" else 0
+    assert len(before_recovery.splitlines()) == len(prefix.splitlines()) + expected_extra
+
+    # Recovery cannot depend on the original private-key location or provider.
+    provider.root.rename(tmp_path / "credentials-offline")
+    def refuse_credentials(*_args, **_kwargs):
+        raise AssertionError("recovery resolved signing credentials")
+    monkeypatch.setattr(MappedCredentialProvider, "for_write", refuse_credentials)
+    monkeypatch.setattr(MappedCredentialProvider, "resolve", refuse_credentials)
+    authentic_intent = intent.read_bytes()
+    for mutation in ("binding", "inner-signature", "outer-signature"):
+        changed = json.loads(authentic_intent)
+        if mutation == "binding":
+            changed["bindings"][0]["public_key"] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        elif mutation == "inner-signature":
+            changed["drafts"][0]["body"]["signature"] = "bogus"
+        else:
+            changed["drafts"][0]["signature"] = "bogus"
+        # Keep the duplicate draft representations consistent: consistency
+        # alone must not stand in for signature and captured-key verification.
+        changed["exact_drafts"] = json.dumps(
+            changed["drafts"], ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        )
+        intent.write_text(json.dumps(changed))
+        with pytest.raises(SdkError):
+            recover_arrival_adoption(intent)
+        assert migrated.target_path.read_bytes() == before_recovery
+        assert intent.exists()
+    intent.write_bytes(authentic_intent)
+    recovered = recover_arrival_adoption(intent)
+    assert recovered.head is not None
+    assert recovered.head.ordinal == migrated.head.ordinal + 1
+    assert recovered.captured_head == migrated.head
+    assert recovered.commit is not None
+    assert recovered.commit.before == migrated.head
+    assert recovered.commit.after == recovered.head
+    final = migrated.target_path.read_bytes()
+    assert final.startswith(prefix)
+    assert len(final.splitlines()) == len(prefix.splitlines()) + 1
+    record = json.loads(final.splitlines()[-1])
+    assert record["body"] == reserved["body"]
+    assert record["sig"] == reserved["signature"]
+    assert not intent.exists()
+    assert read_summary(vertex).basis.captured_head == recovered.head
+    with pytest.raises(SdkError):
+        recover_arrival_adoption(intent)
+    assert migrated.target_path.read_bytes() == final

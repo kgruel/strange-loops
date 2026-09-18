@@ -1,3 +1,58 @@
+## September 18: explicit declaration adoption accepted
+
+The tested Atlas guide and its existing review receipts are checkpointed in
+**870095a7** on `arrival/finish`; nothing pushed. Its six Bash blocks still
+match the saved executed script. Archived prompt whitespace was preserved;
+maintained guide/reference/handoff files passed the whitespace check.
+
+Completed bounded slice: explicit append-forward declaration adoption and
+recovery, mapped SDK composition, and synthetic JSONL/SQLite copy rehearsals.
+Sol implemented engine preparation, signing, intent and recovery; Terra
+implemented SDK composition/results/errors; Luna independently reviewed the
+contract and failure cases; root integrated acceptance tests and handoff.
+
+The caller selects exact reviewed declaration bytes and their SHA-256 separately
+from the published authority descriptor. This slice requires their declaration
+meaning to agree apart from residence. It introduces no observer keys, report
+signature domain change, or on-ledger migration provenance format. Migration
+report verification remains external and occurs at selected head S before
+adoption. A representative user-store rehearsal and live cutover remain later
+work; all tests in this slice use synthetic isolated stores and credentials.
+
+The new `adopt_arrival` and `recover_arrival_adoption` SDK operations are
+implemented and accepted. Recovery works without private credentials, preserves
+the exact adoption Commit(S,A), and keeps a later observed tip distinct. Initial
+review found that self-consistent modified intent evidence/signatures could be
+accepted; recovery now repeats Full(S), registry/document/binding validation
+and public FACT/ARRIVAL verification. Luna reran both probes: fixed, no remaining
+blockers. Primary acceptance agrees.
+
+Final validation: full engine **2,627 passed, 1 skipped**; full SDK **604 passed**;
+repository architecture/integration **107 passed** (includes six migration
+boundary workloads); migration library **74 passed**; minimal CLI **30 passed**.
+Scoped engine/SDK type checks, Ruff and whitespace checks pass. The migration
+and CLI suite runs preceded the narrow recovery-authentication correction;
+engine/SDK and repository checks include it. Counts overlap and are not a
+single unique-test total.
+
+The synthetic JSONL/SQLite copy workloads prove report verification at S,
+unchanged prefix/source bytes, adoption, ordinary reads, signed/witnessed mapped
+writes and exact export. Real subprocess exits after durable intent and append
+recover once with the credential directory offline. Self-consistent tampered
+binding/inner-signature/outer-signature intents refuse without appending; restored
+authentic intents recover. No arbitrary power-loss guarantee is claimed.
+
+See [implementation report](adoption-implementation-2026-09-18.md),
+[final review](adoption-review-2026-09-18.md), and
+[SDK usage](../../libs/sdk/ADOPTION.md).
+
+Next: build the reusable offline copy-rehearsal workflow and select a
+representative store for an isolated rehearsal. Live writer coordination,
+source CLI transition, legacy retirement, live adoption and release remain
+open. No live stores or credentials were changed. Nothing pushed or merged.
+
+Earlier entries below preserve their status at the time of writing.
+
 ## September 7: Atlas greenfield CLI guide tested and accepted
 
 Checkpoint **d4e5792d** committed both prior accepted slices (setup/recovery and

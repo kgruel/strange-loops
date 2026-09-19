@@ -1,0 +1,24 @@
+{
+  "head": "301c350e7bbd3eafa6c874d82e31ef9e2cf8d6c7",
+  "baseline": "301c350e",
+  "sources": {
+    "tests/test_legacy_provenance_review.py": "f8d4dd72ac6bf46ab6efb4b6a4d632e4851ac032006bba3e0cb313273e9eef49",
+    "docs/scratch/arrival-break/reviews/legacy-provenance-fable-2026-09-18/findings.md": "8d17ab7153f6a6874a934d44eaf72ac943eed7375208511051386bc9bd1e0aa9",
+    "docs/scratch/arrival-break/reviews/loops-provenance-rehearsal-2026-09-18/evidence.json": "0c8aae3042cb441e1383d6d137d2bb82588206c71cbe026fe76e2375ea5e0163",
+    "docs/scratch/arrival-break/reviews/loops-provenance-rehearsal-2026-09-18/validation.json": "dbcf82759c0b7066ac7b130036219274c7e6500fbb9e658a68c4ef544484f254",
+    "scripts/verify_legacy_provenance.py": "623a7abf2980a6863d9aa554422a60f148b4ae6c7146726fbeaef5f4e870e58f",
+    "tests/test_legacy_provenance.py": "089b825911282c05ff721aa37fc57837624dec5ab04706acb044066cb02d28fc",
+    "scripts/prepare_legacy_unattributed.py": "e4be5507a8420a385fddb210efaa32579dec154467e34a59e8e023d73ce80d47",
+    "scripts/arrival_rehearsal.py": "7d7ba61e0364e00090c6fc5619c00487990085a5e3e45497b73d605e1a32ef64",
+    "tests/test_arrival_rehearsal_runner.py": "3a61c5cabb349849e295bab7c25f8ce8414970338611255b83a199f4d9c111a7",
+    "libs/engine/src/engine/row_commitment.py": "feaa42f3b287d130cb072453b0a4f8993b03ee7c44ff12d2a89724110301957f",
+    "libs/engine/src/engine/arrival_projection.py": "932d50fa5c84c364bf817f4f97804cb89f89d8011c24916f48a30e50af247aec",
+    "libs/engine/src/engine/arrival.py": "8e37f3cbbcf652133ee23db9edf724635e896f13ce42051c6ee8f3b63064846c",
+    "libs/engine/src/engine/jsonl_codec.py": "81a0f7220a8731f0455da30a7c7d6642fbe1b93ad79b70e361e4b6d286480a0c",
+    "docs/scratch/arrival-break/legacy-provenance-verification-2026-09-18.md": "5e58d18c8ef65926eb565eb7d05e7e31966588b2df9f2284dfd540dc2717d741",
+    "docs/scratch/arrival-break/loops-live-cutover-plan-2026-09-18.md": "a30fc6052e2bcf0e9b7919ae8c7e897646f2e8b9b0234c5e3b2d5aeef5b4c37e",
+    "docs/scratch/arrival-break/reviews/fresh-epoch-fable-r2-2026-09-18/findings.md": "c49d2551ea0e60ba096223972fdf3400d78040e1fa0fed9e6d6b17e4ca79cde6"
+  },
+  "packet_sha256": "9b0737c039c95103a5a0536c1e02113fac0e587e0b9636bdc34f224fcb838f51",
+  "packet_bytes": 341143
+}

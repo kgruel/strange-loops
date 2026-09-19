@@ -1,0 +1,12 @@
+{
+  "scope": "signature and reviewed claims of the immutable migration report; live-head comparison belongs to prefix verifier",
+  "report_sha256": "d341aca974346aaaf833b54b56ba4ab46904cf7fef5af69dfedbfbe59d3b8bc9",
+  "signature_verified": true,
+  "target_head": {
+    "lineage": "01M2VCBPYRT63W2FKA54PVKP7D",
+    "ordinal": 4483,
+    "record_hash": "8997e2280b24d5f060b6c3edc47c7cc726fd6bcc468e3722277f2716e279c2a3"
+  },
+  "source_file_sha256": "e90c51f0929f2cfdb2d46c636845eb57b366e5432bf5c734f6b88619c5215933",
+  "dropped_units": 0
+}

@@ -1,0 +1,11 @@
+--- reviewed/scripts/verify_legacy_provenance.py
++++ final/scripts/verify_legacy_provenance.py
+@@ -89,7 +89,7 @@
+         return stream.read(1) == b"\n"
+ 
+ 
+-def _hex(value: str, label: str) -> str:
++def _hex(value: object, label: str) -> str:
+     if not isinstance(value, str) or len(value) != 64:
+         raise ProvenanceRefused(f"{label} must be a lowercase SHA-256 hex digest")
+     try:

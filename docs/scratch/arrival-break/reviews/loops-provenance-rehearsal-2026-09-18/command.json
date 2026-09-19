@@ -1,0 +1,27 @@
+{
+  "command": [
+    "uv",
+    "run",
+    "python",
+    "scripts/verify_legacy_provenance.py",
+    "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/input/project.jsonl",
+    "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/prepared/project.jsonl",
+    "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/prepared/manifest.json",
+    "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/fresh-rehearsal-run-2/stores/01M2VCBPYRT63W2FKA54PVKP7D.arrival",
+    "--reviewed-source-sha256",
+    "1baa08419b856a52692100d8ea670a12482d80f95ce8a8d3193f194ac4c5347e",
+    "--reviewed-manifest-sha256",
+    "d6db177325ba4a50539504efb834dfce8310082d2a34c6446c465ebf82b748ca",
+    "--migration-lineage",
+    "01M2VCBPYRT63W2FKA54PVKP7D",
+    "--migration-ordinal",
+    "4483",
+    "--migration-record-hash",
+    "8997e2280b24d5f060b6c3edc47c7cc726fd6bcc468e3722277f2716e279c2a3",
+    "--output",
+    "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/provenance-verification-run-1/evidence-r2.json"
+  ],
+  "exit_code": 0,
+  "stderr": "",
+  "source_sha256": "623a7abf2980a6863d9aa554422a60f148b4ae6c7146726fbeaef5f4e870e58f"
+}

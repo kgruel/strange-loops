@@ -1,0 +1,38 @@
+[
+  {
+    "path": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/input/project.jsonl",
+    "sha256": "1baa08419b856a52692100d8ea670a12482d80f95ce8a8d3193f194ac4c5347e",
+    "size": 204426871,
+    "unchanged": true
+  },
+  {
+    "path": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/prepared/project.jsonl",
+    "sha256": "e90c51f0929f2cfdb2d46c636845eb57b366e5432bf5c734f6b88619c5215933",
+    "size": 204445529,
+    "unchanged": true
+  },
+  {
+    "path": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/prepared/manifest.json",
+    "sha256": "d6db177325ba4a50539504efb834dfce8310082d2a34c6446c465ebf82b748ca",
+    "size": 273452,
+    "unchanged": true
+  },
+  {
+    "path": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/fresh-rehearsal-run-2/stores/01M2VCBPYRT63W2FKA54PVKP7D.arrival",
+    "sha256": "73b678adb57c28869d8a7482e6a244280ec7e32a2474a2d6ad5f909a712df5d8",
+    "size": 205673522,
+    "unchanged": true
+  },
+  {
+    "path": "/Users/kaygee/Code/loops/.loops/data/project.jsonl",
+    "sha256": "1baa08419b856a52692100d8ea670a12482d80f95ce8a8d3193f194ac4c5347e",
+    "size": 204426871,
+    "unchanged": true
+  },
+  {
+    "path": "/Users/kaygee/Code/loops/.loops/project.vertex",
+    "sha256": "3a2264100e1e17174f883970290bd8a314ca91eca0d36d4ec53fc11ffbf8479b",
+    "size": 4739,
+    "unchanged": true
+  }
+]

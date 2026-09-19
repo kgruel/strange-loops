@@ -1,0 +1,14 @@
+{
+  "head": "301c350e7bbd3eafa6c874d82e31ef9e2cf8d6c7",
+  "baseline": "301c350e",
+  "sources": {
+    "tests/test_legacy_provenance_review.py": "2ca523233c83240f6c8361034bf62cc970722a974288dee8f3969eecc77a8172",
+    "tests/test_legacy_provenance.py": "089b825911282c05ff721aa37fc57837624dec5ab04706acb044066cb02d28fc",
+    "scripts/verify_legacy_provenance.py": "623a7abf2980a6863d9aa554422a60f148b4ae6c7146726fbeaef5f4e870e58f",
+    "docs/scratch/arrival-break/loops-live-cutover-plan-2026-09-18.md": "6cf38c400b9bc583d0c62e3d3db26dd1c6ca56df82b8a7f68b6a3d127e6134c9",
+    "docs/scratch/arrival-break/reviews/legacy-provenance-fable-r2-2026-09-18/findings.md": "dd1e32699500732c536d24388d3ad86382670836a7aa0774b87a804e8c170f8c",
+    "docs/scratch/arrival-break/reviews/loops-provenance-rehearsal-2026-09-18/final-validation.json": "05afb9e0f4a47f6b542855d507c2a99580dec4a4fb2d488eaab7314d1488fe15"
+  },
+  "packet_sha256": "d5eb5e1391447b409e146a9556bb3c0e284742c702a483891a5a87614703db6d",
+  "packet_bytes": 112829
+}

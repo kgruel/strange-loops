@@ -1,0 +1,9 @@
+{
+  "repository_excluding_chaos": "163 passed",
+  "focused_provenance_and_review": "31 passed",
+  "engine_generated_integration": "passed",
+  "scoped_ruff": "passed",
+  "scoped_ty": "passed",
+  "real_copy_after_fixes": "passed",
+  "source_sha256": "623a7abf2980a6863d9aa554422a60f148b4ae6c7146726fbeaef5f4e870e58f"
+}

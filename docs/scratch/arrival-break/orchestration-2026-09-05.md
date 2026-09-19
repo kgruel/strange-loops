@@ -1,3 +1,33 @@
+## September 18: audited provenance verification accepted; cutover prepared
+
+The user accepted the historical review meaning of the mapped boundaries and
+requested implementation, repeat verification, and a cutover plan. The new
+read-only `scripts/verify_legacy_provenance.py` proves exact original → prepared
+mapping and ordered preservation at pinned migration S, authenticates registry
+introductions, verifies the original structural tick chain, and refuses any
+unexplained or post-S chain/window failure. Ordinary deep audit remains unchanged.
+
+The loops copy passes: 982 mapped facts, 3496 byte-identical rows, 39 explained
+historical windows, 82 unchanged windows, zero unchained historical ticks, one
+valid post-S tick. The immutable migration report signature was separately
+reverified. Wrong manifest/S pins refuse. All inputs and live source/vertex
+hashes remain unchanged.
+
+Sol implemented the verifier; Luna expanded adversarial and real SDK integration
+tests; Terra prepared the cutover plan; root ran the real proof and Fable reviews.
+Fable final result **ACCEPT**, no P1/P2 blockers. Final repository suite:
+**163 passed**, including 31 provenance cases. Scoped Ruff/type/diff checks pass.
+See [final review](reviews/legacy-provenance-fable-r3-2026-09-18/findings.md),
+[real proof](reviews/loops-provenance-rehearsal-2026-09-18/evidence.json), and
+[verification contract](legacy-provenance-verification-2026-09-18.md).
+
+The [cutover plan](loops-live-cutover-plan-2026-09-18.md) is prepared, not executed.
+Next implementation work: complete/rehearse descriptor publication and actual
+writer/CLI adapters or disablement, then inventory/quiesce writers and obtain a
+new production snapshot for the pinned ceremony. The Arrival store must be minted
+at its final durable path; no post-mint physical relocation. Rollback after any
+new authoritative write is forward recovery only. Nothing pushed or merged.
+
 ## September 18: fresh loops epoch rehearsed; historical mapping caveat
 
 The chosen initial state is implemented: declared fold initial values, zero

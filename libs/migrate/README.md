@@ -73,8 +73,39 @@ The loops store rehearsal established these constraints:
   retained historical tick-window commitments; the original archive passes.
   Migration preserves the prepared facts and old tick rows without rewriting
   commitments. Full Arrival verification is not a clean historical tick audit.
-  Keep the original archive and mapping manifest, and settle transformed-history
-  verification policy before live cutover.
+  Keep the original archive and mapping manifest, and use the provenance
+  verifier below to prove the accepted transformation before live cutover.
 
 See the [real-store rehearsal report](../../docs/scratch/arrival-break/loops-real-store-rehearsal-2026-09-18.md)
 for the exercised scope, evidence, and remaining historical-commitment limitation.
+
+### Verify the audited observer mapping
+
+`scripts/verify_legacy_provenance.py` independently verifies the supported flat,
+zero-drop `legacy-unattributed-v1` preparation through a reviewed migration head:
+
+```sh
+uv run python scripts/verify_legacy_provenance.py \
+  ORIGINAL.jsonl PREPARED.jsonl MANIFEST.json TARGET.arrival \
+  --reviewed-source-sha256 ORIGINAL_SHA256 \
+  --reviewed-manifest-sha256 MANIFEST_SHA256 \
+  --migration-lineage LINEAGE \
+  --migration-ordinal S_ORDINAL \
+  --migration-record-hash S_RECORD_HASH \
+  --output NEW_EVIDENCE.json
+```
+
+Supply the source/manifest hashes and S from independently retained reviewed
+evidence, not claims freshly extracted from untrusted input. The verifier checks
+all mapped and unchanged rows, the original tick chain, exact ordered preservation
+through S, and all later tick-chain windows. Unsupported inputs or unexplained
+changes refuse. Output creation is exclusive; inputs are never repaired.
+
+A successful result says `preserved-boundaries-with-audited-transformation`.
+It distinguishes explained historical windows from unchanged windows and does
+not claim historical authorship. It verifies registry-forming Arrival signatures;
+verification of the signed migration report remains a separate step at S.
+The standard deep audit is unchanged and still reports changed historical windows.
+
+See the [verification contract](../../docs/scratch/arrival-break/legacy-provenance-verification-2026-09-18.md)
+and [cutover plan](../../docs/scratch/arrival-break/loops-live-cutover-plan-2026-09-18.md).

@@ -1,0 +1,2252 @@
+Final narrowly scoped adversarial static follow-up. Previous Fable r2 accepted verifier, receipt, cutover plan and engine integration, but returned REVISE solely because four refusal tests hit neighboring checks. No production verifier changes since that acceptance. Review four corrected test paths: bad postS window with validlatest predecessor and validf2->f2cursors; eligible row left unmapped with two eligible rows and one real mapped audit entry; reversed window preserving priorcursor continuity; fully rehashed/re-minted mutated/reordered prefixes with repinnedS reaching exactprefix mismatch. Require precise failure-message matches. Verify closure and any small plan wording correction (distinct source vsvertexhash variables, capturedheadA and rollbackhash binding). No tools, no claim test execution. Full relevant source plus final test receipt supplied. Return ACCEPT or REVISE with short closure table and only concrete P1/P2 blockers. Do not reopen already accepted architecture or optional P3 improvements. Keep response concise.
+
+
+=== tests/test_legacy_provenance_review.py ===
+1: """Adversarial review cases for the offline legacy provenance verifier."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import hashlib
+6: import importlib.util
+7: import json
+8: import shutil
+9: import subprocess
+10: import sys
+11: from pathlib import Path
+12: 
+13: import pytest
+14: from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+15: from custody.signing import ARRIVAL_DOMAIN, TICK_DOMAIN
+16: from engine.arrival import KEY_INTRODUCTION_KIND, ArrivalLog
+17: from engine.arrival_body import body_of_fact_row, body_of_tick_row
+18: from engine.jsonl_codec import (
+19:     deserialize_records,
+20:     serialize_fact_row,
+21:     serialize_tick_row,
+22: )
+23: from engine.row_commitment import fact_row_hash, tick_commitment_hash, tick_row_hash
+24: from sign import ed25519
+25: 
+26: 
+27: def _load(name: str, path: Path):
+28:     spec = importlib.util.spec_from_file_location(name, path)
+29:     assert spec is not None and spec.loader is not None
+30:     module = importlib.util.module_from_spec(spec)
+31:     sys.modules[name] = module
+32:     spec.loader.exec_module(module)
+33:     return module
+34: 
+35: 
+36: _BASE = _load("legacy_provenance_base_review", Path(__file__).with_name("test_legacy_provenance.py"))
+37: _VERIFY = _BASE._VERIFY
+38: _PREPARE = _BASE._PREPARE
+39: _RUNNER = _load(
+40:     "arrival_rehearsal_runner_base_review",
+41:     Path(__file__).with_name("test_arrival_rehearsal_runner.py"),
+42: )
+43: 
+44: 
+45: def _verify(fixture, **overrides):
+46:     values = {
+47:         "reviewed_source_sha256": fixture.source_hash,
+48:         "reviewed_manifest_sha256": fixture.manifest_hash,
+49:         "migration_lineage": fixture.lineage,
+50:         "migration_ordinal": fixture.ordinal,
+51:         "migration_record_hash": fixture.record_hash,
+52:     }
+53:     values.update(overrides)
+54:     return _VERIFY.verify_legacy_provenance(
+55:         fixture.original, fixture.prepared, fixture.manifest, fixture.arrival, **values
+56:     )
+57: 
+58: 
+59: def _repin_manifest(fixture) -> None:
+60:     value = json.loads(fixture.manifest.read_text())
+61:     source_hash = hashlib.sha256(fixture.original.read_bytes()).hexdigest()
+62:     value["source_sha256_before"] = source_hash
+63:     value["source_sha256_after"] = source_hash
+64:     value["output_sha256"] = hashlib.sha256(fixture.prepared.read_bytes()).hexdigest()
+65:     fixture.manifest.write_text(json.dumps(value, sort_keys=True))
+66:     fixture.source_hash = source_hash
+67:     fixture.manifest_hash = hashlib.sha256(fixture.manifest.read_bytes()).hexdigest()
+68: 
+69: 
+70: def _copy_arrival(fixture, path: Path) -> None:
+71:     shutil.copyfile(fixture.arrival, path)
+72:     fixture.arrival = path
+73: 
+74: 
+75: def _prepared_tick(fixture, index: int = 1) -> tuple:
+76:     return deserialize_records(fixture.prepared.read_text().splitlines()[index])[0][1]
+77: 
+78: 
+79: def _append_post_tick(fixture, path: Path, row: tuple) -> None:
+80:     lines = fixture.arrival.read_bytes().splitlines(keepends=True)
+81:     path.write_bytes(b"".join(lines[: fixture.ordinal + 1]))
+82:     log = ArrivalLog(path)
+83:     log.append(
+84:         "tick", body_of_tick_row(row), observer="custodian", origin=row[4], at=row[2]
+85:     )
+86:     fixture.arrival = path
+87: 
+88: 
+89: def _remint_prefix(fixture, path: Path, *, reorder: bool) -> None:
+90:     """Build a valid Arrival prefix whose source row(s) differ from prepared."""
+91:     rows = [deserialize_records(line)[0] for line in fixture.prepared.read_text().splitlines()]
+92:     if reorder:
+93:         rows[0], rows[1] = rows[1], rows[0]
+94:     else:
+95:         kind, row = rows[0]
+96:         changed = list(row)
+97:         changed[5] = '{"changed":true}'
+98:         rows[0] = (kind, tuple(changed))
+99: 
+100:     def signer(_observer: str, digest: str) -> str:
+101:         return ed25519.sign(
+102:             fixture.keypair, digest.encode(), domain=ARRIVAL_DOMAIN
+103:         )
+104: 
+105:     log = ArrivalLog.mint(
+106:         path,
+107:         observer="custodian",
+108:         key=fixture.keypair.public_b64,
+109:         signer=signer,
+110:         lineage=fixture.lineage,
+111:         at=0.0,
+112:     )
+113:     head = None
+114:     for kind, row in rows:
+115:         head = log.append(
+116:             kind,
+117:             body_of_fact_row(row) if kind == "fact" else body_of_tick_row(row),
+118:             observer=row[3] if kind == "fact" else "custodian",
+119:             origin=row[4],
+120:             at=row[2],
+121:         )
+122:     assert head is not None
+123:     fixture.arrival = path
+124:     fixture.ordinal = head["ord"]
+125:     fixture.record_hash = head["rh"]
+126: 
+127: 
+128: @pytest.mark.parametrize(
+129:     "field,value",
+130:     [
+131:         ("reviewed_manifest_sha256", "0" * 64),
+132:         ("migration_record_hash", "0" * 64),
+133:         ("migration_lineage", "wrong-lineage"),
+134:         ("migration_ordinal", "minus"),
+135:     ],
+136: )
+137: def test_refuses_wrong_review_and_migration_pins(tmp_path: Path, field: str, value: str) -> None:
+138:     fixture = _BASE._fixture(tmp_path / field)
+139:     if field == "migration_ordinal":
+140:         with pytest.raises(_VERIFY.ProvenanceRefused):
+141:             _verify(fixture, migration_ordinal=fixture.ordinal - 1)
+142:         with pytest.raises(_VERIFY.ProvenanceRefused):
+143:             _verify(fixture, migration_ordinal=fixture.ordinal + 1)
+144:     else:
+145:         with pytest.raises(_VERIFY.ProvenanceRefused):
+146:             _verify(fixture, **{field: value})
+147: 
+148: 
+149: def test_refuses_manifest_entries_that_are_extra_or_reordered(tmp_path: Path) -> None:
+150:     fixture = _BASE._fixture(tmp_path / "extra")
+151:     value = json.loads(fixture.manifest.read_text())
+152:     entry = dict(value["affected_rows"][0])
+153:     entry["coordinate"] += 100
+154:     value["affected_rows"].append(entry)
+155:     fixture.manifest.write_text(json.dumps(value))
+156:     fixture.manifest_hash = hashlib.sha256(fixture.manifest.read_bytes()).hexdigest()
+157:     with pytest.raises(_VERIFY.ProvenanceRefused):
+158:         _verify(fixture)
+159: 
+160:     fixture = _BASE._fixture(tmp_path / "reordered")
+161:     value = json.loads(fixture.manifest.read_text())
+162:     value["affected_rows"][0]["coordinate"] = 2
+163:     fixture.manifest.write_text(json.dumps(value))
+164:     fixture.manifest_hash = hashlib.sha256(fixture.manifest.read_bytes()).hexdigest()
+165:     with pytest.raises(_VERIFY.ProvenanceRefused):
+166:         _verify(fixture)
+167: 
+168: 
+169: def test_refuses_eligible_row_left_untransformed(tmp_path: Path) -> None:
+170:     fixture = _BASE._fixture(tmp_path)
+171:     extra = {
+172:         "t": "fact", "id": "f-extra", "kind": "note", "ts": 9.0,
+173:         "observer": "", "origin": "legacy", "payload": "{}",
+174:     }
+175:     source = tmp_path / "source-with-two-eligible.jsonl"
+176:     source.write_bytes(fixture.original.read_bytes() + json.dumps(extra, separators=(",", ":")).encode() + b"\n")
+177:     prepared = tmp_path / "prepared-with-two-eligible.jsonl"
+178:     manifest = tmp_path / "prepared-with-two-eligible.manifest.json"
+179:     _PREPARE.prepare_legacy_unattributed(source, prepared, manifest)
+180:     prepared_lines = prepared.read_bytes().splitlines(keepends=True)
+181:     prepared_lines[-1] = source.read_bytes().splitlines(keepends=True)[-1]
+182:     prepared.write_bytes(b"".join(prepared_lines))
+183:     value = json.loads(manifest.read_text())
+184:     value["affected_rows"] = value["affected_rows"][:1]
+185:     value["output_sha256"] = hashlib.sha256(prepared.read_bytes()).hexdigest()
+186:     manifest.write_text(json.dumps(value))
+187:     fixture.original = source
+188:     fixture.prepared = prepared
+189:     fixture.manifest = manifest
+190:     fixture.source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+191:     fixture.manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+192:     with pytest.raises(_VERIFY.ProvenanceRefused, match="eligible line"):
+193:         _verify(fixture)
+194: 
+195: 
+196: def test_refuses_signed_changed_row(tmp_path: Path) -> None:
+197:     fixture = _BASE._fixture(tmp_path)
+198:     lines = fixture.original.read_bytes().splitlines(keepends=True)
+199:     row = json.loads(lines[0])
+200:     row["signature"] = "signed-legacy"
+201:     lines[0] = json.dumps(row, separators=(",", ":")).encode() + b"\n"
+202:     fixture.original.write_bytes(b"".join(lines))
+203:     value = json.loads(fixture.manifest.read_text())
+204:     source_hash = hashlib.sha256(fixture.original.read_bytes()).hexdigest()
+205:     value["source_sha256_before"] = source_hash
+206:     value["source_sha256_after"] = source_hash
+207:     value["affected_rows"][0]["original_line_sha256"] = hashlib.sha256(lines[0]).hexdigest()
+208:     fixture.manifest.write_text(json.dumps(value))
+209:     fixture.source_hash = source_hash
+210:     fixture.manifest_hash = hashlib.sha256(fixture.manifest.read_bytes()).hexdigest()
+211:     with pytest.raises(_VERIFY.ProvenanceRefused, match="signed empty-observer"):
+212:         _verify(fixture)
+213: 
+214: 
+215: @pytest.mark.parametrize("mutation", ["bytes", "reorder", "torn"])
+216: def test_refuses_mutated_reordered_or_torn_migration_prefix(
+217:     tmp_path: Path, mutation: str
+218: ) -> None:
+219:     fixture = _BASE._fixture(tmp_path / mutation)
+220:     target = tmp_path / mutation / "arrival-copy"
+221:     _copy_arrival(fixture, target)
+222:     if mutation == "bytes":
+223:         raw = target.read_bytes()
+224:         target.write_bytes(raw.replace(b'"legacy"', b'"changed"', 1))
+225:     elif mutation == "reorder":
+226:         lines = target.read_bytes().splitlines(keepends=True)
+227:         lines[1], lines[2] = lines[2], lines[1]
+228:         target.write_bytes(b"".join(lines))
+229:     else:
+230:         target.write_bytes(target.read_bytes() + b'{"v":')
+231:     with pytest.raises(_VERIFY.ProvenanceRefused):
+232:         _verify(fixture)
+233: 
+234: 
+235: @pytest.mark.parametrize("reorder", [False, True])
+236: def test_refuses_valid_arrival_prefix_with_mutated_or_reordered_rows(
+237:     tmp_path: Path, reorder: bool
+238: ) -> None:
+239:     fixture = _BASE._fixture(tmp_path / ("reorder" if reorder else "mutate"))
+240:     _remint_prefix(fixture, tmp_path / ("reordered.arrival" if reorder else "mutated.arrival"), reorder=reorder)
+241:     with pytest.raises(_VERIFY.ProvenanceRefused, match="migration prefix row mismatch"):
+242:         _verify(fixture)
+243: 
+244: 
+245: def test_refuses_duplicate_post_migration_id(tmp_path: Path) -> None:
+246:     fixture = _BASE._fixture(tmp_path)
+247:     target = tmp_path / "duplicate.arrival"
+248:     _copy_arrival(fixture, target)
+249:     duplicate = deserialize_records(fixture.prepared.read_text().splitlines()[0])[0][1]
+250:     log = ArrivalLog(target)
+251:     log.append("fact", body_of_fact_row(duplicate), observer=duplicate[3], origin=duplicate[4], at=9.0)
+252:     with pytest.raises(_VERIFY.ProvenanceRefused, match="duplicate row id"):
+253:         _verify(fixture)
+254: 
+255: 
+256: @pytest.mark.parametrize("window_start,end_cursor", [("", "f2"), ("f1", "")])
+257: def test_refuses_original_cursor_discontinuity_or_reversal(
+258:     tmp_path: Path, window_start: str, end_cursor: str
+259: ) -> None:
+260:     fixture = _BASE._fixture(tmp_path / repr((window_start, end_cursor)))
+261:     original_lines = fixture.original.read_bytes().splitlines(keepends=True)
+262:     prepared_lines = fixture.prepared.read_bytes().splitlines(keepends=True)
+263:     _kind, row = deserialize_records(original_lines[3])[0]
+264:     row = list(row)
+265:     row[7] = window_start
+266:     row[8] = end_cursor
+267:     encoded = serialize_tick_row(tuple(row)).encode() + b"\n"
+268:     original_lines[3] = encoded
+269:     prepared_lines[3] = encoded
+270:     fixture.original.write_bytes(b"".join(original_lines))
+271:     fixture.prepared.write_bytes(b"".join(prepared_lines))
+272:     _repin_manifest(fixture)
+273:     expected = "reversed window" if window_start == "f1" else "cursor discontinuity"
+274:     with pytest.raises(_VERIFY.ProvenanceRefused, match=expected):
+275:         _verify(fixture)
+276: 
+277: 
+278: @pytest.mark.parametrize("placement", ["after-chained", "before-chained"])
+279: def test_refuses_historical_unchained_tick_claims(
+280:     tmp_path: Path, placement: str
+281: ) -> None:
+282:     fixture = _BASE._fixture(tmp_path / placement)
+283:     original = fixture.original.read_bytes().splitlines(keepends=True)
+284:     prepared_original = fixture.prepared.read_bytes().splitlines(keepends=True)
+285:     fact1 = deserialize_records(original[0])[0][1]
+286:     tick1 = deserialize_records(original[1])[0][1]
+287:     fact2 = deserialize_records(original[2])[0][1]
+288:     tick2 = list(deserialize_records(original[3])[0][1])
+289:     if placement == "after-chained":
+290:         unchained = (
+291:             "t-un", "note", 2.5, None, "legacy", "{}", None, None, None, None, None
+292:         )
+293:         tick2[6] = tick_row_hash(unchained)
+294:         rows = [fact1, tick1, unchained, fact2, tuple(tick2)]
+295:     else:
+296:         claimed = (
+297:             "t-claimed", "note", 1.5, None, "legacy", "{}", None, "", fact1[0], None, None
+298:         )
+299:         tick1 = list(tick1)
+300:         tick1[6] = tick_row_hash(claimed)
+301:         rows = [fact1, claimed, tuple(tick1), fact2, tuple(tick2)]
+302:     encoded = b"".join(
+303:         (serialize_fact_row(row) if len(row) == 7 else serialize_tick_row(row)).encode() + b"\n"
+304:         for row in rows
+305:     )
+306:     prepared_rows = list(rows)
+307:     prepared_rows[0] = deserialize_records(prepared_original[0])[0][1]
+308:     prepared_encoded = b"".join(
+309:         (serialize_fact_row(row) if len(row) == 7 else serialize_tick_row(row)).encode() + b"\n"
+310:         for row in prepared_rows
+311:     )
+312:     fixture.original.write_bytes(encoded)
+313:     fixture.prepared.write_bytes(prepared_encoded)
+314:     _repin_manifest(fixture)
+315:     with pytest.raises(_VERIFY.ProvenanceRefused, match="unchained|pre-chain tick"):
+316:         _verify(fixture)
+317: 
+318: 
+319: @pytest.mark.parametrize("kind", ["bad-window", "unchained", "bad-prev"])
+320: def test_refuses_bad_post_migration_tick_attestation(tmp_path: Path, kind: str) -> None:
+321:     fixture = _BASE._fixture(tmp_path / kind)
+322:     prior = _prepared_tick(fixture, 3)
+323:     if kind == "unchained":
+324:         row = ("post-unchained", "note", 8.0, None, "legacy", "{}", None, None, None, None, None)
+325:     elif kind == "bad-prev":
+326:         row = ("post-bad-prev", "note", 8.0, None, "legacy", "{}", "0" * 64, "f1", "f2", prior[9], None)
+327:     else:
+328:         row = ("post-bad-window", "note", 8.0, None, "legacy", "{}", tick_row_hash(prior), "f2", "f2", "0" * 64, None)
+329:     _append_post_tick(fixture, tmp_path / f"{kind}.arrival", row)
+330:     expected = "post-migration tick window mismatch" if kind == "bad-window" else None
+331:     with pytest.raises(_VERIFY.ProvenanceRefused, match=expected):
+332:         _verify(fixture)
+333: 
+334: 
+335: def test_refuses_forged_post_migration_key_introduction(tmp_path: Path) -> None:
+336:     fixture = _BASE._fixture(tmp_path)
+337:     target = tmp_path / "forged-key.arrival"
+338:     lines = fixture.arrival.read_bytes().splitlines(keepends=True)
+339:     target.write_bytes(b"".join(lines[: fixture.ordinal + 1]))
+340:     wrong_private = Ed25519PrivateKey.generate()
+341:     wrong = ed25519.Keypair(private=wrong_private, public=wrong_private.public_key())
+342:     named_private = Ed25519PrivateKey.generate()
+343:     named = ed25519.Keypair(private=named_private, public=named_private.public_key())
+344:     log = ArrivalLog(target)
+345:     log.append(
+346:         KEY_INTRODUCTION_KIND,
+347:         {"observer": "mallory", "key": named.public_b64},
+348:         observer="custodian",
+349:         signer=lambda _observer, digest: ed25519.sign(
+350:             wrong, digest.encode(), domain=ARRIVAL_DOMAIN
+351:         ),
+352:         at=8.0,
+353:     )
+354:     fixture.arrival = target
+355:     with pytest.raises(_VERIFY.ProvenanceRefused, match="signature"):
+356:         _verify(fixture)
+357: 
+358: 
+359: def test_engine_generated_fresh_seal_passes_provenance_verifier(tmp_path: Path) -> None:
+360:     sandbox, vertex, source, keys = _RUNNER._inputs(tmp_path, seal=True, signed_tick=True)
+361:     pair = ed25519.load(keys)
+362:     first = ("01ARZ3NDEKTSV4RRFFQ69G5FA0", "concept", 1000.0, "", "legacy", '{"text":"migrated"}', None)
+363:     tick_window = hashlib.sha256(fact_row_hash(first).encode()).hexdigest()
+364:     tick = ("01ARZ3NDEKTSV4RRFFQ69G5FT1", "alice", 1001.0, 1000.0, "alice", "{}", None, "", first[0], tick_window)
+365:     signature = ed25519.sign(
+366:         pair, tick_commitment_hash(tick).encode(), domain=TICK_DOMAIN
+367:     )
+368:     tick = (*tick, signature)
+369:     source.write_text(serialize_fact_row(first) + "\n" + serialize_tick_row(tick) + "\n")
+370:     prepared = sandbox / "input" / "prepared.jsonl"
+371:     manifest = sandbox / "input" / "prepared.manifest.json"
+372:     _PREPARE.prepare_legacy_unattributed(source, prepared, manifest)
+373:     vertex.write_text(
+374:         vertex.read_text(encoding="utf-8").replace("../../input/legacy.jsonl", "../../input/prepared.jsonl"),
+375:         encoding="utf-8",
+376:     )
+377:     output = sandbox / "output"
+378:     result = subprocess.run(
+379:         _RUNNER._command(sandbox, vertex, prepared, keys, output, runtime_epoch="fresh", emit_kind="seal", expect_tick=True),
+380:         capture_output=True,
+381:         text=True,
+382:         check=False,
+383:     )
+384:     assert result.returncode == 0, result.stderr
+385:     evidence = json.loads((output / "evidence.json").read_text())
+386:     selected = evidence["migration"]["selected_head"]
+387:     input_paths = (source, prepared, manifest, Path(evidence["migration"]["target_path"]))
+388:     input_hashes_before = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in input_paths}
+389:     directory_before = tuple(
+390:         sorted(str(path.relative_to(sandbox)) for path in sandbox.rglob("*"))
+391:     )
+392:     verified = _VERIFY.verify_legacy_provenance(
+393:         source,
+394:         prepared,
+395:         manifest,
+396:         Path(evidence["migration"]["target_path"]),
+397:         reviewed_source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+398:         reviewed_manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest(),
+399:         migration_lineage=selected["lineage"],
+400:         migration_ordinal=selected["ordinal"],
+401:         migration_record_hash=selected["record_hash"],
+402:     )
+403:     assert verified["status"] == "preserved-boundaries-with-audited-transformation"
+404:     assert verified["preparation"]["transformed_rows"] == 1
+405:     assert verified["commitments"]["original_tick_chain"] == "structurally-verified"
+406:     assert verified["commitments"]["unchained_historical_ticks"] == 0
+407:     assert verified["trust"]["pins"] == "caller-supplied"
+408:     assert verified["trust"]["pin_independence_verified"] is False
+409:     assert verified["arrival"]["post_migration_ticks_verified"] >= 1
+410:     assert input_hashes_before == {
+411:         path: hashlib.sha256(path.read_bytes()).hexdigest() for path in input_paths
+412:     }
+413:     assert directory_before == tuple(
+414:         sorted(str(path.relative_to(sandbox)) for path in sandbox.rglob("*"))
+415:     )
+
+=== tests/test_legacy_provenance.py ===
+1: """Contract tests for offline legacy provenance verification."""
+2: 
+3: from __future__ import annotations
+4: 
+5: import hashlib
+6: import importlib.util
+7: import json
+8: import sys
+9: from dataclasses import dataclass
+10: from pathlib import Path
+11: 
+12: import pytest
+13: from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+14: from custody.signing import ARRIVAL_DOMAIN
+15: from engine.arrival import ArrivalLog
+16: from engine.arrival_body import body_of_fact_row, body_of_tick_row
+17: from engine.jsonl_codec import (
+18:     deserialize_records,
+19:     serialize_fact_row,
+20:     serialize_tick_row,
+21: )
+22: from engine.row_commitment import fact_row_hash, tick_row_hash
+23: from sign import ed25519
+24: 
+25: _ROOT = Path(__file__).parents[1]
+26: 
+27: 
+28: def _load(name: str, path: Path):
+29:     spec = importlib.util.spec_from_file_location(name, path)
+30:     assert spec is not None and spec.loader is not None
+31:     module = importlib.util.module_from_spec(spec)
+32:     sys.modules[name] = module
+33:     spec.loader.exec_module(module)
+34:     return module
+35: 
+36: 
+37: _VERIFY = _load("verify_legacy_provenance", _ROOT / "scripts/verify_legacy_provenance.py")
+38: _PREPARE = _load(
+39:     "prepare_legacy_unattributed_for_provenance",
+40:     _ROOT / "scripts/prepare_legacy_unattributed.py",
+41: )
+42: 
+43: 
+44: def _hashes(*rows: tuple) -> str:
+45:     digest = hashlib.sha256()
+46:     for row in rows:
+47:         digest.update(fact_row_hash(row).encode())
+48:     return digest.hexdigest()
+49: 
+50: 
+51: @dataclass
+52: class Fixture:
+53:     original: Path
+54:     prepared: Path
+55:     manifest: Path
+56:     arrival: Path
+57:     source_hash: str
+58:     manifest_hash: str
+59:     lineage: str
+60:     ordinal: int
+61:     record_hash: str
+62:     keypair: ed25519.Keypair
+63:     final_tick: tuple
+64: 
+65:     def verify(self):
+66:         return _VERIFY.verify_legacy_provenance(
+67:             self.original,
+68:             self.prepared,
+69:             self.manifest,
+70:             self.arrival,
+71:             reviewed_source_sha256=self.source_hash,
+72:             reviewed_manifest_sha256=self.manifest_hash,
+73:             migration_lineage=self.lineage,
+74:             migration_ordinal=self.ordinal,
+75:             migration_record_hash=self.record_hash,
+76:         )
+77: 
+78: 
+79: def _fixture(
+80:     tmp_path: Path,
+81:     *,
+82:     bad_original_window: bool = False,
+83:     bad_original_predecessor: bool = False,
+84: ) -> Fixture:
+85:     tmp_path.mkdir(parents=True, exist_ok=True)
+86:     original = tmp_path / "original.jsonl"
+87:     prepared = tmp_path / "prepared.jsonl"
+88:     manifest = tmp_path / "manifest.json"
+89:     arrival = tmp_path / "target.arrival"
+90:     first = ("f1", "note", 1.0, "", "legacy", '{"n":1}', None)
+91:     first_window = "0" * 64 if bad_original_window else _hashes(first)
+92:     tick1 = (
+93:         "t1", "note", 2.0, None, "legacy", "{}",
+94:         "f" * 64 if bad_original_predecessor else None, "", "f1",
+95:         first_window, None,
+96:     )
+97:     second = ("f2", "note", 3.0, "alice", "legacy", '{"n":2}', None)
+98:     tick2 = (
+99:         "t2", "note", 4.0, 2.0, "legacy", "{}", tick_row_hash(tick1),
+100:         "f1", "f2", _hashes(second), None,
+101:     )
+102:     original.write_text(
+103:         serialize_fact_row(first) + "\n"
+104:         + serialize_tick_row(tick1) + "\n"
+105:         + serialize_fact_row(second) + "\n"
+106:         + serialize_tick_row(tick2) + "\n"
+107:     )
+108:     _PREPARE.prepare_legacy_unattributed(original, prepared, manifest)
+109: 
+110:     private = Ed25519PrivateKey.generate()
+111:     keypair = ed25519.Keypair(private=private, public=private.public_key())
+112: 
+113:     def signer(_observer: str, digest: str) -> str:
+114:         return ed25519.sign(keypair, digest.encode(), domain=ARRIVAL_DOMAIN)
+115: 
+116:     log = ArrivalLog.mint(
+117:         arrival, observer="custodian", key=keypair.public_b64,
+118:         signer=signer, lineage="01ARZ3NDEKTSV4RRFFQ69G5FAV", at=0.0,
+119:     )
+120:     migration_head = None
+121:     for raw in prepared.read_text().splitlines():
+122:         kind, row = deserialize_records(raw)[0]
+123:         body = body_of_fact_row(row) if kind == "fact" else body_of_tick_row(row)
+124:         migration_head = log.append(
+125:             kind, body, observer=row[3] if kind == "fact" else "custodian",
+126:             origin=row[4], at=row[2],
+127:         )
+128:     assert migration_head is not None
+129:     third = ("f3", "note", 5.0, "alice", "legacy", '{"n":3}', None)
+130:     log.append("fact", body_of_fact_row(third), observer="alice", origin="legacy", at=5.0)
+131:     tick3 = (
+132:         "t3", "note", 6.0, 4.0, "legacy", "{}", tick_row_hash(tick2),
+133:         "f2", "f3", _hashes(third), None,
+134:     )
+135:     log.append("tick", body_of_tick_row(tick3), observer="custodian", origin="legacy", at=6.0)
+136:     return Fixture(
+137:         original=original,
+138:         prepared=prepared,
+139:         manifest=manifest,
+140:         arrival=arrival,
+141:         source_hash=hashlib.sha256(original.read_bytes()).hexdigest(),
+142:         manifest_hash=hashlib.sha256(manifest.read_bytes()).hexdigest(),
+143:         lineage=migration_head["lin"],
+144:         ordinal=migration_head["ord"],
+145:         record_hash=migration_head["rh"],
+146:         keypair=keypair,
+147:         final_tick=tick3,
+148:     )
+149: 
+150: 
+151: def test_verifies_exact_mapping_prefix_and_later_chain_without_authorship_claim(
+152:     tmp_path: Path,
+153: ) -> None:
+154:     fixture = _fixture(tmp_path)
+155: 
+156:     result = fixture.verify()
+157: 
+158:     assert result["status"] == "preserved-boundaries-with-audited-transformation"
+159:     assert result["preparation"] == {
+160:         "policy": "legacy-unattributed-v1",
+161:         "source_sha256": fixture.source_hash,
+162:         "prepared_sha256": hashlib.sha256(fixture.prepared.read_bytes()).hexdigest(),
+163:         "rows": 4,
+164:         "facts": 2,
+165:         "ticks": 2,
+166:         "transformed_rows": 1,
+167:         "byte_identical_rows": 3,
+168:     }
+169:     assert result["commitments"]["explained_transformation_windows"] == 1
+170:     assert result["commitments"]["unchanged_historical_windows"] == 1
+171:     assert result["commitments"]["unchained_historical_ticks"] == 0
+172:     assert result["commitments"]["original_tick_chain"] == "structurally-verified"
+173:     assert result["commitments"]["historical_authorship_verified"] is False
+174:     assert result["commitments"]["ordinary_envelope_signatures_verified"] is False
+175:     assert result["commitments"]["inner_fact_tick_signatures_verified"] is False
+176:     assert result["arrival"]["post_migration_ticks_verified"] == 1
+177:     assert result["arrival"]["prepared_rows_at_pinned_prefix"] == "exact-in-order"
+178:     assert result["arrival"]["captured_head"]["ordinal"] == fixture.ordinal + 2
+179:     assert result["trust"]["migration_report_signature_verified"] is False
+180:     assert result["trust"]["pins"] == "caller-supplied"
+181:     assert result["trust"]["pin_independence_verified"] is False
+182:     def leaves(value):
+183:         if isinstance(value, dict):
+184:             for item in value.values():
+185:                 yield from leaves(item)
+186:         elif isinstance(value, list):
+187:             for item in value:
+188:                 yield from leaves(item)
+189:         else:
+190:             yield value
+191: 
+192:     assert "f1" not in set(leaves(result))
+193:     assert "custodian" not in set(leaves(result))
+194: 
+195: 
+196: def test_refuses_bad_pins_and_incomplete_manifest(tmp_path: Path) -> None:
+197:     fixture = _fixture(tmp_path)
+198:     fixture.source_hash = "0" * 64
+199:     with pytest.raises(_VERIFY.ProvenanceRefused, match="reviewed hash"):
+200:         fixture.verify()
+201: 
+202: 
+203: def test_refuses_self_consistent_manifest_for_unauthorized_payload_change(
+204:     tmp_path: Path,
+205: ) -> None:
+206:     fixture = _fixture(tmp_path)
+207:     lines = fixture.prepared.read_bytes().splitlines(keepends=True)
+208:     changed = json.loads(lines[0])
+209:     changed["payload"] = '{"n":999}'
+210:     lines[0] = json.dumps(changed, separators=(",", ":")).encode() + b"\n"
+211:     fixture.prepared.write_bytes(b"".join(lines))
+212:     manifest = json.loads(fixture.manifest.read_text())
+213:     manifest["output_sha256"] = hashlib.sha256(fixture.prepared.read_bytes()).hexdigest()
+214:     manifest["affected_rows"][0]["normalized_line_sha256"] = hashlib.sha256(
+215:         lines[0]
+216:     ).hexdigest()
+217:     fixture.manifest.write_text(json.dumps(manifest))
+218:     fixture.manifest_hash = hashlib.sha256(fixture.manifest.read_bytes()).hexdigest()
+219: 
+220:     with pytest.raises(_VERIFY.ProvenanceRefused, match="exact authorized transformation"):
+221:         fixture.verify()
+222: 
+223:     fixture = _fixture(tmp_path / "second")
+224:     value = json.loads(fixture.manifest.read_text())
+225:     value["affected_rows"] = []
+226:     fixture.manifest.write_text(json.dumps(value))
+227:     fixture.manifest_hash = hashlib.sha256(fixture.manifest.read_bytes()).hexdigest()
+228:     with pytest.raises(_VERIFY.ProvenanceRefused, match="no affected-row audit"):
+229:         fixture.verify()
+230: 
+231: 
+232: def test_refuses_broken_original_window_before_explaining_mapping(tmp_path: Path) -> None:
+233:     fixture = _fixture(tmp_path, bad_original_window=True)
+234:     with pytest.raises(_VERIFY.ProvenanceRefused, match="original tick window mismatch"):
+235:         fixture.verify()
+236: 
+237: 
+238: def test_refuses_orphan_first_chained_predecessor(tmp_path: Path) -> None:
+239:     fixture = _fixture(tmp_path, bad_original_predecessor=True)
+240:     with pytest.raises(_VERIFY.ProvenanceRefused, match="predecessor mismatch"):
+241:         fixture.verify()
+242: 
+243: 
+244: def test_historical_unchained_ticks_are_structural_pre_chain_only() -> None:
+245:     prechain = (
+246:         "pre", "note", 1.0, None, "legacy", "{}", None, None, None, None, None,
+247:     )
+248:     chain = _VERIFY._TickChain("probe")
+249:     assert chain.tick(prechain, 1, require_window=False) == (None, False)
+250:     assert chain.unchained == 1
+251: 
+252:     malformed = (*prechain[:6], "f" * 64, *prechain[7:])
+253:     with pytest.raises(_VERIFY.ProvenanceRefused, match="carries chain fields"):
+254:         _VERIFY._TickChain("probe").tick(malformed, 1, require_window=False)
+255: 
+256:     fact = ("fact", "note", 2.0, "alice", "", "{}", None)
+257:     chained = (
+258:         "sealed", "note", 3.0, None, "legacy", "{}", None, "", "fact",
+259:         _hashes(fact), None,
+260:     )
+261:     after_chain = _VERIFY._TickChain("probe")
+262:     after_chain.fact(fact)
+263:     after_chain.tick(chained, 2, require_window=False)
+264:     with pytest.raises(_VERIFY.ProvenanceRefused, match="returns to an unchained"):
+265:         after_chain.tick(prechain, 3, require_window=False)
+266: 
+267: 
+268: def test_refuses_arbitrary_record_in_protocol_metadata_prefix(tmp_path: Path) -> None:
+269:     fixture = _fixture(tmp_path)
+270:     replacement = tmp_path / "injected.arrival"
+271: 
+272:     def signer(_observer: str, digest: str) -> str:
+273:         return ed25519.sign(fixture.keypair, digest.encode(), domain=ARRIVAL_DOMAIN)
+274: 
+275:     log = ArrivalLog.mint(
+276:         replacement, observer="custodian", key=fixture.keypair.public_b64,
+277:         signer=signer, lineage=fixture.lineage, at=0.0,
+278:     )
+279:     injected = ("injected", "note", 0.5, "alice", "", "{}", None)
+280:     log.append("fact", body_of_fact_row(injected), observer="alice", at=0.5)
+281:     head = None
+282:     for raw in fixture.prepared.read_text().splitlines():
+283:         kind, row = deserialize_records(raw)[0]
+284:         head = log.append(
+285:             kind,
+286:             body_of_fact_row(row) if kind == "fact" else body_of_tick_row(row),
+287:             observer=row[3] if kind == "fact" else "custodian",
+288:             origin=row[4], at=row[2],
+289:         )
+290:     assert head is not None
+291:     fixture.arrival = replacement
+292:     fixture.ordinal = head["ord"]
+293:     fixture.record_hash = head["rh"]
+294:     with pytest.raises(_VERIFY.ProvenanceRefused, match="non-protocol record"):
+295:         fixture.verify()
+296: 
+297: 
+298: def test_refuses_post_migration_window_or_future_cursor(tmp_path: Path) -> None:
+299:     fixture = _fixture(tmp_path)
+300:     lines = fixture.arrival.read_bytes().splitlines(keepends=True)
+301:     # Rebuild only through S, then append a structurally valid bad later tick.
+302:     truncated = tmp_path / "bad-post.arrival"
+303:     truncated.write_bytes(b"".join(lines[: fixture.ordinal + 1]))
+304:     log = ArrivalLog(truncated)
+305:     bad = (
+306:         "bad", "note", 8.0, None, "legacy", "{}", tick_row_hash(
+307:             deserialize_records(fixture.prepared.read_text().splitlines()[-1])[0][1]
+308:         ),
+309:         "f2", "future", "0" * 64, None,
+310:     )
+311:     log.append("tick", body_of_tick_row(bad), observer="custodian", origin="legacy", at=8.0)
+312:     fixture.arrival = truncated
+313:     with pytest.raises(_VERIFY.ProvenanceRefused, match="missing or future cursor"):
+314:         fixture.verify()
+315: 
+316: 
+317: def test_cli_output_is_exclusive_and_cannot_alias_input(tmp_path: Path) -> None:
+318:     fixture = _fixture(tmp_path)
+319:     args = [
+320:         str(fixture.original), str(fixture.prepared), str(fixture.manifest),
+321:         str(fixture.arrival), "--reviewed-source-sha256", fixture.source_hash,
+322:         "--reviewed-manifest-sha256", fixture.manifest_hash,
+323:         "--migration-lineage", fixture.lineage,
+324:         "--migration-ordinal", str(fixture.ordinal),
+325:         "--migration-record-hash", fixture.record_hash,
+326:         "--output", str(fixture.original),
+327:     ]
+328:     assert _VERIFY.main(args) == 2
+329:     assert hashlib.sha256(fixture.original.read_bytes()).hexdigest() == fixture.source_hash
+330: 
+331:     alias = tmp_path / "source-alias.json"
+332:     alias.symlink_to(fixture.original)
+333:     args[-1] = str(alias)
+334:     assert _VERIFY.main(args) == 2
+335:     assert alias.is_symlink()
+336: 
+337:     output = tmp_path / "evidence.json"
+338:     args[-1] = str(output)
+339:     assert _VERIFY.main(args) == 0
+340:     assert json.loads(output.read_text())["schema"] == "loops.legacy-provenance/v1"
+341:     assert _VERIFY.main(args) == 2
+
+=== scripts/verify_legacy_provenance.py ===
+1: #!/usr/bin/env python3
+2: """Verify an audited legacy preparation through a pinned Arrival prefix.
+3: 
+4: This offline verifier makes no historical authorship claim. It verifies the
+5: Arrival hash chain and registry-forming signatures, while treating the
+6: independently supplied original/manifest hashes and migration head as trust
+7: anchors. It never repairs or rewrites an input.
+8: """
+9: 
+10: from __future__ import annotations
+11: 
+12: import argparse
+13: import hashlib
+14: import json
+15: import os
+16: import sys
+17: import tempfile
+18: from collections.abc import Iterator
+19: from dataclasses import dataclass
+20: from pathlib import Path
+21: from typing import Any
+22: 
+23: from custody.signing import ARRIVAL_DOMAIN
+24: from engine.arrival import (
+25:     GENESIS_KIND,
+26:     KEY_INTRODUCTION_KIND,
+27:     ArrivalLog,
+28:     content_commitment,
+29: )
+30: from engine.arrival_projection import rows_of_record
+31: from engine.jsonl_codec import deserialize_records
+32: from engine.row_commitment import fact_row_hash, tick_row_hash
+33: from sign import ed25519
+34: 
+35: POLICY = "legacy-unattributed-v1"
+36: NORMALIZED_OBSERVER = "legacy/unattributed"
+37: SCHEMA = "loops.legacy-provenance/v1"
+38: _MANIFEST_KEYS = {
+39:     "affected_rows", "normalized_observer", "output_path", "output_sha256",
+40:     "policy", "source_path", "source_sha256_after", "source_sha256_before",
+41: }
+42: _ENTRY_KEYS = {
+43:     "coordinate", "id", "normalized_line_sha256", "original_line_sha256",
+44: }
+45: 
+46: 
+47: class ProvenanceError(Exception):
+48:     """Base class for safe, metadata-only verification failures."""
+49: 
+50: 
+51: class ProvenanceRefused(ProvenanceError):
+52:     """The supplied artifacts do not prove the requested relationship."""
+53: 
+54: 
+55: @dataclass(frozen=True)
+56: class _SourceEvidence:
+57:     rows: int
+58:     facts: int
+59:     ticks: int
+60:     changed: int
+61:     unchanged: int
+62:     unchained_ticks: int
+63:     explained_windows: int
+64:     unchanged_windows: int
+65:     changed_facts: tuple[bool, ...]
+66: 
+67: 
+68: def _sha256(path: Path) -> str:
+69:     digest = hashlib.sha256()
+70:     with path.open("rb") as stream:
+71:         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+72:             digest.update(chunk)
+73:     return digest.hexdigest()
+74: 
+75: 
+76: def _ends_with_newline(path: Path) -> bool:
+77:     with path.open("rb") as stream:
+78:         stream.seek(0, os.SEEK_END)
+79:         if stream.tell() == 0:
+80:             return False
+81:         stream.seek(-1, os.SEEK_END)
+82:         return stream.read(1) == b"\n"
+83: 
+84: 
+85: def _hex(value: object, label: str) -> str:
+86:     if not isinstance(value, str) or len(value) != 64:
+87:         raise ProvenanceRefused(f"{label} must be a lowercase SHA-256 hex digest")
+88:     try:
+89:         decoded = bytes.fromhex(value)
+90:     except ValueError as exc:
+91:         raise ProvenanceRefused(f"{label} must be a lowercase SHA-256 hex digest") from exc
+92:     if decoded.hex() != value:
+93:         raise ProvenanceRefused(f"{label} must be a lowercase SHA-256 hex digest")
+94:     return value
+95: 
+96: 
+97: def _object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+98:     result: dict[str, Any] = {}
+99:     for key, value in pairs:
+100:         if key in result:
+101:             raise ProvenanceRefused("JSON input contains a duplicate key")
+102:         result[key] = value
+103:     return result
+104: 
+105: 
+106: def _reject_constant(_value: str) -> None:
+107:     raise ProvenanceRefused("JSON input contains a non-finite number")
+108: 
+109: 
+110: def _json_object(raw: bytes, label: str) -> dict[str, Any]:
+111:     try:
+112:         value = json.loads(
+113:             raw.decode("utf-8"),
+114:             object_pairs_hook=_object_pairs,
+115:             parse_constant=_reject_constant,
+116:         )
+117:     except ProvenanceRefused:
+118:         raise
+119:     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+120:         raise ProvenanceRefused(f"{label} is not a valid UTF-8 JSON object") from exc
+121:     if not isinstance(value, dict):
+122:         raise ProvenanceRefused(f"{label} must be a JSON object")
+123:     return value
+124: 
+125: 
+126: def _regular(path: Path | str, label: str) -> Path:
+127:     resolved = Path(path).expanduser().resolve(strict=False)
+128:     if not resolved.is_file():
+129:         raise ProvenanceRefused(f"{label} must be an existing regular file")
+130:     return resolved
+131: 
+132: 
+133: def _decode_flat(raw: bytes, coordinate: int, label: str) -> tuple[str, tuple]:
+134:     content, _ending = _split_ending(raw)
+135:     framed = _json_object(content, f"{label} line {coordinate}")
+136:     if framed.get("t") not in {"fact", "tick"} or "rows" in framed:
+137:         raise ProvenanceRefused(f"{label} line {coordinate} is not one flat row")
+138:     try:
+139:         records = deserialize_records(raw.decode("utf-8"))
+140:     except Exception as exc:
+141:         raise ProvenanceRefused(
+142:             f"{label} line {coordinate} is not supported flat JSONL"
+143:         ) from exc
+144:     if len(records) != 1:
+145:         raise ProvenanceRefused(f"{label} line {coordinate} is not one flat row")
+146:     kind, row = records[0]
+147:     if kind not in {"fact", "tick"}:
+148:         raise ProvenanceRefused(f"{label} line {coordinate} has an unsupported row kind")
+149:     if kind == "fact" and row[1].startswith("_decl."):
+150:         raise ProvenanceRefused(
+151:             f"{label} line {coordinate} uses the reserved declaration namespace"
+152:         )
+153:     return kind, row
+154: 
+155: 
+156: def _split_ending(raw: bytes) -> tuple[bytes, bytes]:
+157:     if raw.endswith(b"\r\n"):
+158:         return raw[:-2], b"\r\n"
+159:     if raw.endswith(b"\n"):
+160:         return raw[:-1], b"\n"
+161:     return raw, b""
+162: 
+163: 
+164: def _expected_normalized(raw: bytes, coordinate: int) -> bytes:
+165:     content, ending = _split_ending(raw)
+166:     value = _json_object(content, f"original line {coordinate}")
+167:     if (
+168:         value.get("t") != "fact"
+169:         or value.get("observer") != ""
+170:         or "rows" in value
+171:         or value.get("signature") is not None
+172:         or not isinstance(value.get("id"), str)
+173:     ):
+174:         raise ProvenanceRefused(
+175:             f"changed line {coordinate} is not an unsigned flat empty-observer fact"
+176:         )
+177:     value["observer"] = NORMALIZED_OBSERVER
+178:     try:
+179:         return json.dumps(
+180:             value, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+181:         ).encode("utf-8") + ending
+182:     except (TypeError, ValueError) as exc:
+183:         raise ProvenanceRefused(
+184:             f"changed line {coordinate} cannot be normalized exactly"
+185:         ) from exc
+186: 
+187: 
+188: class _TickChain:
+189:     def __init__(self, label: str) -> None:
+190:         self.label = label
+191:         self.fact_ids: list[str] = []
+192:         self.fact_hashes: list[str] = []
+193:         self.positions: dict[str, int] = {}
+194:         self.all_ids: set[str] = set()
+195:         self.changed: list[bool] = []
+196:         self.previous: tuple | None = None
+197:         self.last_cursor: str | None = None
+198:         self.ticks = 0
+199:         self.chained = 0
+200:         self.unchained = 0
+201: 
+202:     def fact(self, row: tuple, *, changed: bool = False) -> None:
+203:         fact_id = row[0]
+204:         if fact_id in self.all_ids:
+205:             raise ProvenanceRefused(f"{self.label} has a duplicate row id")
+206:         self.all_ids.add(fact_id)
+207:         self.positions[fact_id] = len(self.fact_ids)
+208:         self.fact_ids.append(fact_id)
+209:         self.fact_hashes.append(fact_row_hash(row))
+210:         self.changed.append(changed)
+211: 
+212:     def _position(self, fact_id: str, coordinate: int) -> int:
+213:         if fact_id == "":
+214:             return 0
+215:         position = self.positions.get(fact_id)
+216:         if position is None:
+217:             raise ProvenanceRefused(
+218:                 f"{self.label} tick at coordinate {coordinate} has a missing or future cursor"
+219:             )
+220:         return position + 1
+221: 
+222:     def tick(
+223:         self, row: tuple, coordinate: int, *, require_window: bool
+224:     ) -> tuple[str | None, bool]:
+225:         self.ticks += 1
+226:         if row[0] in self.all_ids:
+227:             raise ProvenanceRefused(f"{self.label} has a duplicate row id")
+228:         self.all_ids.add(row[0])
+229:         if row[9] is None:
+230:             if require_window:
+231:                 raise ProvenanceRefused(
+232:                     f"{self.label} post-migration tick at coordinate {coordinate} is unchained"
+233:                 )
+234:             if self.chained > 0:
+235:                 raise ProvenanceRefused(
+236:                     f"{self.label} returns to an unchained tick at coordinate {coordinate}"
+237:                 )
+238:             if any(row[index] is not None for index in (6, 7, 8)):
+239:                 raise ProvenanceRefused(
+240:                     f"{self.label} pre-chain tick carries chain fields at coordinate {coordinate}"
+241:                 )
+242:             self.unchained += 1
+243:             self.previous = row
+244:             return None, False
+245:         self.chained += 1
+246:         expected_previous = (
+247:             tick_row_hash(self.previous) if self.previous is not None else None
+248:         )
+249:         if row[6] != expected_previous:
+250:             raise ProvenanceRefused(
+251:                 f"{self.label} tick predecessor mismatch at coordinate {coordinate}"
+252:             )
+253:         if self.last_cursor is not None and row[7] != self.last_cursor:
+254:             raise ProvenanceRefused(
+255:                 f"{self.label} tick cursor discontinuity at coordinate {coordinate}"
+256:             )
+257:         lo = self._position(row[7], coordinate)
+258:         hi = self._position(row[8], coordinate)
+259:         if lo > hi:
+260:             raise ProvenanceRefused(
+261:                 f"{self.label} tick has a reversed window at coordinate {coordinate}"
+262:             )
+263:         digest = hashlib.sha256()
+264:         for fact_digest in self.fact_hashes[lo:hi]:
+265:             digest.update(fact_digest.encode())
+266:         calculated = digest.hexdigest()
+267:         transformed = any(self.changed[lo:hi])
+268:         self.last_cursor = row[8]
+269:         self.previous = row
+270:         return calculated, transformed
+271: 
+272: 
+273: def _manifest(path: Path, expected_hash: str) -> tuple[dict[str, Any], str]:
+274:     raw = path.read_bytes()
+275:     actual_hash = hashlib.sha256(raw).hexdigest()
+276:     if actual_hash != expected_hash:
+277:         raise ProvenanceRefused("preparation manifest does not match its reviewed hash")
+278:     value = _json_object(raw, "preparation manifest")
+279:     if set(value) != _MANIFEST_KEYS:
+280:         raise ProvenanceRefused("preparation manifest has an unsupported shape")
+281:     if value.get("policy") != POLICY or value.get("normalized_observer") != NORMALIZED_OBSERVER:
+282:         raise ProvenanceRefused("preparation manifest names an unsupported policy")
+283:     for field in ("source_sha256_before", "source_sha256_after", "output_sha256"):
+284:         _hex(value.get(field), f"manifest {field}")
+285:     if not isinstance(value.get("source_path"), str) or not isinstance(
+286:         value.get("output_path"), str
+287:     ):
+288:         raise ProvenanceRefused("preparation manifest paths are malformed")
+289:     entries = value.get("affected_rows")
+290:     if not isinstance(entries, list) or not entries:
+291:         raise ProvenanceRefused("preparation manifest has no affected-row audit")
+292:     previous = 0
+293:     for entry in entries:
+294:         if not isinstance(entry, dict) or set(entry) != _ENTRY_KEYS:
+295:             raise ProvenanceRefused("preparation manifest row entry is malformed")
+296:         coordinate = entry.get("coordinate")
+297:         if type(coordinate) is not int or coordinate <= previous:
+298:             raise ProvenanceRefused(
+299:                 "preparation manifest row coordinates must be unique and increasing"
+300:             )
+301:         previous = coordinate
+302:         if not isinstance(entry.get("id"), str) or not entry["id"]:
+303:             raise ProvenanceRefused("preparation manifest row id is malformed")
+304:         _hex(entry.get("original_line_sha256"), "manifest original-line hash")
+305:         _hex(entry.get("normalized_line_sha256"), "manifest normalized-line hash")
+306:     return value, actual_hash
+307: 
+308: 
+309: def _verify_sources(
+310:     original: Path,
+311:     prepared: Path,
+312:     manifest: dict[str, Any],
+313:     reviewed_source_hash: str,
+314: ) -> _SourceEvidence:
+315:     original_hash = _sha256(original)
+316:     prepared_hash = _sha256(prepared)
+317:     if original_hash != reviewed_source_hash:
+318:         raise ProvenanceRefused("original source does not match its reviewed hash")
+319:     if manifest["source_sha256_before"] != reviewed_source_hash or manifest[
+320:         "source_sha256_after"
+321:     ] != reviewed_source_hash:
+322:         raise ProvenanceRefused("manifest source hashes do not match the reviewed source")
+323:     if prepared_hash != manifest["output_sha256"]:
+324:         raise ProvenanceRefused("prepared source does not match the manifest output hash")
+325: 
+326:     entries = iter(manifest["affected_rows"])
+327:     pending = next(entries, None)
+328:     original_chain = _TickChain("original source")
+329:     prepared_chain = _TickChain("prepared source")
+330:     facts = ticks = changed = unchanged = explained = unchanged_windows = 0
+331:     changed_facts: list[bool] = []
+332:     with original.open("rb") as left, prepared.open("rb") as right:
+333:         coordinate = 0
+334:         while True:
+335:             raw = left.readline()
+336:             cooked = right.readline()
+337:             if not raw and not cooked:
+338:                 break
+339:             coordinate += 1
+340:             if not raw or not cooked:
+341:                 raise ProvenanceRefused("original and prepared sources have different row counts")
+342:             raw_kind, raw_row = _decode_flat(raw, coordinate, "original")
+343:             cooked_kind, cooked_row = _decode_flat(cooked, coordinate, "prepared")
+344:             is_changed = raw != cooked
+345:             if raw_kind == "fact" and raw_row[3] == "" and raw_row[6] is not None:
+346:                 raise ProvenanceRefused(
+347:                     f"signed empty-observer fact at coordinate {coordinate} is unsupported"
+348:                 )
+349:             if is_changed:
+350:                 if pending is None or pending["coordinate"] != coordinate:
+351:                     raise ProvenanceRefused(
+352:                         f"changed line {coordinate} is absent from the manifest audit"
+353:                     )
+354:                 expected = _expected_normalized(raw, coordinate)
+355:                 if cooked != expected:
+356:                     raise ProvenanceRefused(
+357:                         f"changed line {coordinate} is not the exact authorized transformation"
+358:                     )
+359:                 if pending["id"] != raw_row[0]:
+360:                     raise ProvenanceRefused(
+361:                         f"manifest row id disagrees at coordinate {coordinate}"
+362:                     )
+363:                 expected_row = (*raw_row[:3], NORMALIZED_OBSERVER, *raw_row[4:])
+364:                 if cooked_row != expected_row:
+365:                     raise ProvenanceRefused(
+366:                         f"changed row differs beyond observer at coordinate {coordinate}"
+367:                     )
+368:                 if pending["original_line_sha256"] != hashlib.sha256(raw).hexdigest():
+369:                     raise ProvenanceRefused(
+370:                         f"manifest original-line hash disagrees at coordinate {coordinate}"
+371:                     )
+372:                 if pending["normalized_line_sha256"] != hashlib.sha256(cooked).hexdigest():
+373:                     raise ProvenanceRefused(
+374:                         f"manifest normalized-line hash disagrees at coordinate {coordinate}"
+375:                     )
+376:                 pending = next(entries, None)
+377:                 changed += 1
+378:             else:
+379:                 if pending is not None and pending["coordinate"] == coordinate:
+380:                     raise ProvenanceRefused(
+381:                         f"manifest claims unchanged line {coordinate} was transformed"
+382:                     )
+383:                 unchanged += 1
+384:                 if raw_kind == "fact" and raw_row[3] == "" and raw_row[6] is None:
+385:                     raise ProvenanceRefused(
+386:                         f"eligible line {coordinate} was not transformed or audited"
+387:                     )
+388:             if raw_kind != cooked_kind:
+389:                 raise ProvenanceRefused(f"row kind changed at coordinate {coordinate}")
+390:             if raw_kind == "fact":
+391:                 if raw_row[0] != cooked_row[0]:
+392:                     raise ProvenanceRefused(f"fact identity changed at coordinate {coordinate}")
+393:                 facts += 1
+394:                 original_chain.fact(raw_row)
+395:                 prepared_chain.fact(cooked_row, changed=is_changed)
+396:                 changed_facts.append(is_changed)
+397:             else:
+398:                 ticks += 1
+399:                 if raw_row != cooked_row:
+400:                     raise ProvenanceRefused(f"tick row changed at coordinate {coordinate}")
+401:                 original_window, _ = original_chain.tick(
+402:                     raw_row, coordinate, require_window=False
+403:                 )
+404:                 prepared_window, transformed = prepared_chain.tick(
+405:                     cooked_row, coordinate, require_window=False
+406:                 )
+407:                 if original_window is not None and original_window != raw_row[9]:
+408:                     raise ProvenanceRefused(
+409:                         f"original tick window mismatch at coordinate {coordinate}"
+410:                     )
+411:                 if prepared_window is not None and prepared_window != cooked_row[9]:
+412:                     if not transformed or prepared_window == original_window:
+413:                         raise ProvenanceRefused(
+414:                             f"unexplained prepared tick window mismatch at coordinate {coordinate}"
+415:                         )
+416:                     explained += 1
+417:                 elif prepared_window is not None:
+418:                     unchanged_windows += 1
+419:         if pending is not None:
+420:             raise ProvenanceRefused("preparation manifest has unused affected-row entries")
+421: 
+422:     if changed != len(manifest["affected_rows"]):
+423:         raise ProvenanceRefused("preparation manifest is incomplete")
+424:     if _sha256(original) != original_hash or _sha256(prepared) != prepared_hash:
+425:         raise ProvenanceRefused("a source changed during verification")
+426:     return _SourceEvidence(
+427:         coordinate, facts, ticks, changed, unchanged, original_chain.unchained,
+428:         explained, unchanged_windows, tuple(changed_facts),
+429:     )
+430: 
+431: 
+432: def _prepared_rows(path: Path) -> Iterator[tuple[str, tuple]]:
+433:     with path.open("rb") as stream:
+434:         for coordinate, raw in enumerate(stream, 1):
+435:             yield _decode_flat(raw, coordinate, "prepared")
+436: 
+437: 
+438: def _verify_registry_signature(
+439:     record: dict[str, Any], keys: dict[str, list[str]], coordinate: int
+440: ) -> None:
+441:     signature = record.get("sig")
+442:     if not isinstance(signature, str):
+443:         raise ProvenanceRefused(
+444:             f"migration metadata at ordinal {coordinate} is unsigned"
+445:         )
+446:     digest = content_commitment(
+447:         record["k"], record["at"], record["observer"], record["origin"], record["body"]
+448:     ).encode()
+449:     valid = False
+450:     for encoded in keys.get(record["observer"], ()):
+451:         try:
+452:             public = ed25519.public_key_from_b64(encoded)
+453:         except ValueError:
+454:             continue
+455:         if ed25519.verify(public, signature, digest, domain=ARRIVAL_DOMAIN):
+456:             valid = True
+457:             break
+458:     if not valid:
+459:         raise ProvenanceRefused(
+460:             f"migration metadata signature does not verify at ordinal {coordinate}"
+461:         )
+462: 
+463: 
+464: def _verify_arrival(
+465:     arrival: Path,
+466:     prepared: Path,
+467:     source: _SourceEvidence,
+468:     *,
+469:     lineage: str,
+470:     migration_ordinal: int,
+471:     migration_hash: str,
+472: ) -> dict[str, Any]:
+473:     before_hash = _sha256(arrival)
+474:     if not _ends_with_newline(arrival):
+475:         raise ProvenanceRefused("Arrival target has an incomplete trailing record")
+476:     metadata_count = migration_ordinal + 1 - source.rows
+477:     if metadata_count < 1:
+478:         raise ProvenanceRefused("pinned migration head cannot contain the prepared source")
+479:     expected = iter(_prepared_rows(prepared))
+480:     chain = _TickChain("Arrival target")
+481:     registry: dict[str, list[str]] = {}
+482:     facts = ticks = post_ticks = historical_explained = historical_unchanged = 0
+483:     record_count = 0
+484:     final_head: dict[str, Any] | None = None
+485:     historical_tick_index = 0
+486:     records = None
+487:     try:
+488:         records = ArrivalLog(arrival).walk()
+489:         for record in records:
+490:             ordinal = record["ord"]
+491:             record_count += 1
+492:             final_head = {
+493:                 "lineage": record["lin"],
+494:                 "ordinal": ordinal,
+495:                 "record_hash": record["rh"],
+496:             }
+497:             if record["lin"] != lineage:
+498:                 raise ProvenanceRefused("Arrival target lineage differs from pinned S")
+499:             if ordinal < metadata_count:
+500:                 if ordinal == 0:
+501:                     if record["k"] != GENESIS_KIND:
+502:                         raise ProvenanceRefused("migration prefix does not begin with genesis")
+503:                     key = record["body"]["key"]
+504:                     _verify_registry_signature(record, {record["observer"]: [key]}, ordinal)
+505:                     registry[record["observer"]] = [key]
+506:                 else:
+507:                     if record["k"] != KEY_INTRODUCTION_KIND:
+508:                         raise ProvenanceRefused(
+509:                             f"non-protocol record appears before source at ordinal {ordinal}"
+510:                         )
+511:             if ordinal > 0 and record["k"] == KEY_INTRODUCTION_KIND:
+512:                 _verify_registry_signature(record, registry, ordinal)
+513:                 registry.setdefault(record["body"]["observer"], []).append(
+514:                     record["body"]["key"]
+515:                 )
+516:             if metadata_count <= ordinal <= migration_ordinal:
+517:                 try:
+518:                     wanted = next(expected)
+519:                 except StopIteration as exc:
+520:                     raise ProvenanceRefused(
+521:                         "migration prefix contains extra source rows"
+522:                     ) from exc
+523:                 actual = rows_of_record(record)
+524:                 if len(actual) != 1 or actual[0] != wanted:
+525:                     raise ProvenanceRefused(
+526:                         f"migration prefix row mismatch at ordinal {ordinal}"
+527:                     )
+528:             if ordinal == migration_ordinal and record["rh"] != migration_hash:
+529:                 raise ProvenanceRefused("Arrival record at S does not match the pinned hash")
+530: 
+531:             for kind, row in rows_of_record(record):
+532:                 if kind == "fact":
+533:                     facts += 1
+534:                     fact_index = len(chain.fact_ids)
+535:                     chain.fact(
+536:                         row,
+537:                         changed=(
+538:                             ordinal <= migration_ordinal
+539:                             and fact_index < len(source.changed_facts)
+540:                             and source.changed_facts[fact_index]
+541:                         ),
+542:                     )
+543:                 else:
+544:                     ticks += 1
+545:                     require = ordinal > migration_ordinal
+546:                     calculated, transformed = chain.tick(
+547:                         row, ordinal, require_window=require
+548:                     )
+549:                     if ordinal <= migration_ordinal:
+550:                         historical_tick_index += 1
+551:                         if calculated is not None and calculated != row[9]:
+552:                             if not transformed:
+553:                                 raise ProvenanceRefused(
+554:                                     f"unexplained historical Arrival window mismatch at ordinal {ordinal}"
+555:                                 )
+556:                             historical_explained += 1
+557:                         elif calculated is not None:
+558:                             historical_unchanged += 1
+559:                     else:
+560:                         post_ticks += 1
+561:                         if calculated != row[9]:
+562:                             raise ProvenanceRefused(
+563:                                 f"post-migration tick window mismatch at ordinal {ordinal}"
+564:                             )
+565:         try:
+566:             next(expected)
+567:         except StopIteration:
+568:             pass
+569:         else:
+570:             raise ProvenanceRefused("migration prefix is missing prepared source rows")
+571:     except ProvenanceRefused:
+572:         raise
+573:     except Exception as exc:
+574:         raise ProvenanceRefused("Arrival target failed complete structural verification") from exc
+575:     finally:
+576:         for iterator in (expected, records):
+577:             closer = getattr(iterator, "close", None)
+578:             if callable(closer):
+579:                 closer()
+580:     if record_count <= migration_ordinal:
+581:         raise ProvenanceRefused("Arrival target does not reach pinned migration head S")
+582:     assert final_head is not None
+583:     if historical_tick_index != source.ticks:
+584:         raise ProvenanceRefused("migration prefix tick count differs from prepared source")
+585:     if historical_explained != source.explained_windows:
+586:         raise ProvenanceRefused("historical transformed-window evidence differs after migration")
+587:     if historical_unchanged != source.unchanged_windows:
+588:         raise ProvenanceRefused("historical unchanged-window evidence differs after migration")
+589:     if _sha256(arrival) != before_hash:
+590:         raise ProvenanceRefused("Arrival target changed during verification")
+591:     return {
+592:         "sha256": before_hash,
+593:         "records": record_count,
+594:         "captured_head": final_head,
+595:         "facts": facts,
+596:         "ticks": ticks,
+597:         "protocol_metadata_records": metadata_count,
+598:         "source_first_ordinal": metadata_count,
+599:         "source_last_ordinal": migration_ordinal,
+600:         "post_migration_ticks_verified": post_ticks,
+601:     }
+602: 
+603: 
+604: def verify_legacy_provenance(
+605:     original: Path | str,
+606:     prepared: Path | str,
+607:     manifest: Path | str,
+608:     arrival: Path | str,
+609:     *,
+610:     reviewed_source_sha256: str,
+611:     reviewed_manifest_sha256: str,
+612:     migration_lineage: str,
+613:     migration_ordinal: int,
+614:     migration_record_hash: str,
+615: ) -> dict[str, Any]:
+616:     """Return metadata-only evidence or refuse without changing an artifact."""
+617:     source_hash = _hex(reviewed_source_sha256, "reviewed source hash")
+618:     manifest_hash = _hex(reviewed_manifest_sha256, "reviewed manifest hash")
+619:     migration_hash = _hex(migration_record_hash, "migration record hash")
+620:     if not migration_lineage or type(migration_ordinal) is not int or migration_ordinal < 0:
+621:         raise ProvenanceRefused("migration head S is malformed")
+622:     original_path = _regular(original, "original source")
+623:     prepared_path = _regular(prepared, "prepared source")
+624:     manifest_path = _regular(manifest, "preparation manifest")
+625:     arrival_path = _regular(arrival, "Arrival target")
+626:     if len({original_path, prepared_path, manifest_path, arrival_path}) != 4:
+627:         raise ProvenanceRefused("all four input artifacts must be distinct")
+628: 
+629:     manifest_value, actual_manifest_hash = _manifest(manifest_path, manifest_hash)
+630:     source = _verify_sources(
+631:         original_path, prepared_path, manifest_value, source_hash
+632:     )
+633:     arrival_evidence = _verify_arrival(
+634:         arrival_path,
+635:         prepared_path,
+636:         source,
+637:         lineage=migration_lineage,
+638:         migration_ordinal=migration_ordinal,
+639:         migration_hash=migration_hash,
+640:     )
+641:     if _sha256(manifest_path) != actual_manifest_hash:
+642:         raise ProvenanceRefused("preparation manifest changed during verification")
+643:     if _sha256(original_path) != source_hash:
+644:         raise ProvenanceRefused("original source changed during verification")
+645:     if _sha256(prepared_path) != manifest_value["output_sha256"]:
+646:         raise ProvenanceRefused("prepared source changed during verification")
+647:     return {
+648:         "schema": SCHEMA,
+649:         "status": "preserved-boundaries-with-audited-transformation",
+650:         "trust": {
+651:             "reviewed_source_sha256": source_hash,
+652:             "reviewed_manifest_sha256": manifest_hash,
+653:             "migration_head": {
+654:                 "lineage": migration_lineage,
+655:                 "ordinal": migration_ordinal,
+656:                 "record_hash": migration_hash,
+657:             },
+658:             "pins": "caller-supplied",
+659:             "pin_independence_verified": False,
+660:             "migration_report_signature_verified": False,
+661:         },
+662:         "preparation": {
+663:             "policy": POLICY,
+664:             "source_sha256": source_hash,
+665:             "prepared_sha256": manifest_value["output_sha256"],
+666:             "rows": source.rows,
+667:             "facts": source.facts,
+668:             "ticks": source.ticks,
+669:             "transformed_rows": source.changed,
+670:             "byte_identical_rows": source.unchanged,
+671:         },
+672:         "commitments": {
+673:             "original_tick_chain": "structurally-verified",
+674:             "unchained_historical_ticks": source.unchained_ticks,
+675:             "unchanged_historical_windows": source.unchanged_windows,
+676:             "explained_transformation_windows": source.explained_windows,
+677:             "historical_authorship_verified": False,
+678:             "ordinary_envelope_signatures_verified": False,
+679:             "inner_fact_tick_signatures_verified": False,
+680:             "meaning": "old commitments bind the pinned original rows; mapped rows carry no historical authorship claim",
+681:         },
+682:         "arrival": {
+683:             **arrival_evidence,
+684:             "record_hash_chain": "verified",
+685:             "registry_forming_signatures": "verified",
+686:             "prepared_rows_at_pinned_prefix": "exact-in-order",
+687:         },
+688:     }
+689: 
+690: 
+691: def _parser() -> argparse.ArgumentParser:
+692:     parser = argparse.ArgumentParser(
+693:         description="Verify audited legacy provenance through a pinned Arrival migration prefix."
+694:     )
+695:     parser.add_argument("original", type=Path)
+696:     parser.add_argument("prepared", type=Path)
+697:     parser.add_argument("manifest", type=Path)
+698:     parser.add_argument("arrival", type=Path)
+699:     parser.add_argument("--reviewed-source-sha256", required=True)
+700:     parser.add_argument("--reviewed-manifest-sha256", required=True)
+701:     parser.add_argument("--migration-lineage", required=True)
+702:     parser.add_argument("--migration-ordinal", required=True, type=int)
+703:     parser.add_argument("--migration-record-hash", required=True)
+704:     parser.add_argument("--output", type=Path)
+705:     return parser
+706: 
+707: 
+708: def _publish_output(path: Path, value: dict[str, Any], inputs: set[Path]) -> None:
+709:     resolved = path.expanduser().resolve(strict=False)
+710:     if resolved in inputs:
+711:         raise ProvenanceRefused("output must not alias an input artifact")
+712:     if resolved.exists() or resolved.is_symlink():
+713:         raise ProvenanceRefused("output already exists and will not be overwritten")
+714:     if not resolved.parent.is_dir():
+715:         raise ProvenanceRefused("output parent directory does not exist")
+716:     fd, raw = tempfile.mkstemp(prefix=f".{resolved.name}.", suffix=".stage", dir=resolved.parent)
+717:     staged = Path(raw)
+718:     try:
+719:         with os.fdopen(fd, "wb") as stream:
+720:             stream.write(json.dumps(value, indent=2, sort_keys=True).encode())
+721:             stream.write(b"\n")
+722:             stream.flush()
+723:             os.fsync(stream.fileno())
+724:         try:
+725:             os.link(staged, resolved)
+726:         except FileExistsError as exc:
+727:             raise ProvenanceRefused("output appeared during verification") from exc
+728:     finally:
+729:         staged.unlink(missing_ok=True)
+730: 
+731: 
+732: def main(argv: list[str] | None = None) -> int:
+733:     args = _parser().parse_args(argv)
+734:     try:
+735:         result = verify_legacy_provenance(
+736:             args.original,
+737:             args.prepared,
+738:             args.manifest,
+739:             args.arrival,
+740:             reviewed_source_sha256=args.reviewed_source_sha256,
+741:             reviewed_manifest_sha256=args.reviewed_manifest_sha256,
+742:             migration_lineage=args.migration_lineage,
+743:             migration_ordinal=args.migration_ordinal,
+744:             migration_record_hash=args.migration_record_hash,
+745:         )
+746:         if args.output is None:
+747:             print(json.dumps(result, sort_keys=True))
+748:         else:
+749:             inputs = {
+750:                 Path(item).expanduser().resolve(strict=False)
+751:                 for item in (args.original, args.prepared, args.manifest, args.arrival)
+752:             }
+753:             _publish_output(args.output, result, inputs)
+754:     except ProvenanceError as exc:
+755:         print(f"provenance verification refused: {exc}", file=sys.stderr)
+756:         return 2
+757:     # CLI errors must never echo malformed row content through a dependency's
+758:     # exception. Library callers still receive the typed refusals above.
+759:     except Exception as exc:  # noqa: BLE001
+760:         print(
+761:             "provenance verification refused: unexpected input or storage "
+762:             f"failure ({type(exc).__name__})",
+763:             file=sys.stderr,
+764:         )
+765:         return 2
+766:     return 0
+767: 
+768: 
+769: if __name__ == "__main__":
+770:     raise SystemExit(main())
+
+=== docs/scratch/arrival-break/loops-live-cutover-plan-2026-09-18.md ===
+1: # Loops live Arrival cutover plan
+2: 
+3: This is an execution plan for a future, separately authorized maintenance
+4: window. It does not authorize a live migration, key access, descriptor swap or
+5: write. It uses the user-approved `legacy-unattributed-v1` transformation and
+6: the fresh runtime epoch; it does not recast the old tick-window commitments as
+7: unchanged commitments over the prepared archive.
+8: 
+9: The September 18 copy rehearsal is evidence for the path, not an input to this
+10: cutover. Its source snapshot, prepared copy, lineage, report and credentials
+11: are never promoted to production. The live window starts with a new snapshot
+12: and independently captured pins.
+13: 
+14: ## Supported runtime boundary
+15: 
+16: Use the descriptor-first SDK after the descriptor is published:
+17: 
+18: - Reads and inspection: `inspect_declaration`, `read_summary`, `read_facts`,
+19:   `read_ticks`, `read_state`, `read_timeline`, `search_facts`, `sync_target`,
+20:   and `verify_target`.
+21: - Writes: `preview_emission`, `emit_fact`, `emit_batch`,
+22:   `edit_declaration`, and the SDK kind-mutation APIs, with a mapped credential
+23:   provider.
+24: - Source/cadence execution: asynchronous `run_sources`, with an explicit
+25:   observer, mapped provider, collector factory, and dispatcher supplied by the
+26:   production job. It requires one Arrival Authority vertex.
+27: - Preservation: `export_target` creates an exclusive exact Arrival export at a
+28:   captured head.
+29: - Adoption: `adopt_arrival(..., runtime_epoch="fresh")`; if an intent remains,
+30:   only `recover_arrival_adoption(intent_path)` may reconcile it. Recovery has
+31:   no signer or epoch argument.
+32: 
+33: Do **not** use `loops emit`, `loops sync`, `loops stream`, `loops read`,
+34: `loops store`, `loops store absorb`, `loops store adopt`, `loops store reanchor`,
+35: or `loops store reindex` against the candidate or live descriptor. Those
+36: commands retain the legacy SQLite/canonical-store and `open_vertex` consumer
+37: paths. This plan has not established a refusal for each command, including
+38: `loops store absorb`; it makes no safety claim based on such a refusal. Keeping
+39: them disabled is the protection. They do not form a reviewed Arrival-v2 writer
+40: or reader handoff. In particular, `loops store migrate` is not the cutover
+41: ceremony: it has no reviewed-snapshot, provenance verification, mapped-binding,
+42: fresh-adoption, or recovery handoff.
+43: 
+44: The legacy source and its sibling SQLite index are archival inputs after the
+45: swap. Neither is a fallback writer for an Arrival lineage.
+46: 
+47: ## Inputs and durable locations
+48: 
+49: The maintenance owner records absolute paths and SHA-256 values in the cutover
+50: receipt, without payloads or private key material. Keep `ORIGINAL_SOURCE_SHA256`,
+51: `ORIGINAL_VERTEX_SHA256`, and `CANDIDATE_VERTEX_SHA256` distinct; the source
+52: and descriptor pins are not interchangeable.
+53: 
+54: | Role | Required property |
+55: | --- | --- |
+56: | `LIVE_VERTEX`, `LIVE_SOURCE` | Existing production `.vertex` and canonical JSONL, captured after writer quiescence. |
+57: | `CUTOVER_ROOT` | New access-controlled directory outside the repository and outside the live vertex directory. It contains snapshots, candidate, reports, exports and receipts. |
+58: | `CUTOVER_STATE` | New durable `$XDG_STATE_HOME` for migration, adoption, recovery, and every later Arrival writer. It contains the authoritative Arrival head journal; it is not a rehearsal state directory. |
+59: | `CUTOVER_BINDINGS` | New durable mapped-credential root. It is neither a copied rehearsal provider root nor `$XDG_STATE_HOME`. Its selected public binding is recorded in the receipt. |
+60: | `ARCHIVE_ORIGINAL` | Immutable original JSONL/vertex snapshots plus a separately named, exclusively written prepublication vertex backup. Keep all of them after cutover. |
+61: | `PREPARED_SOURCE`, `PREPARATION_MANIFEST` | Exclusive output of `prepare_legacy_unattributed.py`; retain both alongside the original snapshot. |
+62: | `CANDIDATE_VERTEX`, `ARRIVAL_STORE` | A copied vertex and its lineage-named Arrival file minted directly in the final durable store directory. Before adoption, rewrite only the candidate descriptor text to name that same resolved path absolutely. |
+63: 
+64: No live private-key directory is reused as a rehearsal credential root. Migration
+65: uses the approved current custodian signing capability only while writers are
+66: quiesced. The production mapped provider is created in `CUTOVER_BINDINGS` from
+67: the explicitly selected approved key reference or a controlled one-time legacy
+68: import. Its public key must equal the captured declaration key. The private
+69: credential source stays under its normal custody controls; recovery later uses
+70: only public FACT and Arrival verification and must work with that source
+71: offline.
+72: 
+73: Every candidate migration, report check, provenance check, adoption, recovery,
+74: post-adoption SDK check, and later enabled Arrival writer runs with
+75: `XDG_STATE_HOME` set to exactly `CUTOVER_STATE`. Do not inherit a rehearsal
+76: state root or an operator's default state root. `CUTOVER_BINDINGS` is passed explicitly to
+77: `MappedCredentialProvider`; it is never inferred from XDG state.
+78: 
+79: ## Quiescence and fresh pins
+80: 
+81: Before taking any snapshot, stop and account for every process that can change
+82: the canonical JSONL, its derived SQLite index, the vertex, or its adjacent
+83: key/configuration files. The known inventory includes interactive `loops emit`,
+84: scheduled or manual `loops sync` source runs, `loops init`, all `loops store`
+85: mutators, local scripts using legacy stores, direct SDK/engine writers, and any
+86: service using the vertex. Disable their schedulers and prevent new sessions;
+87: record owners, process IDs or service revisions, and the time the stop took
+88: effect. Readers may stay only if they do not repair, reindex, or write local
+89: metadata into the cutover locations.
+90: 
+91: Take a new source and vertex snapshot only after that gate. The following are
+92: the shell primitives to record in the operations transcript; substitute the
+93: approved absolute paths and run them only in the maintenance window:
+94: 
+95: ```sh
+96: umask 077
+97: mkdir -p "$CUTOVER_ROOT/original" "$CUTOVER_ROOT/prepared" "$CUTOVER_ROOT/receipts"
+98: cp -p "$LIVE_SOURCE" "$CUTOVER_ROOT/original/project.jsonl"
+99: cp -p "$LIVE_VERTEX" "$CUTOVER_ROOT/original/project.vertex"
+100: shasum -a 256 "$LIVE_SOURCE" "$LIVE_VERTEX" \
+101:   "$CUTOVER_ROOT/original/project.jsonl" "$CUTOVER_ROOT/original/project.vertex"
+102: cmp -s "$LIVE_SOURCE" "$CUTOVER_ROOT/original/project.jsonl"
+103: cmp -s "$LIVE_VERTEX" "$CUTOVER_ROOT/original/project.vertex"
+104: ```
+105: 
+106: The two `cmp` checks and matching hashes are a gate, not a best-effort log.
+107: Capture the source hash again immediately before migration, before descriptor
+108: publication, and after all pre-publication checks. Any change releases the
+109: quiescence lock, abandons the candidate, and starts a new snapshot; no resume
+110: against changed source is allowed.
+111: 
+112: ## Audited preparation and provenance gate
+113: 
+114: Prepare only the copied JSONL. Its policy changes an exactly empty observer on
+115: an unsigned flat fact to `legacy/unattributed`; it preserves IDs, payload text,
+116: timestamps, order, all ticks, and every other field. It refuses a missing/null
+117: observer, a signed blank observer, an input/output alias, overwrite, or no
+118: eligible rows. The original snapshot remains immutable. Record the new snapshot's affected-row
+119: count explicitly for review; the rehearsal count was 982, not a fixed expected
+120: count for a later production snapshot.
+121: 
+122: Run the preparation utility with exclusive output and a new manifest, then pin
+123: the original source and manifest hashes outside all inputs. The exact
+124: provenance-verifier interface agreed for the cutover is:
+125: 
+126: ```sh
+127: uv run python scripts/verify_legacy_provenance.py \
+128:   "$ARCHIVE_ORIGINAL/project.jsonl" "$PREPARED_SOURCE" "$PREPARATION_MANIFEST" "$ARRIVAL_STORE" \
+129:   --reviewed-source-sha256 "$ORIGINAL_SOURCE_SHA256" \
+130:   --reviewed-manifest-sha256 "$MANIFEST_SHA256" \
+131:   --migration-lineage "$LINEAGE" \
+132:   --migration-ordinal "$S_ORDINAL" \
+133:   --migration-record-hash "$S_RECORD_HASH" \
+134:   --output "$CUTOVER_ROOT/receipts/legacy-provenance.json"
+135: ```
+136: 
+137: This verifier is read-only, requires independent pins, and is limited to the
+138: flat zero-drop preparation policy. It verifies the original historical
+139: predecessor/cursor/window chain, the mapping manifest, the prepared prefix at
+140: S, and later physical tick-chain evidence. A pass means **preserved boundaries
+141: with audited transformation**. It does not claim old fact-window hashes were
+142: unchanged after observer mapping. Migration report signature/authorship checks
+143: remain a separate gate.
+144: 
+145: The verifier must be landed, reviewed and exercised on a new production-shaped
+146: copy before this plan can run. Until then, the historical-provenance gate is a
+147: blocker.
+148: 
+149: ## Candidate migration and adoption
+150: 
+151: Build a candidate vertex from the fresh vertex snapshot in `CUTOVER_ROOT`; do
+152: not call migration with `LIVE_VERTEX`. Place its pre-migration source residence
+153: so parsing the copied vertex resolves the store clause to exactly
+154: `PREPARED_SOURCE`. Record the candidate bytes, its parsed source path, and that
+155: resolved path before migration. This makes the reviewed original vertex bytes
+156: and the published candidate differ only in controlled residence, while ensuring
+157: the migration consumes the prepared copy rather than an accidental sibling.
+158: 
+159: The existing migration API publishes only into the vertex it receives, so using
+160: a candidate keeps the live declaration unchanged during migration and adoption
+161: gates. Pass the final durable store directory as `run_migration(store_dir=...)`
+162: up front: its lineage-named `outcome.target_path` is `ARRIVAL_STORE`. Do not
+163: move that file after minting; witness/location binding requires a separate
+164: relocation ceremony that this plan does not invoke. After migration verifies S,
+165: use `edit_vertex_store_clause` on the *candidate* to change only the textual
+166: location to the absolute path resolving to `outcome.target_path`, retaining the
+167: exact lineage. That call takes the candidate's exact pre-edit bytes and
+168: re-parses the result, so it refuses a concurrent candidate change or a
+169: non-store-field change. Re-run report verification and
+170: `verify_target(..., through=S)` against the same physical store and rewritten
+171: candidate before adoption.
+172: 
+173: The supported migration primitive is `migrate.sidecar.run_migration`, with the
+174: prepared source, candidate vertex, the final durable store directory, the
+175: approved custodian signer, and the identity transform. The preparation utility
+176: has already performed the only allowed observer rewrite. It returns
+177: `MigrationOutcome(target_path, lineage, head, report_path, exceptions)`.
+178: Require zero dropped units, then pin `S = outcome.head` as lineage, ordinal and
+179: record hash. Verify, before adoption:
+180: 
+181: ```python
+182: from migrate.sidecar import verify_migration_report
+183: from sdk import verify_target
+184: 
+185: assert verify_migration_report(
+186:     outcome.report_path,
+187:     custodian_public_key,
+188:     verify=report_signature_verifier,
+189:     target_path=ARRIVAL_STORE,
+190: )
+191: assert verify_target(candidate_vertex, through=outcome.head).verified_through == outcome.head
+192: ```
+193: 
+194: `report_signature_verifier` is the explicitly supplied public verifier for the
+195: report's signing domain. Save the report hash and the verified S coordinates
+196: before any later append. Then run the provenance command above with those pins.
+197: The source hash must still equal the fresh source snapshot at each gate.
+198: 
+199: Create or confirm the selected mapped binding in `CUTOVER_BINDINGS` before
+200: adoption. Its FACT and Arrival requests must resolve to one captured public key
+201: for the adoption observer. The SDK independently verifies both signatures; a
+202: provider-local permissive verifier is not sufficient.
+203: 
+204: ```python
+205: from sdk import MappedCredentialProvider, adopt_arrival
+206: 
+207: provider = MappedCredentialProvider(
+208:     CUTOVER_BINDINGS,
+209:     namespace=CUTOVER_NAMESPACE,
+210:     receipt_observer=CUTOVER_OBSERVER,
+211: )
+212: # Use exactly one reviewed binding operation, recorded with its token:
+213: # provider.bind_existing_ref(...) or provider.import_legacy(...)
+214: 
+215: adopted = adopt_arrival(
+216:     candidate_vertex,
+217:     selected_head=outcome.head,
+218:     reviewed_text=reviewed_vertex_text,
+219:     reviewed_sha256=reviewed_vertex_sha256,
+220:     declaration_text=candidate_vertex.read_text(encoding="utf-8"),
+221:     observer=CUTOVER_OBSERVER,
+222:     credentials=provider,
+223:     runtime_epoch="fresh",
+224: )
+225: ```
+226: 
+227: Require `adopted.commit.before == S`, `adopted.head == adopted.commit.after`,
+228: `adopted.runtime_epoch == "fresh"`, `adopted.phase` published, and a caught-up
+229: projection. If apply reports a retained intent, preserve it and use
+230: `recover_arrival_adoption(intent_path)` with the dedicated public SDK verifier
+231: configuration. Do not retry adoption with new signatures. A provably
+232: superseded intent is stale evidence; preserve it and prepare a fresh candidate
+233: only after recording the disposition.
+234: 
+235: At A, use the SDK to require all of the following from the candidate:
+236: 
+237: - `verify_target(..., through=A)` succeeds and `sync_target` is current at A.
+238: - `inspect_declaration` reports the Arrival-backed effective declaration.
+239: - `read_summary`, `read_facts`, and `read_ticks` retain the inventory history.
+240: - `read_state` reports `runtime_epoch == {"mode": "fresh", "anchor_ordinal": A.ordinal}`
+241:   and matches the reviewed declaration's initial fold sections.
+242: - `export_target(..., through=A)` writes an exclusive exact export. Store its
+243:   manifest and SHA-256 in the receipt.
+244: 
+245: Re-run `verify_legacy_provenance.py` at A with the same independent original,
+246: manifest and S pins, writing a second exclusive `legacy-provenance-at-A.json`
+247: receipt. Require its `arrival.captured_head` to equal A in all three fields and
+248: retain its `arrival.sha256` as the post-adoption store hash used by rollback.
+249: This binds the pre-publication Arrival state, including the adoption anchor,
+250: to the audited transformation; it is not substituted for the signed
+251: migration-report verification at S.
+252: 
+253: No rehearsal-only fact is written to production. The first post-cutover fact is
+254: a separately authorized business operation.
+255: 
+256: ## Publication and writer handoff
+257: 
+258: There are two distinct publication points:
+259: 
+260: 1. Migration and adoption make durable records in `ARRIVAL_STORE`, while only
+261:    `CANDIDATE_VERTEX` names them. This is pre-live evidence and does not change
+262:    `LIVE_VERTEX`.
+263: 2. The final descriptor replacement makes the candidate declaration live. It
+264:    must be an atomic same-directory replace that first confirms the live vertex
+265:    still equals the pinned original bytes and then fsyncs the directory. Save
+266:    a separately named prepublication backup under `ARCHIVE_ORIGINAL` (for
+267:    example `project.vertex.prepublish`); do not overwrite it on a retry.
+268: 
+269: Prepare the final replacement file in `LIVE_VERTEX.parent` so the final
+270: `os.replace` is same-directory. Under the already-held quiescence lock, a small
+271: one-shot publication procedure must do the following in order:
+272: 
+273: 1. Read `LIVE_VERTEX` and `CANDIDATE_VERTEX`; require their SHA-256 values to
+274:    equal the recorded original and candidate pins. Re-parse the candidate and
+275:    require its descriptor to name the final absolute `ARRIVAL_STORE`, the
+276:    pinned lineage, and authority role.
+277: 2. Create and `fsync` the separately named prepublication backup exclusively,
+278:    or, on a retry, require its existing hash to equal the original pin. Then
+279:    create `LIVE_VERTEX.parent / ".<name>.arrival-cutover"` exclusively with
+280:    the candidate bytes, `fsync` it, reread/hash it, and require the candidate
+281:    hash again. An existing stage path refuses.
+282: 3. Reread and hash `LIVE_VERTEX` one final time. If it no longer equals the
+283:    original pin, remove only the uninstalled stage file and refuse.
+284: 4. Call `os.replace(stage_path, LIVE_VERTEX)`, then open and `fsync` the parent
+285:    directory. Reread/hash the new live vertex and require the candidate pin.
+286: 
+287: This is an atomic same-directory replacement under quiescence; it is not an
+288: atomic compare-and-swap. Quiescence is the guarantee against a concurrent
+289: editor; the two live-byte checks detect drift observed before replacement. The
+290: procedure's receipt binds the old and candidate hashes, A, stable Arrival path,
+291: backup hash, and replacement result.
+292: 
+293: ```python
+294: def publish_vertex(live: Path, candidate: Path, backup: Path) -> tuple[str, str]:
+295:     old = live.read_bytes()
+296:     replacement = candidate.read_bytes()
+297:     old_hash = hashlib.sha256(old).hexdigest()
+298:     replacement_hash = hashlib.sha256(replacement).hexdigest()
+299:     if old_hash != ORIGINAL_VERTEX_SHA256 or replacement_hash != CANDIDATE_VERTEX_SHA256:
+300:         raise RuntimeError("cutover input hash changed")
+301:     stage = live.parent / f".{live.name}.arrival-cutover"
+302:     if backup.exists():
+303:         if hashlib.sha256(backup.read_bytes()).hexdigest() != old_hash:
+304:             raise RuntimeError("existing prepublication backup hash mismatch")
+305:     else:
+306:         _write_exclusive_and_fsync(backup, old)
+307:     if hashlib.sha256(backup.read_bytes()).hexdigest() != old_hash:
+308:         raise RuntimeError("original backup hash mismatch")
+309:     if stage.exists():
+310:         raise RuntimeError("exclusive live-directory stage already exists")
+311:     _write_exclusive_and_fsync(stage, replacement)
+312:     if hashlib.sha256(stage.read_bytes()).hexdigest() != replacement_hash:
+313:         raise RuntimeError("staged candidate changed")
+314:     if live.read_bytes() != old:  # quiescence check immediately before replace
+315:         stage.unlink(missing_ok=True)
+316:         raise RuntimeError("live vertex changed during publication")
+317:     os.replace(stage, live)
+318:     _fsync_directory(live.parent)
+319:     if hashlib.sha256(live.read_bytes()).hexdigest() != replacement_hash:
+320:         raise RuntimeError("published vertex hash mismatch")
+321:     return old_hash, replacement_hash
+322: ```
+323: 
+324: This is illustrative algorithm text, not an implemented cutover command.
+325: `_write_exclusive_and_fsync` opens with exclusive creation, writes, flushes and
+326: calls `os.fsync`; `_fsync_directory` opens the directory read-only and calls
+327: `os.fsync`. Before use, the cutover transcript must add the step-1 descriptor
+328: reparse and receipt serialization, then record a disposable-directory rehearsal
+329: of the exact fragment.
+330: 
+331: Keep writers stopped through the replacement, reopen the descriptor only with
+332: the SDK operations above, and repeat `verify_target`, `sync_target`,
+333: `inspect_declaration`, `read_summary`, and `read_state` against `LIVE_VERTEX`.
+334: Run `preview_emission` for the separately approved first business payload with
+335: the production mapped provider against `LIVE_VERTEX`; require
+336: `read_path == "arrival"` and `captured_head == A`, with no append. Record the
+337: explicit `CUTOVER_BINDINGS` and `CUTOVER_STATE` paths used by that process and
+338: confirm no binding or head-journal material was resolved from the candidate or
+339: from a default-state root.
+340: Only then hand each inventoried writer to a descriptor-first SDK integration:
+341: 
+342: - interactive/API fact writer: `preview_emission` then `emit_fact` with the
+343:   production mapped provider;
+344: - batch ingest: `emit_batch` with the same mapped provider and captured
+345:   result/commit evidence;
+346: - declaration management: `edit_declaration` and its recovery API;
+347: - source/cadence jobs: `run_sources` with the production collector factory,
+348:   dispatcher, observer, mapped provider, and `CUTOVER_STATE` environment;
+349: - CLI-only workflows: remain disabled until they have a reviewed adapter to
+350:   those descriptor-first SDK calls.
+351: 
+352: The handoff receipt names every enabled writer and its SDK version, plus how
+353: each excluded legacy command or scheduled job was disabled. No legacy or raw
+354: JSONL/SQLite writer is re-enabled.
+355: 
+356: ## Failure disposition and rollback
+357: 
+358: Before final descriptor replacement, any failed migration, provenance, report,
+359: adoption, projection or read gate leaves `LIVE_VERTEX` and `LIVE_SOURCE`
+360: unchanged. Preserve the candidate Arrival file, report, intent and receipts as
+361: evidence; do not truncate, delete, reuse, or append a second anchor. Resume is
+362: allowed only through the documented migration/adoption recovery paths when
+363: their exact input pins still hold.
+364: 
+365: After descriptor replacement but before any post-A business write, legacy
+366: routing may be restored only when all of the following are recorded while
+367: writers and source jobs are stopped:
+368: 
+369: - `verify_target(LIVE_VERTEX)` captures a head exactly equal to A in lineage,
+370:   ordinal, and record hash; the Arrival file SHA-256 equals the recorded
+371:   post-adoption A pin.
+372: - `LIVE_VERTEX` SHA-256 equals the candidate pin, and `LIVE_SOURCE` SHA-256
+373:   still equals its original snapshot pin.
+374: - The exclusive same-directory restore stage is written from the separately
+375:   named prepublication backup, fsynced and rehashed against the original vertex
+376:   pin before `os.replace`; after replace, fsync the directory and require the
+377:   live vertex hash to equal that original pin.
+378: 
+379: If any condition fails, restoration is forbidden and disposition is forward
+380: only. When it succeeds, retain the candidate Arrival lineage and adoption
+381: anchor; this is a service-routing reversal, never a history deletion.
+382: 
+383: After the first post-A write, do not restore the legacy vertex as a writable
+384: fallback. It would conceal new authoritative facts. Stop writers, retain the
+385: Arrival descriptor, head journal, mapped-binding root, original archive and
+386: exact export, then recover or correct forward on the Arrival lineage. If
+387: service must be limited during that work, use descriptor-first read-only SDK
+388: access at the recorded head; do not drop or replay new facts into the legacy
+389: source.
+390: 
+391: ## Remaining blockers and decisions
+392: 
+393: 1. The provenance verifier command above is under development. Its reviewed
+394:    implementation and a fresh-copy passing receipt are required.
+395: 2. The illustrative same-directory publication algorithm needs its descriptor
+396:    reparse, receipt serialization, and disposable-directory rehearsal completed
+397:    before use. The existing migration publisher cannot replace a distinct live
+398:    vertex.
+399: 3. Every production writer must either have a descriptor-first SDK handoff or
+400:    remain disabled. `run_sources` is available for source jobs, but the current
+401:    CLI emit/sync/source workflows have no supported Arrival-v2 adapter today.
+402:    Refusal behavior for legacy CLI commands, including `store absorb`, is
+403:    unverified; disablement is the safety gate, not an assumed refusal.
+404: 4. The maintenance owner must complete the real writer inventory and obtain a
+405:    quiescence record. A new source hash after snapshot requires a new candidate
+406:    rather than a policy choice.
+407: 
+408: The selected policy decisions are already fixed: use the audited
+409: `legacy/unattributed` preparation, fresh runtime epoch, preserved historical
+410: boundaries with audited transformation, and no legacy writable fallback after
+411: an Arrival write. The four items above are integration gates, not decisions to
+412: defer to the cutover window.
+
+=== docs/scratch/arrival-break/reviews/legacy-provenance-fable-r2-2026-09-18/findings.md ===
+1: **REVISE, narrowly: four refusal tests need fixing; the verifier, receipt wording and cutover plan are accepted as they stand.** I found no P1 and could not construct a false pass.
+2: 
+3: This was a static review with no tools, and I ran no tests. `CORRECTION DIFF` arrived empty again, so I reviewed the full sources instead. I did not see or assess the modified `libs/migrate/README.md` or the rehearsal doc.
+4: 
+5: ## Closure
+6: 
+7: | # | Prior finding | Status | Basis |
+8: |---|---|---|---|
+9: | 1 | Unchained historical tick left unverified while the receipt said `verified` | **Closed** | `verify_legacy_provenance.py:229-244` refuses an unchained tick after chaining starts, refuses any predecessor or cursor claim on one, and always refuses one post-S. The count is emitted as `unchained_historical_ticks`. My original repro now refuses at `:234`. Both placements and a direct `_TickChain` probe are tested. |
+10: | 2 | Receipt overclaims | **Closed** | `:658-660` and `:673-679`: pins are `caller-supplied`, `pin_independence_verified` is false, the chain is `structurally-verified`, and envelope and inner signatures are disclaimed. The real-copy receipt matches. |
+11: | 3 | Refusal coverage and engine tie | **Partial; see the P2 below** | The integration test is sound: preparer, then a real fresh `seal` rehearsal, then the verifier through the emitted tick, with input hashes and directory listing asserted unchanged. Most refusals are covered. Four never reach the check they name. |
+12: | 4 | Legacy CLI refusal assumed | **Closed** | `plan:33-42` and blocker 3 now state that refusal is unverified and that disablement is the gate. |
+13: | 5 | Rollback precondition uncheckable | **Closed** | `plan:358-374` requires the head to equal A in all three fields, plus Arrival-file, vertex and source hash pins. The restore runs from the pinned backup with an exclusive stage and fsync, and is forward-only otherwise. |
+14: | – | Post-S forged key introduction | **Closed in code** | `:511-515` verifies every key introduction at any ordinal before its key joins the registry. The lookup uses the envelope observer, so a record cannot certify itself and an unknown observer refuses. Genesis is always verified (`:500-505`). A key record inside the source range refuses at `:524`. |
+15: | – | Rehearsal tick | **Stays closed** | `attest_tick_commit` and its test show no regression. |
+16: 
+17: The real-copy counts are internally consistent. Rows and facts, ticks, windows, and the 6+4478 prefix all add up: 982+3496=4478, 4357+121=4478, 39+82+0=121, 4359=4357+2, and 122=121+1. The 9 and 29 test counts match the sources. Note that `validation.json` still lists the post-correction repository run as pending.
+18: 
+19: ## P2: four refusal tests hit a neighbouring branch
+20: 
+21: These tests use a bare `pytest.raises` or a loose match, which hides the miss. Deleting any of the four named checks would fail no test today.
+22: 
+23: 1. **Post-S bad window** (`review:253-265`).
+24:    - `_prepared_tick(fixture)` defaults to index 1, which is `t1`, but the chain head at S is `t2`. The row therefore refuses at the predecessor check (`verify:249`), and `window_start="f1"` is also discontinuous. The window check at `:561-564` is never reached.
+25:    - Round 1 asked for this case explicitly.
+26:    - Fix: use `prior = _prepared_tick(fixture, 3)` with window `"f2"`→`"f2"` and hash `"0"*64`. Match on `post-migration tick window mismatch`.
+27: 2. **Eligible row left unmapped** (`review:130-137`).
+28:    - The manifest entry is kept, so the refusal is `manifest claims unchanged line` (`:379`), not the eligible-row check (`:384-387`).
+29:    - A fixture with one blank row cannot reach that check, because an empty manifest refuses earlier.
+30:    - Fix: build a source with two blank-observer rows, leave one untransformed, and remove its manifest entry. Match on `eligible line`.
+31: 3. **Reversed window** (`review:190-209`).
+32:    - The `"f2"` parameter breaks continuity first (`:253`), so `:259-262` is never reached.
+33:    - Fix: keep `row[7]="f1"` and set `row[8]=""`. Match on `reversed window`.
+34: 4. **Mutated or reordered prefix row** (`review:159-176`).
+35:    - All three mutations are caught by the walk's hash and ordinal checks. Nothing reaches `prefix row mismatch` (`:523-527`), which enforces `exact-in-order`.
+36:    - Fix: re-mint the Arrival log with one prepared row altered, and again with two rows swapped. Re-pin S each time, as `test_refuses_arbitrary_record…` does. Match on `prefix row mismatch`.
+37: 
+38: No verifier change is needed. A follow-up diff of these tests plus the final repository run is enough.
+39: 
+40: ## Optional improvements
+41: 
+42: - **Tests:**
+43:   - Add `match=` to the remaining bare raises, including the forged-key test.
+44:   - Add forged-key cases for a record signed by the key it introduces and for an unknown envelope observer.
+45:   - Add one valid post-S introduction as a positive control; nothing exercises that path unless the engine migration in the integration test happens to introduce a key.
+46:   - The `"minus"` parameter value is unused.
+47: - **Wording:**
+48:   - The module docstring (`verify:5-6`), `plan:133` and `doc:9` still say the pins are independent; independence is a procedure the tool cannot verify.
+49:   - The refusal at `:444` and `:460` says "migration metadata" even for post-S records.
+50: - **Plan:**
+51:   - At the A re-run, require the receipt's `captured_head` to equal A, and name that receipt's `arrival.sha256` as the rollback pin.
+52:   - Record how each legacy command was disabled in the handoff receipt.
+53:   - Show the 982 affected-row count to the approver.
+54: - **Verifier:**
+55:   - `prepared_window == original_window` at `:412` can never be true.
+56:   - Two items carry over from last round. The output path is checked only after verifying, and a dangling symlink at that path is not refused. Also, the output directory is not fsynced.
+57: - **Unchained ticks:**
+58:   - No engine-tied test covers an unchained tick followed by a chained one; the real copy reports 0.
+59:   - If the production snapshot reports more than 0 or refuses, surface that to the user and do not relax the rule.
+
+=== docs/scratch/arrival-break/reviews/loops-provenance-rehearsal-2026-09-18/final-validation.json ===
+1: {
+2:   "repository_excluding_chaos": "163 passed",
+3:   "focused_provenance_and_review": "31 passed",
+4:   "engine_generated_integration": "passed",
+5:   "scoped_ruff": "passed",
+6:   "scoped_ty": "passed",
+7:   "real_copy_after_fixes": "passed",
+8:   "source_sha256": "623a7abf2980a6863d9aa554422a60f148b4ae6c7146726fbeaef5f4e870e58f"
+9: }
+
+=== FINAL CORRECTION DIFF tests/test_legacy_provenance_review.py ===
+--- r2/tests/test_legacy_provenance_review.py
++++ final/tests/test_legacy_provenance_review.py
+@@ -84,6 +84,45 @@
+         "tick", body_of_tick_row(row), observer="custodian", origin=row[4], at=row[2]
+     )
+     fixture.arrival = path
++
++
++def _remint_prefix(fixture, path: Path, *, reorder: bool) -> None:
++    """Build a valid Arrival prefix whose source row(s) differ from prepared."""
++    rows = [deserialize_records(line)[0] for line in fixture.prepared.read_text().splitlines()]
++    if reorder:
++        rows[0], rows[1] = rows[1], rows[0]
++    else:
++        kind, row = rows[0]
++        changed = list(row)
++        changed[5] = '{"changed":true}'
++        rows[0] = (kind, tuple(changed))
++
++    def signer(_observer: str, digest: str) -> str:
++        return ed25519.sign(
++            fixture.keypair, digest.encode(), domain=ARRIVAL_DOMAIN
++        )
++
++    log = ArrivalLog.mint(
++        path,
++        observer="custodian",
++        key=fixture.keypair.public_b64,
++        signer=signer,
++        lineage=fixture.lineage,
++        at=0.0,
++    )
++    head = None
++    for kind, row in rows:
++        head = log.append(
++            kind,
++            body_of_fact_row(row) if kind == "fact" else body_of_tick_row(row),
++            observer=row[3] if kind == "fact" else "custodian",
++            origin=row[4],
++            at=row[2],
++        )
++    assert head is not None
++    fixture.arrival = path
++    fixture.ordinal = head["ord"]
++    fixture.record_hash = head["rh"]
+ 
+ 
+ @pytest.mark.parametrize(
+@@ -129,11 +168,28 @@
+ 
+ def test_refuses_eligible_row_left_untransformed(tmp_path: Path) -> None:
+     fixture = _BASE._fixture(tmp_path)
+-    lines = fixture.prepared.read_bytes().splitlines(keepends=True)
+-    lines[0] = fixture.original.read_bytes().splitlines(keepends=True)[0]
+-    fixture.prepared.write_bytes(b"".join(lines))
+-    _repin_manifest(fixture)
+-    with pytest.raises(_VERIFY.ProvenanceRefused, match="unchanged line"):
++    extra = {
++        "t": "fact", "id": "f-extra", "kind": "note", "ts": 9.0,
++        "observer": "", "origin": "legacy", "payload": "{}",
++    }
++    source = tmp_path / "source-with-two-eligible.jsonl"
++    source.write_bytes(fixture.original.read_bytes() + json.dumps(extra, separators=(",", ":")).encode() + b"\n")
++    prepared = tmp_path / "prepared-with-two-eligible.jsonl"
++    manifest = tmp_path / "prepared-with-two-eligible.manifest.json"
++    _PREPARE.prepare_legacy_unattributed(source, prepared, manifest)
++    prepared_lines = prepared.read_bytes().splitlines(keepends=True)
++    prepared_lines[-1] = source.read_bytes().splitlines(keepends=True)[-1]
++    prepared.write_bytes(b"".join(prepared_lines))
++    value = json.loads(manifest.read_text())
++    value["affected_rows"] = value["affected_rows"][:1]
++    value["output_sha256"] = hashlib.sha256(prepared.read_bytes()).hexdigest()
++    manifest.write_text(json.dumps(value))
++    fixture.original = source
++    fixture.prepared = prepared
++    fixture.manifest = manifest
++    fixture.source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
++    fixture.manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
++    with pytest.raises(_VERIFY.ProvenanceRefused, match="eligible line"):
+         _verify(fixture)
+ 
+ 
+@@ -176,6 +232,16 @@
+         _verify(fixture)
+ 
+ 
++@pytest.mark.parametrize("reorder", [False, True])
++def test_refuses_valid_arrival_prefix_with_mutated_or_reordered_rows(
++    tmp_path: Path, reorder: bool
++) -> None:
++    fixture = _BASE._fixture(tmp_path / ("reorder" if reorder else "mutate"))
++    _remint_prefix(fixture, tmp_path / ("reordered.arrival" if reorder else "mutated.arrival"), reorder=reorder)
++    with pytest.raises(_VERIFY.ProvenanceRefused, match="migration prefix row mismatch"):
++        _verify(fixture)
++
++
+ def test_refuses_duplicate_post_migration_id(tmp_path: Path) -> None:
+     fixture = _BASE._fixture(tmp_path)
+     target = tmp_path / "duplicate.arrival"
+@@ -187,25 +253,25 @@
+         _verify(fixture)
+ 
+ 
+-@pytest.mark.parametrize("window_start", ["", "f2"])
++@pytest.mark.parametrize("window_start,end_cursor", [("", "f2"), ("f1", "")])
+ def test_refuses_original_cursor_discontinuity_or_reversal(
+-    tmp_path: Path, window_start: str
++    tmp_path: Path, window_start: str, end_cursor: str
+ ) -> None:
+-    fixture = _BASE._fixture(tmp_path / repr(window_start))
++    fixture = _BASE._fixture(tmp_path / repr((window_start, end_cursor)))
+     original_lines = fixture.original.read_bytes().splitlines(keepends=True)
+     prepared_lines = fixture.prepared.read_bytes().splitlines(keepends=True)
+     _kind, row = deserialize_records(original_lines[3])[0]
+     row = list(row)
+     row[7] = window_start
+-    if window_start == "f2":
+-        row[8] = "f1"
++    row[8] = end_cursor
+     encoded = serialize_tick_row(tuple(row)).encode() + b"\n"
+     original_lines[3] = encoded
+     prepared_lines[3] = encoded
+     fixture.original.write_bytes(b"".join(original_lines))
+     fixture.prepared.write_bytes(b"".join(prepared_lines))
+     _repin_manifest(fixture)
+-    with pytest.raises(_VERIFY.ProvenanceRefused):
++    expected = "reversed window" if window_start == "f1" else "cursor discontinuity"
++    with pytest.raises(_VERIFY.ProvenanceRefused, match=expected):
+         _verify(fixture)
+ 
+ 
+@@ -253,15 +319,16 @@
+ @pytest.mark.parametrize("kind", ["bad-window", "unchained", "bad-prev"])
+ def test_refuses_bad_post_migration_tick_attestation(tmp_path: Path, kind: str) -> None:
+     fixture = _BASE._fixture(tmp_path / kind)
+-    prior = _prepared_tick(fixture)
++    prior = _prepared_tick(fixture, 3)
+     if kind == "unchained":
+         row = ("post-unchained", "note", 8.0, None, "legacy", "{}", None, None, None, None, None)
+     elif kind == "bad-prev":
+         row = ("post-bad-prev", "note", 8.0, None, "legacy", "{}", "0" * 64, "f1", "f2", prior[9], None)
+     else:
+-        row = ("post-bad-window", "note", 8.0, None, "legacy", "{}", tick_row_hash(prior), "f1", "f2", "0" * 64, None)
++        row = ("post-bad-window", "note", 8.0, None, "legacy", "{}", tick_row_hash(prior), "f2", "f2", "0" * 64, None)
+     _append_post_tick(fixture, tmp_path / f"{kind}.arrival", row)
+-    with pytest.raises(_VERIFY.ProvenanceRefused):
++    expected = "post-migration tick window mismatch" if kind == "bad-window" else None
++    with pytest.raises(_VERIFY.ProvenanceRefused, match=expected):
+         _verify(fixture)
+ 
+ 
+@@ -285,7 +352,7 @@
+         at=8.0,
+     )
+     fixture.arrival = target
+-    with pytest.raises(_VERIFY.ProvenanceRefused):
++    with pytest.raises(_VERIFY.ProvenanceRefused, match="signature"):
+         _verify(fixture)
+ 
+ 
+
+
+=== FINAL CORRECTION DIFF docs/scratch/arrival-break/loops-live-cutover-plan-2026-09-18.md ===
+--- r2/docs/scratch/arrival-break/loops-live-cutover-plan-2026-09-18.md
++++ final/docs/scratch/arrival-break/loops-live-cutover-plan-2026-09-18.md
+@@ -47,7 +47,9 @@
+ ## Inputs and durable locations
+ 
+ The maintenance owner records absolute paths and SHA-256 values in the cutover
+-receipt, without payloads or private key material.
++receipt, without payloads or private key material. Keep `ORIGINAL_SOURCE_SHA256`,
++`ORIGINAL_VERTEX_SHA256`, and `CANDIDATE_VERTEX_SHA256` distinct; the source
++and descriptor pins are not interchangeable.
+ 
+ | Role | Required property |
+ | --- | --- |
+@@ -113,7 +115,9 @@
+ an unsigned flat fact to `legacy/unattributed`; it preserves IDs, payload text,
+ timestamps, order, all ticks, and every other field. It refuses a missing/null
+ observer, a signed blank observer, an input/output alias, overwrite, or no
+-eligible rows. The original snapshot remains immutable.
++eligible rows. The original snapshot remains immutable. Record the new snapshot's affected-row
++count explicitly for review; the rehearsal count was 982, not a fixed expected
++count for a later production snapshot.
+ 
+ Run the preparation utility with exclusive output and a new manifest, then pin
+ the original source and manifest hashes outside all inputs. The exact
+@@ -122,7 +126,7 @@
+ ```sh
+ uv run python scripts/verify_legacy_provenance.py \
+   "$ARCHIVE_ORIGINAL/project.jsonl" "$PREPARED_SOURCE" "$PREPARATION_MANIFEST" "$ARRIVAL_STORE" \
+-  --reviewed-source-sha256 "$ORIGINAL_SHA256" \
++  --reviewed-source-sha256 "$ORIGINAL_SOURCE_SHA256" \
+   --reviewed-manifest-sha256 "$MANIFEST_SHA256" \
+   --migration-lineage "$LINEAGE" \
+   --migration-ordinal "$S_ORDINAL" \
+@@ -240,8 +244,10 @@
+ 
+ Re-run `verify_legacy_provenance.py` at A with the same independent original,
+ manifest and S pins, writing a second exclusive `legacy-provenance-at-A.json`
+-receipt. This binds the pre-publication Arrival state, including the adoption
+-anchor, to the audited transformation; it is not substituted for the signed
++receipt. Require its `arrival.captured_head` to equal A in all three fields and
++retain its `arrival.sha256` as the post-adoption store hash used by rollback.
++This binds the pre-publication Arrival state, including the adoption anchor,
++to the audited transformation; it is not substituted for the signed
+ migration-report verification at S.
+ 
+ No rehearsal-only fact is written to production. The first post-cutover fact is
+@@ -290,7 +296,7 @@
+     replacement = candidate.read_bytes()
+     old_hash = hashlib.sha256(old).hexdigest()
+     replacement_hash = hashlib.sha256(replacement).hexdigest()
+-    if old_hash != ORIGINAL_SHA256 or replacement_hash != CANDIDATE_SHA256:
++    if old_hash != ORIGINAL_VERTEX_SHA256 or replacement_hash != CANDIDATE_VERTEX_SHA256:
+         raise RuntimeError("cutover input hash changed")
+     stage = live.parent / f".{live.name}.arrival-cutover"
+     if backup.exists():
+@@ -343,8 +349,9 @@
+ - CLI-only workflows: remain disabled until they have a reviewed adapter to
+   those descriptor-first SDK calls.
+ 
+-The handoff receipt names every enabled writer and its SDK version. No legacy
+-or raw JSONL/SQLite writer is re-enabled.
++The handoff receipt names every enabled writer and its SDK version, plus how
++each excluded legacy command or scheduled job was disabled. No legacy or raw
++JSONL/SQLite writer is re-enabled.
+ 
+ ## Failure disposition and rollback
+ 

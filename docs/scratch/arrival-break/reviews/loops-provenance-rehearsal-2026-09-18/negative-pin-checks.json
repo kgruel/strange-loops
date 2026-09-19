@@ -1,0 +1,14 @@
+[
+  {
+    "changed_argument": "--reviewed-manifest-sha256",
+    "exit_code": 2,
+    "stdout_empty": true,
+    "refusal": "provenance verification refused: preparation manifest does not match its reviewed hash"
+  },
+  {
+    "changed_argument": "--migration-record-hash",
+    "exit_code": 2,
+    "stdout_empty": true,
+    "refusal": "provenance verification refused: Arrival record at S does not match the pinned hash"
+  }
+]

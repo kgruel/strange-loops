@@ -1,0 +1,13 @@
+{
+  "schema": "loops.rehearsal/provenance-reviewed-pins/v1",
+  "source_sha256": "1baa08419b856a52692100d8ea670a12482d80f95ce8a8d3193f194ac4c5347e",
+  "manifest_sha256": "d6db177325ba4a50539504efb834dfce8310082d2a34c6446c465ebf82b748ca",
+  "migration_head": {
+    "lineage": "01M2VCBPYRT63W2FKA54PVKP7D",
+    "ordinal": 4483,
+    "record_hash": "8997e2280b24d5f060b6c3edc47c7cc726fd6bcc468e3722277f2716e279c2a3"
+  },
+  "target_path": "/Users/kaygee/Code/loops-rehearsals/loops-20260918-171627/fresh-rehearsal-run-2/stores/01M2VCBPYRT63W2FKA54PVKP7D.arrival",
+  "prepared_sha256": "e90c51f0929f2cfdb2d46c636845eb57b366e5432bf5c734f6b88619c5215933",
+  "source_of_pins": "reviewed checkpoint 301c350e; original preparation and verified migration evidence"
+}

@@ -1,0 +1,20 @@
+{
+  "head": "301c350e7bbd3eafa6c874d82e31ef9e2cf8d6c7",
+  "baseline": "301c350e",
+  "sources": {
+    "scripts/verify_legacy_provenance.py": "ac3a3a630158ea0880c89bf413e5deaee3432b8d410be50a62d0d2aa7389eec3",
+    "tests/test_legacy_provenance.py": "56b5a5e478356ac783e4672a5e49cd8ae095e54369d9a943227e557bb4ba0116",
+    "scripts/prepare_legacy_unattributed.py": "e4be5507a8420a385fddb210efaa32579dec154467e34a59e8e023d73ce80d47",
+    "scripts/arrival_rehearsal.py": "7d7ba61e0364e00090c6fc5619c00487990085a5e3e45497b73d605e1a32ef64",
+    "tests/test_arrival_rehearsal_runner.py": "3a61c5cabb349849e295bab7c25f8ce8414970338611255b83a199f4d9c111a7",
+    "libs/engine/src/engine/row_commitment.py": "feaa42f3b287d130cb072453b0a4f8993b03ee7c44ff12d2a89724110301957f",
+    "libs/engine/src/engine/arrival_projection.py": "932d50fa5c84c364bf817f4f97804cb89f89d8011c24916f48a30e50af247aec",
+    "libs/engine/src/engine/arrival.py": "8e37f3cbbcf652133ee23db9edf724635e896f13ce42051c6ee8f3b63064846c",
+    "libs/engine/src/engine/jsonl_codec.py": "81a0f7220a8731f0455da30a7c7d6642fbe1b93ad79b70e361e4b6d286480a0c",
+    "docs/scratch/arrival-break/legacy-provenance-verification-2026-09-18.md": "9061ab3bcbcaa9f7915781c575d3e3c59a771eb6ee7b98c5f770a88f2be9fe93",
+    "docs/scratch/arrival-break/loops-live-cutover-plan-2026-09-18.md": "f407937776ea3ca60ed476eae890ddf33adda3fef40fecf40395feca307fda2c",
+    "docs/scratch/arrival-break/reviews/fresh-epoch-fable-r2-2026-09-18/findings.md": "c49d2551ea0e60ba096223972fdf3400d78040e1fa0fed9e6d6b17e4ca79cde6"
+  },
+  "packet_sha256": "154711689114a9ab23f5f9edc33d7e42c9a0cf304452e49dca935546956bad80",
+  "packet_bytes": 308854
+}

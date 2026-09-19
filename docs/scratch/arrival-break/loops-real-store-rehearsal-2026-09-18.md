@@ -225,3 +225,46 @@ tick-attestation finding with no P1/P2 blocker. Final tests: engine 2,650 passed
 lang 721 passed. Scoped lint and whitespace checks pass. The final third-call
 [review receipt and closure](reviews/fresh-epoch-fable-r3-2026-09-18/primary-triage.md)
 distinguish actual review coverage from the refused invocation.
+
+## Accepted transformed-history verification
+
+The user accepted the historical review meaning of the preserved boundaries with
+an audited observer mapping and requested provenance-aware verification. The new
+read-only `scripts/verify_legacy_provenance.py` proves the complete relationship
+using independently reviewed original/manifest hashes and migration head S.
+It does not change the normal deep audit or rewrite any commitment.
+
+The loops-copy rerun passed with status
+`preserved-boundaries-with-audited-transformation`:
+
+- All 4,478 source rows are accounted for: 982 mapped facts and 3,496 byte-identical
+  rows. IDs, payloads, order, and all historical tick fields are preserved.
+- The original 121-tick chain passes. Exactly 39 historical windows are explained
+  by the mapping; 82 still match unchanged.
+- Arrival preserves all prepared rows in order through S=4483, behind six
+  signature-verified protocol metadata records. The full record hash chain
+  passes through the same final head at ordinal 4486.
+- The post-migration tick passes predecessor/cursor/window checks. The verifier
+  has no historical-first-ten diagnostic cutoff or broad exception rule.
+- Substituting a wrong reviewed manifest hash or wrong S record hash refuses
+  with no success output. All four inputs and the live source/vertex remain
+  byte-identical.
+
+The signed migration report was separately reverified under the reviewed public
+key, and its source hash and S match the pinned evidence. The provenance result
+itself deliberately does not claim to authenticate every historical author or
+reverify the migration report signature.
+
+[Verification evidence](reviews/loops-provenance-rehearsal-2026-09-18/evidence.json),
+[report attestation](reviews/loops-provenance-rehearsal-2026-09-18/migration-report-attestation.json),
+and [preservation checks](reviews/loops-provenance-rehearsal-2026-09-18/preservation-check.json)
+record metadata only. The [cutover plan](loops-live-cutover-plan-2026-09-18.md)
+prepares the remaining publication and writer-handoff work; it does not execute
+a live switch. This provenance pass resolves the accepted historical-commitment
+interpretation, while preserving the standard audit's distinct result.
+
+Final provenance review: Fable returned **ACCEPT**, no P1/P2 blockers, after
+correcting receipt scope, historical unchained handling and targeted refusal
+coverage. Final repository validation is **163 passed**, including **31 provenance
+cases**. The [acceptance receipt](reviews/legacy-provenance-fable-r3-2026-09-18/primary-triage.md)
+records scope and remaining cutover preparation. No live switch occurred.

@@ -1,0 +1,50 @@
+{
+  "arrival": {
+    "captured_head": {
+      "lineage": "01M2VCBPYRT63W2FKA54PVKP7D",
+      "ordinal": 4486,
+      "record_hash": "288cb73f9488f56448ea1c1f78e852cd157f1e5f620173cb866aaf87bafcafa2"
+    },
+    "facts": 4359,
+    "post_migration_ticks_verified": 1,
+    "prepared_rows_at_pinned_prefix": "exact-in-order",
+    "protocol_metadata_records": 6,
+    "record_hash_chain": "verified",
+    "records": 4487,
+    "registry_forming_signatures": "verified",
+    "sha256": "73b678adb57c28869d8a7482e6a244280ec7e32a2474a2d6ad5f909a712df5d8",
+    "source_first_ordinal": 6,
+    "source_last_ordinal": 4483,
+    "ticks": 122
+  },
+  "commitments": {
+    "explained_transformation_windows": 39,
+    "historical_authorship_verified": false,
+    "meaning": "old commitments bind the pinned original rows; mapped rows carry no historical authorship claim",
+    "original_tick_chain": "verified",
+    "unchanged_historical_windows": 82
+  },
+  "preparation": {
+    "byte_identical_rows": 3496,
+    "facts": 4357,
+    "policy": "legacy-unattributed-v1",
+    "prepared_sha256": "e90c51f0929f2cfdb2d46c636845eb57b366e5432bf5c734f6b88619c5215933",
+    "rows": 4478,
+    "source_sha256": "1baa08419b856a52692100d8ea670a12482d80f95ce8a8d3193f194ac4c5347e",
+    "ticks": 121,
+    "transformed_rows": 982
+  },
+  "schema": "loops.legacy-provenance/v1",
+  "status": "preserved-boundaries-with-audited-transformation",
+  "trust": {
+    "migration_head": {
+      "lineage": "01M2VCBPYRT63W2FKA54PVKP7D",
+      "ordinal": 4483,
+      "record_hash": "8997e2280b24d5f060b6c3edc47c7cc726fd6bcc468e3722277f2716e279c2a3"
+    },
+    "migration_report_signature_verified": false,
+    "pins_supplied_independently": true,
+    "reviewed_manifest_sha256": "d6db177325ba4a50539504efb834dfce8310082d2a34c6446c465ebf82b748ca",
+    "reviewed_source_sha256": "1baa08419b856a52692100d8ea670a12482d80f95ce8a8d3193f194ac4c5347e"
+  }
+}

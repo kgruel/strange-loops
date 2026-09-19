@@ -1,0 +1,10 @@
+{
+  "focused_provenance": "9 passed",
+  "repository_excluding_chaos": "163 passed",
+  "scoped_ruff": "passed",
+  "scoped_ty": "passed",
+  "real_copy": "passed again after review corrections",
+  "review": "Fable 5.1 ACCEPT; no P1/P2 blockers",
+  "focused_provenance_and_review": "31 passed",
+  "engine_generated_integration": "passed"
+}

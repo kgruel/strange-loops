@@ -1,0 +1,55 @@
+{
+  "command": [
+    "/Users/kaygee/.local/bin/claude",
+    "-p",
+    "--safe-mode",
+    "--model",
+    "claude-fable-5-1[1m]",
+    "--effort",
+    "high",
+    "--no-session-persistence",
+    "--tools",
+    "",
+    "--output-format",
+    "json"
+  ],
+  "started": "2026-09-19T01:53:18.647479+00:00",
+  "status": "completed",
+  "exit_code": 0,
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 91301,
+      "outputTokens": 17,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.091386,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 27445,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 120494,
+      "webSearchRequests": 0,
+      "costUSD": 3.78215,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 24761,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "subtype": "success",
+  "is_error": false,
+  "source_drift": [
+    "scripts/verify_legacy_provenance.py"
+  ],
+  "finished": "2026-09-19T01:59:00.611617+00:00"
+}

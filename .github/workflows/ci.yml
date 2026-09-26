@@ -64,6 +64,33 @@ jobs:
       - name: Run Ruff Check
         run: uv run ruff check libs/custody libs/sign
 
+  loops-min-distribution:
+    name: loops-min Suite & Root Wheel Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Test loops-min
+        run: uv run --package loops-min pytest apps/loops-min/tests -q
+
+      - name: Build root wheel and smoke installed loops-min
+        run: |
+          artifact_root=$(mktemp -d "$RUNNER_TEMP/loops-min-root-wheel.XXXXXX")
+          uv build --wheel --out-dir "$artifact_root" .
+          uv venv "$artifact_root/venv" --python 3.13
+          uv pip install --python "$artifact_root/venv/bin/python" "$artifact_root"/strange_loops-*.whl
+          "$artifact_root/venv/bin/python" apps/loops-min/tests/wheel_smoke.py "$artifact_root/venv/bin/loops-min"
+
   discover:
     name: Discover Packages
     runs-on: ubuntu-latest

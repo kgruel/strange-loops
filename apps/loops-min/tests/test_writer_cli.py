@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from sdk import MappedCredentialProvider, init_vertex
+from sdk import MappedCredentialProvider, init_vertex, preview_emission
 from sdk.errors import CommittedOutcomeUnknown, CommittedProjectionFailed
 
 
@@ -18,6 +18,8 @@ from sdk.errors import CommittedOutcomeUnknown, CommittedProjectionFailed
 def _isolated_parent_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.setenv("LOOPS_HOME", str(tmp_path / "loops"))
 
 
@@ -27,6 +29,8 @@ def _environment(tmp_path: Path) -> dict[str, str]:
         {
             "XDG_STATE_HOME": str(tmp_path / "state"),
             "XDG_CONFIG_HOME": str(tmp_path / "config"),
+            "XDG_DATA_HOME": str(tmp_path / "data"),
+            "XDG_CACHE_HOME": str(tmp_path / "cache"),
             "LOOPS_HOME": str(tmp_path / "loops"),
         }
     )
@@ -34,11 +38,16 @@ def _environment(tmp_path: Path) -> dict[str, str]:
 
 
 def _run(
-    tmp_path: Path, command: str, target: Path, *arguments: str
+    tmp_path: Path,
+    command: str,
+    target: Path,
+    *arguments: str,
+    input_text: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "loops_min", command, str(target), *arguments],
         capture_output=True,
+        input=input_text,
         text=True,
         env=_environment(tmp_path),
         check=False,
@@ -232,6 +241,141 @@ def test_mapped_writer_workflow_is_real_process_sdk_boundary(tmp_path: Path) -> 
     assert _json(verified)["result"]["level"] == "full"
 
 
+def test_emit_file_and_stdin_transport_preserve_unicode_and_multiline_content(
+    tmp_path: Path,
+) -> None:
+    target, location, provider, _alice, _bob = _provision(tmp_path)
+    _init_mapped(tmp_path, target, location, provider.root)
+    source = tmp_path / "payload.json"
+    source.write_text('{\n  "message": "héllo\\nfile"\n}\n', encoding="utf-8")
+
+    from_file = _run(
+        tmp_path,
+        "emit",
+        target,
+        "item",
+        "--payload-file",
+        str(source),
+        "--observer",
+        "alice",
+        "--id",
+        "file-transport",
+        *_credentials(provider.root),
+    )
+    assert from_file.returncode == 0, from_file.stdout + from_file.stderr
+    from_stdin = _run(
+        tmp_path,
+        "emit",
+        target,
+        "item",
+        "--payload-file",
+        "-",
+        "--observer",
+        "alice",
+        "--id",
+        "stdin-transport",
+        *_credentials(provider.root),
+        input_text='{\n  "message": "λ\\nstdin"\n}\n',
+    )
+    assert from_stdin.returncode == 0, from_stdin.stdout + from_stdin.stderr
+    facts = _run(tmp_path, "facts", target, "--order", "oldest", "--limit", "10")
+    assert facts.returncode == 0, facts.stdout + facts.stderr
+    assert [(item["id"], item["payload"]) for item in _json(facts)["result"]["items"]] == [
+        ("file-transport", {"message": "héllo\nfile"}),
+        ("stdin-transport", {"message": "λ\nstdin"}),
+    ]
+
+
+@pytest.mark.parametrize("transport", ["file", "stdin"])
+def test_batch_file_and_stdin_transport(tmp_path: Path, transport: str) -> None:
+    target, location, provider, _alice, _bob = _provision(tmp_path)
+    _init_mapped(tmp_path, target, location, provider.root)
+    facts = [
+        {"id": "batch-file-1", "kind": "item", "observer": "alice", "payload": {"text": "λ"}},
+        {"id": "batch-file-2", "kind": "item", "observer": "alice", "payload": {"text": "two"}},
+    ]
+    document = json.dumps(facts, ensure_ascii=False)
+    source = tmp_path / "facts.json"
+    source.write_text(document, encoding="utf-8")
+    process = _run(
+        tmp_path, "emit-batch", target,
+        "--facts-file", "-" if transport == "stdin" else str(source),
+        *_credentials(provider.root),
+        input_text=document if transport == "stdin" else None,
+    )
+    assert process.returncode == 0, process.stdout + process.stderr
+    assert _json(process)["result"]["commit"] is not None
+    read = _run(tmp_path, "facts", target, "--order", "oldest", "--limit", "10")
+    assert read.returncode == 0, read.stdout + read.stderr
+    assert [(item["id"], item["payload"]) for item in _json(read)["result"]["items"]] == [
+        (fact["id"], fact["payload"]) for fact in facts
+    ]
+
+
+def test_preview_is_sdk_result_without_custody_or_binding_mutation(tmp_path: Path) -> None:
+    target, location, provider, _alice, _bob = _provision(tmp_path)
+    _init_mapped(tmp_path, target, location, provider.root)
+    ledger = _ledger_path(target)
+    payload = {"message": "héllo\\npreview"}
+    custody_before = _file_snapshot(provider.root)
+    ledger_before = ledger.read_bytes()
+
+    process = _run(
+        tmp_path,
+        "preview",
+        target,
+        "item",
+        "--payload-json",
+        json.dumps(payload),
+        "--observer",
+        "alice",
+        "--origin",
+        "preview-test",
+        "--ts",
+        "10",
+        "--id",
+        "preview-id",
+        *_credentials(provider.root),
+    )
+    assert process.returncode == 0, process.stdout + process.stderr
+    result = _json(process)["result"]
+    expected = preview_emission(
+        target,
+        "item",
+        payload,
+        observer="alice",
+        origin="preview-test",
+        ts=10.0,
+        id_override="preview-id",
+        credentials=provider,
+    ).as_dict()
+    assert result == expected
+    assert ledger.read_bytes() == ledger_before
+    assert _file_snapshot(provider.root) == custody_before
+
+
+def test_strict_undeclared_preview_is_a_successful_refusal_result(tmp_path: Path) -> None:
+    target, location, provider, _alice, _bob = _provision(tmp_path)
+    init_vertex(
+        target, name="workload", store_type="arrival", location=str(location),
+        observer="alice", strict=True, credentials=provider,
+    )
+    before = location.read_bytes()
+    bindings = _file_snapshot(provider.root)
+    process = _run(
+        tmp_path, "preview", target, "undeclared-kind", "--payload-json", "{}",
+        "--observer", "alice", *_credentials(provider.root),
+    )
+    assert process.returncode == 0, process.stdout + process.stderr
+    envelope = _json(process)
+    assert envelope["ok"] is True
+    assert envelope["result"]["admitted"] is False
+    assert envelope["result"]["kind_declared"] is False
+    assert envelope["result"]["strict"] is True
+    assert location.read_bytes() == before
+    assert _file_snapshot(provider.root) == bindings
+
+
 def test_writer_input_refusals_do_not_append_or_create_target(tmp_path: Path) -> None:
     target, location, provider, _alice, _bob = _provision(tmp_path)
     _init_mapped(tmp_path, target, location, provider.root)
@@ -374,16 +518,19 @@ def test_wrong_namespace_and_legacy_writer_refuse_without_effects(tmp_path: Path
 
 
 @pytest.mark.parametrize(
-    ("error_type", "outcome"),
+    ("command", "error_type", "outcome"),
     [
-        (CommittedOutcomeUnknown, "unknown"),
-        (CommittedProjectionFailed, "committed-projection-failed"),
+        ("emit", CommittedOutcomeUnknown, "unknown"),
+        ("preview", CommittedOutcomeUnknown, "unknown"),
+        ("emit", CommittedProjectionFailed, "committed-projection-failed"),
+        ("preview", CommittedProjectionFailed, "committed-projection-failed"),
     ],
 )
 def test_cli_error_boundary_preserves_committed_evidence(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    command: str,
     error_type: type[BaseException],
     outcome: str,
 ) -> None:
@@ -400,10 +547,10 @@ def test_cli_error_boundary_preserves_committed_evidence(
     def fail(*_args: object, **_kwargs: object) -> dict:
         raise error
 
-    monkeypatch.setattr(cli, "emit_fact", fail)
+    monkeypatch.setattr(cli, "preview_emission" if command == "preview" else "emit_fact", fail)
     assert cli.main(
         [
-            "emit",
+            command,
             str(target),
             "item",
             "--payload-json",

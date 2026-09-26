@@ -43,18 +43,30 @@ legacy default. A minimal lifecycle is:
 loops-min init app.vertex --name app --location /data/app.arrival \
   --observer alice --credential-root /keys --credential-namespace tenant \
   --receipt-observer alice --strict
+loops-min preview app.vertex item --payload-file payload.json --observer alice \
+  --credential-root /keys --credential-namespace tenant --receipt-observer alice
 loops-min emit app.vertex item --payload-json '{"value":1}' --observer alice \
   --credential-root /keys --credential-namespace tenant --receipt-observer alice
-loops-min emit-batch app.vertex --facts-json '[{"kind":"item","payload":{"value":2},"observer":"alice","id":"item-2"}]' \
+printf '%s' '{"value":2}' | loops-min emit app.vertex item --payload-file - --observer alice \
+  --credential-root /keys --credential-namespace tenant --receipt-observer alice
+loops-min emit-batch app.vertex --facts-file facts.json \
   --credential-root /keys --credential-namespace tenant --receipt-observer alice
 ```
 
-`emit` requires a JSON object payload. `emit-batch` requires an array of JSON
-objects and passes their observer, ID, timestamp, origin, and admission fields
-to the SDK, retaining its existing defaults and coercion rules. Transport JSON rejects duplicate keys and non-finite
-numbers before credential resolution. The client does not retry unknown
-outcomes; stable IDs and the SDK's returned evidence are the reconciliation
-boundary.
+`emit` and `preview` require exactly one of `--payload-json STRING` or
+`--payload-file PATH`; `PATH` may be `-` for UTF-8 stdin (without a BOM).
+`emit-batch` likewise
+requires exactly one of `--facts-json STRING` or `--facts-file PATH`. Payloads
+must be JSON objects; batch inputs must be arrays of JSON objects. Transport
+JSON rejects duplicate keys, non-finite numbers, malformed UTF-8, and wrong
+shapes before target or credential resolution. `preview` returns the public
+SDK `preview_emission` result, including an `admitted: false` result when the
+SDK declines admission; it does not append custody records or create credential
+bindings. It may still update external witness state; its result is not a
+complete filesystem-effects receipt. `emit-batch` passes observer, ID, timestamp, origin, and admission
+fields to the SDK, retaining its existing defaults and coercion rules. The
+client does not retry unknown outcomes; stable IDs and the SDK's returned
+evidence are the reconciliation boundary.
 
 `declaration target.vertex --proposed-file next.vertex --observer alice ...`
 passes the file's text to the SDK's captured declaration-edit protocol. If an
@@ -95,8 +107,9 @@ has a binding token and phase rather than a ledger Commit or fact IDs; an
 unknown phase does not prove that a durable binding intent exists.
 
 The executable is deliberately named `loops-min` while the legacy `loops`
-application remains in the workspace. It has no presentation, storage, or
-legacy CLI dependency.
+application remains in the workspace. The root distribution also installs the
+same `loops-min` console entry point; `sl` and `loops` remain legacy aliases.
+It has no presentation, storage, or legacy CLI dependency.
 
 For a complete fresh-store example with tested commands, see
 [A fresh Loops store for Atlas observations](../../docs/guides/atlas-greenfield-cli.md).

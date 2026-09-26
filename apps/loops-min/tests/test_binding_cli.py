@@ -14,6 +14,8 @@ def test_binding_publication_failure_and_fresh_process_recovery(tmp_path: Path) 
     for variable, directory in (
         ("XDG_STATE_HOME", "state"),
         ("XDG_CONFIG_HOME", "config"),
+        ("XDG_DATA_HOME", "data"),
+        ("XDG_CACHE_HOME", "cache"),
         ("LOOPS_HOME", "loops"),
     ):
         environment[variable] = str(tmp_path / directory)
@@ -97,6 +99,8 @@ def test_non_object_custody_record_retains_process_recovery_coordinates(tmp_path
     for variable, directory in (
         ("XDG_STATE_HOME", "state"),
         ("XDG_CONFIG_HOME", "config"),
+        ("XDG_DATA_HOME", "data"),
+        ("XDG_CACHE_HOME", "cache"),
         ("LOOPS_HOME", "loops"),
     ):
         environment[variable] = str(tmp_path / directory)

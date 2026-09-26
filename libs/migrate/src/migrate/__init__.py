@@ -35,6 +35,13 @@ from .legacy_sqlite import (
     read_facts,
     read_ticks,
 )
+from .publication import (
+    PublicationError,
+    PublicationRefused,
+    PublicationRequest,
+    PublicationResult,
+    publish_candidate_descriptor,
+)
 from .refusals import (
     BatchRegroupRefused,
     DeclarationKeyRefused,
@@ -91,6 +98,10 @@ __all__ = [
     "MigrationOutcome",
     "MigrationRefused",
     "MissingCustodianKeyRefused",
+    "PublicationError",
+    "PublicationRefused",
+    "PublicationRequest",
+    "PublicationResult",
     "PublishPreconditionRefused",
     "ReportBadSignatureRefused",
     "ReportHeadMismatchRefused",
@@ -124,6 +135,7 @@ __all__ = [
     "load_line",
     "open_legacy_sqlite",
     "preflight_journal",
+    "publish_candidate_descriptor",
     "read_facts",
     "read_ticks",
     "records_from_object",

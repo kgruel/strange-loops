@@ -30,6 +30,7 @@ from sdk import (
     export_target,
     init_vertex,
     inspect_declaration,
+    preview_emission,
     read_fact_by_id,
     read_facts,
     read_state,
@@ -156,17 +157,26 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("--strict", action="store_true")
     mapped_credentials(init)
 
-    emit = target_command("emit", "emit one fact through the Arrival SDK")
-    emit.add_argument("kind")
-    emit.add_argument("--payload-json", required=True)
-    emit.add_argument("--observer", required=True)
-    emit.add_argument("--origin", default="")
-    emit.add_argument("--ts", type=_finite_float)
-    emit.add_argument("--id", dest="id_override")
-    mapped_credentials(emit)
+    def emission_command(name: str, help_text: str) -> argparse.ArgumentParser:
+        sub = target_command(name, help_text)
+        sub.add_argument("kind")
+        payload = sub.add_mutually_exclusive_group(required=True)
+        payload.add_argument("--payload-json")
+        payload.add_argument("--payload-file")
+        sub.add_argument("--observer", required=True)
+        sub.add_argument("--origin", default="")
+        sub.add_argument("--ts", type=_finite_float)
+        sub.add_argument("--id", dest="id_override")
+        mapped_credentials(sub)
+        return sub
+
+    emission_command("emit", "emit one fact through the Arrival SDK")
+    emission_command("preview", "preview one fact emission through the Arrival SDK")
 
     batch = target_command("emit-batch", "atomically emit a fact batch through the SDK")
-    batch.add_argument("--facts-json", required=True)
+    facts = batch.add_mutually_exclusive_group(required=True)
+    facts.add_argument("--facts-json")
+    facts.add_argument("--facts-file")
     mapped_credentials(batch)
 
     declaration = target_command("declaration", "apply one Arrival declaration edit")
@@ -263,6 +273,56 @@ def _json_argument(raw: str, *, name: str, shape: type) -> Any:
     return value
 
 
+def _read_transport_file(path: str, *, name: str) -> str:
+    """Read one JSON transport source with strict UTF-8 decoding.
+
+    The binary stdin path is intentional: the default text wrapper may use
+    ``surrogateescape``, which would otherwise let invalid UTF-8 cross the
+    process boundary. Text-only streams remain useful for in-process tests.
+    """
+    try:
+        if path == "-":
+            if sys.stdin is None:
+                raise UsageError(f"cannot read {name}: stdin is unavailable")
+            binary = getattr(sys.stdin, "buffer", None)
+            if binary is not None:
+                raw = binary.read()
+                if isinstance(raw, bytes):
+                    return raw.decode("utf-8")
+                if isinstance(raw, str):
+                    return raw
+                raise TypeError("stdin buffer did not return text or bytes")
+            raw = sys.stdin.read()
+            if isinstance(raw, bytes):
+                return raw.decode("utf-8")
+            if isinstance(raw, str):
+                return raw
+            raise TypeError("stdin did not return text or bytes")
+        with open(path, encoding="utf-8", errors="strict") as stream:
+            return stream.read()
+    except (OSError, ValueError, TypeError) as exc:
+        # UnicodeError is a ValueError; closed streams also raise ValueError.
+        raise UsageError(f"cannot read {name}: {exc}") from exc
+
+
+def _transport_json(
+    args: argparse.Namespace,
+    *,
+    json_attribute: str,
+    file_attribute: str,
+    json_name: str,
+    file_name: str,
+    shape: type,
+) -> Any:
+    raw_json = getattr(args, json_attribute)
+    if raw_json is not None:
+        return _json_argument(raw_json, name=json_name, shape=shape)
+    raw_file = getattr(args, file_attribute)
+    return _json_argument(
+        _read_transport_file(raw_file, name=file_name), name=file_name, shape=shape
+    )
+
+
 def _credentials(args: argparse.Namespace) -> MappedCredentialProvider:
     return MappedCredentialProvider(
         args.credential_root,
@@ -323,11 +383,19 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
                 credentials=_credentials(args),
             )
         )
-    if command == "emit":
-        payload = _json_argument(args.payload_json, name="--payload-json", shape=dict)
+    if command in {"emit", "preview"}:
+        payload = _transport_json(
+            args,
+            json_attribute="payload_json",
+            file_attribute="payload_file",
+            json_name="--payload-json",
+            file_name="--payload-file",
+            shape=dict,
+        )
         _require_arrival_target(args.target)
+        operation = preview_emission if command == "preview" else emit_fact
         return _as_dict(
-            emit_fact(
+            operation(
                 args.target,
                 args.kind,
                 payload,
@@ -339,9 +407,16 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
             )
         )
     if command == "emit-batch":
-        facts = _json_argument(args.facts_json, name="--facts-json", shape=list)
+        facts = _transport_json(
+            args,
+            json_attribute="facts_json",
+            file_attribute="facts_file",
+            json_name="--facts-json",
+            file_name="--facts-file",
+            shape=list,
+        )
         if not all(isinstance(item, dict) for item in facts):
-            raise UsageError("--facts-json must contain only JSON objects")
+            raise UsageError("--facts-json or --facts-file must contain only JSON objects")
         _require_arrival_target(args.target)
         return _as_dict(emit_batch(args.target, facts, credentials=_credentials(args)))
     if command == "declaration":

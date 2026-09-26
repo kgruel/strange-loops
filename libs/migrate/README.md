@@ -38,6 +38,45 @@ lineage or role are refused by the new existing-descriptor guard. They need
 explicit descriptor reconciliation before this resume path can apply; adding
 those fields alone still does not adopt their declaration.
 
+## Offline descriptor publication
+
+`publish_candidate_descriptor(PublicationRequest(...))` is the narrow final
+publication primitive for an already reviewed and adopted candidate. All paths
+are explicit absolute `Path` values, including the prepublication backup and
+exclusive receipt. It streams the legacy-source and Arrival-store hashes,
+re-parses the pinned descriptors, and requires the candidate's one store clause
+to be an absolute `backend="file"`, `role="authority"` location naming the
+already-final Arrival file using the exact approved backend location spelling
+and the reviewed full head's lineage. Both descriptor-declared file leaves must
+be regular files, not symlinks. The original must be a legacy descriptor; this
+is not an Arrival-to-Arrival routing or authority-transfer operation. It never
+opens the Arrival protocol, reads credentials, consults witness state, verifies
+a report, or adopts anything.
+
+The request separately carries caller assertions for the reviewed adoption
+head, provenance reference, and quiescence transcript. The versioned receipt
+labels these assertions as unverified by this primitive; matching Arrival bytes
+does not prove A, report signatures, provenance, or writer quiescence. It uses
+an exclusive backup, an exclusive deterministic same-directory stage,
+`os.replace`, and directory fsync. New backups and receipts are private (0600).
+The complete stage takes the live descriptor's POSIX mode before fsync; that
+mode is checked again before and after replacement and recorded in the receipt.
+Ownership, ACLs and extended attributes are not copied. This is atomic replacement
+under caller-held quiescence, not CAS. Existing stage or receipt paths refuse;
+a matching backup alone can be reused. Failures retain artifacts as evidence.
+
+`PublicationError` exposes `phase`, `effect`, paths and pins. Effects refer only
+to live-descriptor replacement: `not_attempted` can still leave backup/stage
+artifacts; `replace_entered_unknown` means the replacement call raised;
+`replace_returned_unverified` means it returned but directory sync or final
+bytes/mode verification failed. `known_published` requires directory sync and
+verified live bytes/mode, but does not promise receipt completion or continued
+immutability. None is permission to blindly retry. Artifact existence is not
+re-probed during error serialization. Alias checks cover the declared roles,
+not every external hard link or consumer. Existing parent directories are a
+trusted, quiescent namespace, not protected against hostile concurrent
+parent-symlink replacement.
+
 The migration report certifies the head at migration completion. Its current
 verifier requires that exact live head, so verify it before a later adoption or
 ordinary append advances the target. Structural Full verification without an

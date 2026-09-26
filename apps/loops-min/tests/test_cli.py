@@ -75,6 +75,8 @@ def _run(vertex: Path, *args: str, state_home: Path) -> subprocess.CompletedProc
     environment = os.environ.copy()
     environment["XDG_STATE_HOME"] = str(state_home)
     environment["XDG_CONFIG_HOME"] = str(state_home.parent / "config")
+    environment["XDG_DATA_HOME"] = str(state_home.parent / "data")
+    environment["XDG_CACHE_HOME"] = str(state_home.parent / "cache")
     environment["LOOPS_HOME"] = str(state_home.parent / "loops")
     prefix: list[str] = []
     if args and args[0] == "--pretty":
@@ -240,6 +242,8 @@ def test_sdk_refusal_and_unavailable_operation_have_stable_json_status(tmp_path:
     environment = os.environ.copy()
     environment["XDG_STATE_HOME"] = str(state_home)
     environment["XDG_CONFIG_HOME"] = str(state_home.parent / "config")
+    environment["XDG_DATA_HOME"] = str(state_home.parent / "data")
+    environment["XDG_CACHE_HOME"] = str(state_home.parent / "cache")
     environment["LOOPS_HOME"] = str(state_home.parent / "loops")
     init = subprocess.run(
         [sys.executable, "-m", "loops_min", "replicate", str(init_target)],
@@ -269,6 +273,10 @@ def test_sdk_refusal_and_unavailable_operation_have_stable_json_status(tmp_path:
 def test_help_and_pretty_output_are_conventional(tmp_path: Path) -> None:
     environment = os.environ.copy()
     environment["XDG_STATE_HOME"] = str(tmp_path / "xdg")
+    environment["XDG_CONFIG_HOME"] = str(tmp_path / "config")
+    environment["XDG_DATA_HOME"] = str(tmp_path / "data")
+    environment["XDG_CACHE_HOME"] = str(tmp_path / "cache")
+    environment["LOOPS_HOME"] = str(tmp_path / "loops")
     help_process = subprocess.run(
         [sys.executable, "-m", "loops_min", "--help"],
         capture_output=True,

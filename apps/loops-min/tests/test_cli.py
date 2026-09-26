@@ -141,7 +141,24 @@ def test_real_arrival_reads_are_json_process_results(tmp_path: Path) -> None:
     vertex, fact_id = _fixture(tmp_path)
     state_home = tmp_path / "xdg"
 
-    summary_process = _run(vertex, "summary", state_home=state_home)
+    summary_process = _run(vertex, "summary", "--arrival-only", state_home=state_home)
+    strict_facts_process = _run(
+        vertex,
+        "facts",
+        "--arrival-only",
+        "--metadata-only",
+        "--limit",
+        "5",
+        "--order",
+        "newest",
+        state_home=state_home,
+    )
+    all_arrival_process = _run(
+        vertex, "facts", "--all", "--arrival-only", state_home=state_home
+    )
+    all_metadata_process = _run(
+        vertex, "facts", "--all", "--metadata-only", state_home=state_home
+    )
     target_process = _run(vertex, "target", state_home=state_home)
     facts_process = _run(
         vertex,
@@ -167,6 +184,8 @@ def test_real_arrival_reads_are_json_process_results(tmp_path: Path) -> None:
     search_process = _run(vertex, "search", "hello", state_home=state_home)
 
     summary = _json_result(summary_process)
+    strict_facts = _json_result(strict_facts_process)
+    all_arrival = _json_result(all_arrival_process)
     target = _json_result(target_process)
     facts = _json_result(facts_process)
     fact = _json_result(fact_process)
@@ -182,13 +201,26 @@ def test_real_arrival_reads_are_json_process_results(tmp_path: Path) -> None:
     assert all(
         result["ok"]
         for result in (
-            summary, target, facts, fact, state, inspect, ticks, timeline, verify, sync,
-            search_sync, search,
+            summary, strict_facts, all_arrival, target, facts, fact, state, inspect, ticks,
+            timeline, verify, sync, search_sync, search,
         )
     )
     assert target["result"]["schema"] == "loops.sdk/arrival-target/v1"
     assert target["result"]["store"]["backend"] == "file"
     assert summary["result"]["read_path"] == "arrival"
+    assert summary["result"]["vertex_name"] == "arrival"
+    assert summary["result"]["runtime_epoch"] == {"mode": "strict", "anchor_ordinal": None}
+    assert strict_facts["result"]["read_path"] == "arrival"
+    assert strict_facts["result"]["basis"] == summary["result"]["basis"]
+    assert strict_facts["result"]["store"]["backend"] == "file"
+    assert strict_facts["result"]["order"] == "newest"
+    assert strict_facts["result"]["metadata_only"] is True
+    assert strict_facts["result"]["items"] and all(
+        "payload" not in item for item in strict_facts["result"]["items"]
+    )
+    assert all_arrival["result"]["complete"] is True
+    assert all_metadata_process.returncode == 2
+    assert json.loads(all_metadata_process.stdout)["error"]["type"] == "UsageError"
     assert facts["result"]["items"][0]["id"] == fact_id
     assert facts["result"]["has_continuation"] is True
     assert facts["result"]["next_cursor"] is None

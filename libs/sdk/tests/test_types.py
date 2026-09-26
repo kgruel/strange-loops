@@ -133,6 +133,19 @@ def test_read_summary_model() -> None:
     assert "latest_iso" not in d_empty
 
 
+def test_read_summary_preserves_existing_positional_constructor() -> None:
+    summary = ReadSummary(
+        "loops.sdk/read-summary/v2", "legacy", None, None, "vertex", "target.vertex",
+        "sqlite", "store.db", "index.db", 42,
+    )
+    assert summary.canonical_mode == "sqlite"
+    assert summary.canonical_path == "store.db"
+    assert summary.index_path == "index.db"
+    assert summary.fact_total == 42
+    assert summary.vertex_name == ""
+    assert summary.runtime_epoch is None
+
+
 def test_fact_page_result_model() -> None:
     """FactPageResult defaults, frozenness, and as_dict conversion."""
     page = FactPageResult(

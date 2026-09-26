@@ -73,10 +73,17 @@ a committed fact from an idempotent no-op. The client does not retry unknown
 outcomes; stable IDs and the SDK's returned evidence are the reconciliation
 boundary.
 
-`facts` remains a bounded page with default `--limit 50`. `facts TARGET --all`
-is mutually exclusive with `--limit` and delegates once to `sdk.read_all_facts`;
-it returns a complete selected JSON materialization from one current Arrival
-basis. It has no page-size flag, token, streaming, or cross-process continuation.
+`summary TARGET --arrival-only` and bounded `facts TARGET --arrival-only`
+require one explicit non-aggregate Arrival descriptor and never fall through to
+legacy or aggregate readers. `facts TARGET --metadata-only` omits each item's
+`payload` while retaining its envelope, page metadata, basis, and store; it can
+be combined with `--arrival-only`. `facts` remains a bounded page with default
+`--limit 50`. `facts TARGET --all` is mutually exclusive with `--limit` and
+delegates once to `sdk.read_all_facts`; `--arrival-only` is accepted there as
+redundant, while `--metadata-only` is refused as usage before the target opens.
+`facts TARGET --all` returns a complete selected JSON materialization from one
+current Arrival basis. It has no page-size flag, token, streaming, or
+cross-process continuation.
 An unsupported or truncated adapter result refuses rather than claiming a
 complete history.
 

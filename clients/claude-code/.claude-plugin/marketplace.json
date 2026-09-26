@@ -6,7 +6,7 @@
     {
       "name": "loops",
       "source": "./",
-      "description": "In-session loops integration for Claude Code."
+      "description": "Explicitly configured Arrival session hooks for Claude Code."
     }
   ]
 }

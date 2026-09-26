@@ -135,6 +135,11 @@ def _fact_as_dict(fact: Fact) -> dict[str, Any]:
     }
 
 
+def _metadata_only_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Retain fact envelopes while deliberately omitting their payload bodies."""
+    return [{key: value for key, value in item.items() if key != "payload"} for item in items]
+
+
 def _arrival_tick_as_dict(tick: Tick) -> dict[str, Any]:
     return {
         "id": tick.id,
@@ -538,10 +543,71 @@ def _aggregate_timeline_from(
     )
 
 
+def _runtime_epoch_as_dict(runtime_epoch: Any) -> dict[str, Any]:
+    """Serialize the epoch captured by one open Arrival invocation."""
+    return {
+        "mode": runtime_epoch.mode,
+        "anchor_ordinal": runtime_epoch.start_ordinal,
+    }
+
+
+def _read_arrival_summary(
+    target_path: Path,
+    resolved: tuple[Path, Any, Any],
+    *,
+    include_internal: bool,
+    registry: BackendRegistry | None,
+    allow_aggregate: bool,
+) -> ReadSummary:
+    """Read one descriptor resolved by the caller, without re-routing it."""
+    with _open_arrival_read(resolved, registry=registry) as (
+        locator_ast,
+        descriptor,
+        opened,
+    ):
+        raw = opened.snapshot.summary(SummaryRequest(include_internal=include_internal))
+        effective_ast, declaration_status, _facts, _own_lineage = _arrival_declaration(
+            locator_ast, target_path, opened, allow_aggregate=allow_aggregate
+        )
+        if effective_ast.combine is not None or effective_ast.discover is not None:
+            with open_aggregate_read(
+                target_path, registry=registry, opened_root=opened
+            ) as aggregate:
+                return _aggregate_summary_from(
+                    aggregate, target_path, include_internal=include_internal
+                )
+        runtime_epoch = opened.runtime_epoch()
+        kinds = {name: dict(stats) for name, stats in raw.fact_kinds.items()}
+        return ReadSummary(
+            read_path="arrival",
+            basis=opened.basis,
+            store=StoreDescriptorInfo.from_descriptor(descriptor),
+            target_type="vertex",
+            target_path=str(target_path),
+            vertex_name=effective_ast.name,
+            runtime_epoch=_runtime_epoch_as_dict(runtime_epoch),
+            fact_total=raw.fact_total,
+            tick_total=raw.tick_total,
+            latest_ts=_latest_timestamp(raw.fact_kinds),
+            kinds=kinds,
+            ticks={name: dict(stats) for name, stats in raw.tick_names.items()},
+            agreement=None,
+            declaration_status=declaration_status,
+            unfolded_kinds=[
+                name
+                for name in kinds
+                if name not in effective_ast.loops and not name.startswith("_decl.")
+            ],
+            signed_count=raw.signed_count,
+            unsigned_count=raw.unsigned_count,
+        )
+
+
 def read_summary(
     target: Path | str,
     *,
     include_internal: bool = False,
+    require_arrival: bool = False,
     registry: BackendRegistry | None = None,
 ) -> ReadSummary:
     """Read domain-neutral statistical inventory of a target artifact.
@@ -549,57 +615,42 @@ def read_summary(
     Parameters:
         target: Path to .vertex, .jsonl, or .db artifact.
         include_internal: Whether to include reserved `_decl.*` kinds.
+        require_arrival: Refuse every non-single-store Arrival route without
+            probing legacy or aggregate readers.
 
     Returns:
         ReadSummary containing fact/tick totals, kind distribution, and agreement.
     """
     target_path = Path(target).resolve()
+    if require_arrival:
+        # This is the strict routing boundary: resolve exactly once with the
+        # aggregate prohibition intact, then reuse that descriptor below.
+        arrival = _arrival_descriptor(target_path)
+        if arrival is None:
+            raise TargetUnsupported(
+                f"summary requires an explicit non-aggregate Arrival descriptor: {target_path}"
+            )
+        return _read_arrival_summary(
+            target_path,
+            arrival,
+            include_internal=include_internal,
+            registry=registry,
+            allow_aggregate=False,
+        )
+
     if has_local_descriptor_aggregate(target_path):
         return _aggregate_summary(
             target_path, include_internal=include_internal, registry=registry
         )
     arrival = _aggregate_aware_arrival_descriptor(target_path)
     if arrival is not None:
-        with _open_arrival_read(arrival, registry=registry) as (
-            locator_ast,
-            descriptor,
-            opened,
-        ):
-            raw = opened.snapshot.summary(
-                SummaryRequest(include_internal=include_internal)
-            )
-            effective_ast, declaration_status, _facts, _own_lineage = _arrival_declaration(
-                locator_ast, target_path, opened, allow_aggregate=True
-            )
-            if effective_ast.combine is not None or effective_ast.discover is not None:
-                with open_aggregate_read(
-                    target_path, registry=registry, opened_root=opened
-                ) as aggregate:
-                    return _aggregate_summary_from(
-                        aggregate, target_path, include_internal=include_internal
-                    )
-            kinds = {name: dict(stats) for name, stats in raw.fact_kinds.items()}
-            return ReadSummary(
-                read_path="arrival",
-                basis=opened.basis,
-                store=StoreDescriptorInfo.from_descriptor(descriptor),
-                target_type="vertex",
-                target_path=str(target_path),
-                fact_total=raw.fact_total,
-                tick_total=raw.tick_total,
-                latest_ts=_latest_timestamp(raw.fact_kinds),
-                kinds=kinds,
-                ticks={name: dict(stats) for name, stats in raw.tick_names.items()},
-                agreement=None,
-                declaration_status=declaration_status,
-                unfolded_kinds=[
-                    name
-                    for name in kinds
-                    if name not in effective_ast.loops and not name.startswith("_decl.")
-                ],
-                signed_count=raw.signed_count,
-                unsigned_count=raw.unsigned_count,
-            )
+        return _read_arrival_summary(
+            target_path,
+            arrival,
+            include_internal=include_internal,
+            registry=registry,
+            allow_aggregate=True,
+        )
 
     _refuse_arrival_aggregate_members(target_path)
     info = resolve_target(target)
@@ -735,6 +786,8 @@ def read_facts(
     before: str | Continuation | None = None,
     after: str | Continuation | None = None,
     include_internal: bool = False,
+    require_arrival: bool = False,
+    metadata_only: bool = False,
     registry: BackendRegistry | None = None,
 ) -> FactPageResult:
     """Read a bounded page of facts with stable witness pagination cursors.
@@ -755,6 +808,10 @@ def read_facts(
         before: Cursor token to fetch rows before (older than) the cursor in newest order.
         after: Cursor token to fetch rows after (newer than) the cursor in oldest order.
         include_internal: Whether to include internal `_decl.*` facts.
+        require_arrival: Refuse every non-single-store Arrival route without
+            probing legacy or aggregate readers.
+        metadata_only: Omit each returned fact's payload while retaining page
+            and Arrival envelope metadata.
 
     Returns:
         FactPageResult containing deserialized fact items and pagination metadata.
@@ -763,7 +820,13 @@ def read_facts(
         raise SdkValueError(f"invalid order '{order}': expected 'newest' or 'oldest'")
 
     target_path = Path(target).resolve()
+    # Strict mode resolves once and never reaches legacy aggregate or store
+    # probes. The descriptor is the same object passed to the Arrival open.
     arrival = _arrival_descriptor(target_path)
+    if require_arrival and arrival is None:
+        raise TargetUnsupported(
+            f"facts requires an explicit non-aggregate Arrival descriptor: {target_path}"
+        )
     if arrival is not None:
         if before is not None and after is not None:
             raise SdkValueError("before and after are mutually exclusive")
@@ -794,11 +857,16 @@ def read_facts(
                 read_path="arrival",
                 basis=opened.basis,
                 store=StoreDescriptorInfo.from_descriptor(descriptor),
-                items=[_fact_as_dict(fact) for fact in page.items],
+                items=(
+                    _metadata_only_items([_fact_as_dict(fact) for fact in page.items])
+                    if metadata_only
+                    else [_fact_as_dict(fact) for fact in page.items]
+                ),
                 next_cursor=next_cursor,
                 prev_cursor=None,
                 truncated=page.truncated,
                 order=page.order,
+                metadata_only=metadata_only,
             )
 
     _refuse_arrival_aggregate_members(target_path)
@@ -834,11 +902,12 @@ def read_facts(
             capped = all_facts[:limit]
             truncated = len(all_facts) > len(capped)
             return FactPageResult(
-                items=capped,
+                items=_metadata_only_items(capped) if metadata_only else capped,
                 next_cursor=None,
                 prev_cursor=None,
                 truncated=truncated,
                 order=order,
+                metadata_only=metadata_only,
             )
 
         if info.canonical_path is None or not info.canonical_path.exists():
@@ -848,6 +917,7 @@ def read_facts(
                 prev_cursor=None,
                 truncated=False,
                 order=order,
+                metadata_only=metadata_only,
             )
 
         # Witness resolution reads the sqlite index, not the (possibly jsonl)
@@ -871,11 +941,12 @@ def read_facts(
         page_prev: Any = getattr(page, "prev", None)
         prev_tok = page_prev.fact_id or f"seq:{page_prev.seq}" if page_prev is not None else None
         return FactPageResult(
-            items=page.items,
+            items=_metadata_only_items(page.items) if metadata_only else page.items,
             next_cursor=next_tok,
             prev_cursor=prev_tok,
             truncated=page.truncated,
             order=order,
+            metadata_only=metadata_only,
         )
 
     # A bare .db/.jsonl target is one store, so its axis is Arrival().
@@ -905,11 +976,12 @@ def read_facts(
         prev_tok = page_prev.fact_id or f"seq:{page_prev.seq}" if page_prev is not None else None
 
         return FactPageResult(
-            items=page.items,
+            items=_metadata_only_items(page.items) if metadata_only else page.items,
             next_cursor=next_tok,
             prev_cursor=prev_tok,
             truncated=page.truncated,
             order=order,
+            metadata_only=metadata_only,
         )
     finally:
         reader.close()

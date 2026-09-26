@@ -68,6 +68,11 @@ summary = read_summary("target.vertex")
 page = read_facts("target.vertex", limit=10, order="newest")
 # -> FactPageResult(items=[...], next_cursor=..., truncated=True, order='newest')
 
+# Require a single-store Arrival descriptor without legacy or aggregate routing.
+summary = read_summary("target.vertex", require_arrival=True)
+page = read_facts("target.vertex", require_arrival=True, metadata_only=True)
+# metadata_only pages retain fact envelopes, cursors, basis, and store but omit payload.
+
 # Arrival continuations are process-local capabilities. Pass next_cursor back
 # to read_facts() directly; as_dict() reports has_continuation=True and redacts
 # the engine value instead of emitting an unprotected wire token.
@@ -108,7 +113,14 @@ fact = lookup.fact
 ```
 
 `read_summary`, `read_facts`, `read_state`, `read_ticks`, and
-`read_fact_by_id` always return typed result models. Descriptor-first results
+`read_fact_by_id` always return typed result models. `read_summary(...,
+require_arrival=True)` and `read_facts(..., require_arrival=True)` resolve one
+non-aggregate descriptor and refuse bare, storeless, legacy, and aggregate
+routes without probing them. Arrival summaries expose the effective captured
+`vertex_name` and that invocation's `runtime_epoch`; they do not reconstruct
+state. `read_facts(..., metadata_only=True)` omits only item payloads and sets
+`FactPageResult.metadata_only=True`; it does not reduce adapter query work.
+Descriptor-first results
 carry the custody head and represented projection prefix in `basis`; legacy
 results carry `read_path="legacy"` and `basis=None`. `read_all_facts` accepts only
 an explicit non-aggregate Arrival descriptor and sends one `FactRequest(limit=None)`
@@ -429,8 +441,8 @@ retain their established serialized fields; use `read_path`, `basis`, and
 | **`InitVertexResult`** | `loops.sdk/init-vertex/v1` | Outcome of vertex scaffolding operation. |
 | **`DeclarationInspectionResult`** | `loops.sdk/declaration-inspection/v1` | Deep structural inspection of a `.vertex` file. |
 | **`DeclarationPlanResult`** | `loops.sdk/declaration-plan/v1` | Dry-run preview of a proposed declaration update. |
-| **`ReadSummary`** | `loops.sdk/read-summary/v2` | Basis-bearing inventory of facts, ticks, and kinds. |
-| **`FactPageResult`** | `loops.sdk/facts-page/v2` | Basis-bearing bounded page with continuation metadata. |
+| **`ReadSummary`** | `loops.sdk/read-summary/v2` | Basis-bearing inventory of facts, ticks, kinds, captured vertex name, and runtime epoch. |
+| **`FactPageResult`** | `loops.sdk/facts-page/v2` | Basis-bearing bounded page with continuation metadata and optional payload omission. |
 | **`FactHistoryResult`** | `loops.sdk/facts-history/v1` | Complete selected materialization from one Arrival basis. |
 | **`FactLookupResult`** | `loops.sdk/fact-lookup/v1` | Basis-bearing exact/prefix lookup; a miss retains its basis. |
 | **`TickReadResult`** | `loops.sdk/tick-read/v1` | Basis-bearing chronological tick records. |

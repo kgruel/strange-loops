@@ -277,6 +277,8 @@ class ReadSummary:
     unsigned_count: int | None = None
     aggregate_members: list[dict[str, Any]] = field(default_factory=list)
     aggregate_definitions: list[dict[str, Any]] = field(default_factory=list)
+    vertex_name: str = ""
+    runtime_epoch: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -298,6 +300,7 @@ class FactPageResult:
     prev_cursor: str | Continuation | None = None
     truncated: bool = False
     order: str = "newest"
+    metadata_only: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         result = asdict(self)

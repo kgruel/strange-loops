@@ -1,26 +1,14 @@
 {
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-open.sh\"" },
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-orient.sh\"" }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-close.sh\"" }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/turn-capture.py\"" }
-        ]
-      }
-    ]
+    "SessionStart": [{
+      "matcher": "startup|resume|clear|fork",
+      "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/arrival_session.py\" start" }]
+    }],
+    "SessionEnd": [{
+      "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/arrival_session.py\" end", "timeout": 60 }]
+    }],
+    "Stop": [{
+      "hooks": [{ "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/arrival_session.py\" stop" }]
+    }]
   }
 }

@@ -80,8 +80,11 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Test loops-min
-        run: uv run --package loops-min pytest apps/loops-min/tests -q
+      - name: Test loops-min and Claude Arrival adapter
+        run: uv run --package loops-min pytest apps/loops-min/tests clients/claude-code/tests -q
+
+      - name: Lint Claude Arrival adapter
+        run: uv run --package loops-min ruff check clients/claude-code
 
       - name: Build root wheel and smoke installed loops-min
         run: |
@@ -90,6 +93,7 @@ jobs:
           uv venv "$artifact_root/venv" --python 3.13
           uv pip install --python "$artifact_root/venv/bin/python" "$artifact_root"/strange_loops-*.whl
           "$artifact_root/venv/bin/python" apps/loops-min/tests/wheel_smoke.py "$artifact_root/venv/bin/loops-min"
+          "$artifact_root/venv/bin/python" clients/claude-code/tests/installed_smoke.py "$artifact_root/venv/bin/loops-min" "$GITHUB_WORKSPACE/clients/claude-code/hooks/arrival_session.py"
 
   discover:
     name: Discover Packages

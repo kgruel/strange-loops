@@ -113,7 +113,8 @@ def _parser() -> argparse.ArgumentParser:
 
     target_command("target", "resolve an explicit Arrival descriptor")
     target_command("inspect", "inspect a declaration")
-    target_command("summary", "read a target summary")
+    summary = target_command("summary", "read a target summary")
+    summary.add_argument("--arrival-only", action="store_true")
     facts = target_command("facts", "read a bounded fact page or complete history")
     facts_mode = facts.add_mutually_exclusive_group()
     facts_mode.add_argument("--limit", type=int, default=50)
@@ -122,6 +123,8 @@ def _parser() -> argparse.ArgumentParser:
     facts.add_argument("--observer")
     facts.add_argument("--order", choices=("newest", "oldest"), default="newest")
     facts.add_argument("--include-internal", action="store_true")
+    facts.add_argument("--arrival-only", action="store_true")
+    facts.add_argument("--metadata-only", action="store_true")
     fact = target_command("fact", "look up one fact by ID or prefix")
     fact.add_argument("fact_id")
     state = target_command("state", "read folded state")
@@ -475,8 +478,10 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
     if command == "inspect":
         return _as_dict(inspect_declaration(args.target))
     if command == "summary":
-        return _as_dict(read_summary(args.target))
+        return _as_dict(read_summary(args.target, require_arrival=args.arrival_only))
     if command == "facts":
+        if args.all and args.metadata_only:
+            raise UsageError("--metadata-only is unavailable with --all")
         operation = read_all_facts if args.all else read_facts
         arguments: dict[str, Any] = {
             "kind": args.kind,
@@ -486,6 +491,8 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
         }
         if not args.all:
             arguments["limit"] = args.limit
+            arguments["require_arrival"] = args.arrival_only
+            arguments["metadata_only"] = args.metadata_only
         return _as_dict(operation(args.target, **arguments))
     if command == "fact":
         return _as_dict(read_fact_by_id(args.target, args.fact_id))

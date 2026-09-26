@@ -122,6 +122,11 @@ def main() -> None:
             *credentials,
         )
         assert initialized["ok"] is True
+        strict_summary = _run(
+            console, environment, run_root, "summary", str(target), "--arrival-only"
+        )
+        assert strict_summary["ok"] is True
+        assert strict_summary["result"]["read_path"] == "arrival"
 
         payload = root / "payload.json"
         payload.write_text('{\n  "message": "héllo\\nfile"\n}\n', encoding="utf-8")
@@ -187,6 +192,22 @@ def main() -> None:
             ("file-id", {"message": "héllo\nfile"}),
             ("stdin-id", {"message": "stdin"}),
         ]
+        metadata = _run(
+            console,
+            environment,
+            run_root,
+            "facts",
+            str(target),
+            "--arrival-only",
+            "--metadata-only",
+            "--limit",
+            "5",
+            "--order",
+            "newest",
+        )
+        assert metadata["ok"] is True
+        assert metadata["result"]["metadata_only"] is True
+        assert all("payload" not in item for item in metadata["result"]["items"])
         bulk = _run(
             console, environment, run_root, "emit-batch", str(target),
             "--facts-json", json.dumps([

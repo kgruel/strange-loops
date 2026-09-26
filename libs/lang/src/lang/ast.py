@@ -85,6 +85,20 @@ def _frozen(cls):
 
     cls.__match_args__ = fields
 
+    def __deepcopy__(self, memo):
+        # Runtime capture copies AST conditions with mutable fold state. The
+        # default slot reconstruction would call our rejecting __setattr__.
+        # Copy fields recursively: some frozen AST nodes contain mutable data.
+        from copy import deepcopy
+
+        clone = object.__new__(type(self))
+        memo[id(self)] = clone
+        for name in fields:
+            _setattr(clone, name, deepcopy(getattr(self, name), memo))
+        return clone
+
+    cls.__deepcopy__ = __deepcopy__
+
     # Clean up class-level defaults
     for f in defaults:
         try:

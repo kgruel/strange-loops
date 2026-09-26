@@ -53,7 +53,7 @@ loops-min emit-batch app.vertex --facts-file facts.json \
   --credential-root /keys --credential-namespace tenant --receipt-observer alice
 ```
 
-`emit` and `preview` require exactly one of `--payload-json STRING` or
+`emit`, `preview`, and `seal TARGET` require exactly one of `--payload-json STRING` or
 `--payload-file PATH`; `PATH` may be `-` for UTF-8 stdin (without a BOM).
 `emit-batch` likewise
 requires exactly one of `--facts-json STRING` or `--facts-file PATH`. Payloads
@@ -64,9 +64,21 @@ SDK `preview_emission` result, including an `admitted: false` result when the
 SDK declines admission; it does not append custody records or create credential
 bindings. It may still update external witness state; its result is not a
 complete filesystem-effects receipt. `emit-batch` passes observer, ID, timestamp, origin, and admission
-fields to the SDK, retaining its existing defaults and coercion rules. The
-client does not retry unknown outcomes; stable IDs and the SDK's returned
-evidence are the reconciliation boundary.
+fields to the SDK, retaining its existing defaults and coercion rules. `seal`
+uses the same mandatory mapped credentials and delegates to `sdk.seal_fact`.
+It is descriptor-only: a captured vertex `boundary when="seal"` is required;
+the first such boundary supplies required match values. `sealed: false` means
+this invocation produced no own-vertex tick; the underlying receipt distinguishes
+a committed fact from an idempotent no-op. The client does not retry unknown
+outcomes; stable IDs and the SDK's returned evidence are the reconciliation
+boundary.
+
+`facts` remains a bounded page with default `--limit 50`. `facts TARGET --all`
+is mutually exclusive with `--limit` and delegates once to `sdk.read_all_facts`;
+it returns a complete selected JSON materialization from one current Arrival
+basis. It has no page-size flag, token, streaming, or cross-process continuation.
+An unsupported or truncated adapter result refuses rather than claiming a
+complete history.
 
 `declaration target.vertex --proposed-file next.vertex --observer alice ...`
 passes the file's text to the SDK's captured declaration-edit protocol. If an

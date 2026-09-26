@@ -31,6 +31,7 @@ from .errors import (
     ProjectionOutcomeUnknown,
     normalize_exception,
 )
+from .history import FactHistoryResult, read_all_facts
 from .kind import (
     add_kind,
     edit_kind,
@@ -52,6 +53,7 @@ from .read import (
     sync_search_index,
     sync_target,
 )
+from .seal import SealReceipt, seal_fact
 from .sources import run_sources
 from .target import TargetInfo, discover_targets, resolve_arrival_target, resolve_target
 from .transfer import (
@@ -127,6 +129,7 @@ __all__ = [
     "recover_arrival_adoption",
     "read_summary",
     "read_facts",
+    "read_all_facts",
     "read_state",
     "read_ticks",
     "read_fact_by_id",
@@ -139,6 +142,7 @@ __all__ = [
     "emit_fact",
     "emit_batch",
     "preview_emission",
+    "seal_fact",
     "run_sources",
     "add_kind",
     "edit_kind",
@@ -164,10 +168,12 @@ __all__ = [
     "DeclarationPlanResult",
     "ReadSummary",
     "FactPageResult",
+    "FactHistoryResult",
     "FactLookupResult",
     "FoldStateResult",
     "TickReadResult",
     "EmitReceipt",
+    "SealReceipt",
     "BatchEmitResult",
     "CredentialBindingResult",
     "EntityResolutionResult",

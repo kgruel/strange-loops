@@ -50,6 +50,7 @@ targets = discover_targets(".", recursive=True)
 from sdk import (
     read_summary,
     read_facts,
+    read_all_facts,
     read_state,
     read_ticks,
     read_fact_by_id,
@@ -70,6 +71,11 @@ page = read_facts("target.vertex", limit=10, order="newest")
 # Arrival continuations are process-local capabilities. Pass next_cursor back
 # to read_facts() directly; as_dict() reports has_continuation=True and redacts
 # the engine value instead of emitting an unprotected wire token.
+
+# Complete selected history from one current captured snapshot. This is an
+# O(selected history) JSON materialization, not paging or a continuation protocol.
+history = read_all_facts("target.vertex", kind="note", order="oldest")
+# -> FactHistoryResult(complete=True, basis=ReadBasis(...), items=(...))
 
 # Folded vertex state
 state = read_state("target.vertex", kind="note")
@@ -104,8 +110,11 @@ fact = lookup.fact
 `read_summary`, `read_facts`, `read_state`, `read_ticks`, and
 `read_fact_by_id` always return typed result models. Descriptor-first results
 carry the custody head and represented projection prefix in `basis`; legacy
-results carry `read_path="legacy"` and `basis=None`. Descriptor reads require a
-current projection and never materialize, repair, or catch it up. Search,
+results carry `read_path="legacy"` and `basis=None`. `read_all_facts` accepts only
+an explicit non-aggregate Arrival descriptor and sends one `FactRequest(limit=None)`
+through one current snapshot; an adapter cursor or truncation refuses rather than
+claiming completeness. Descriptor reads require a current projection and never
+materialize, repair, or catch it up. Search,
 entity resolution, and timelines carry the same captured basis. Aggregate
 state, summary and timeline results retain per-occurrence member bases rather
 than inventing one shared head. `sync_target` is the
@@ -175,6 +184,8 @@ print(batch.commit, batch.atomicity, batch.projection)
   Emits a fact (or `Fact` atom) under declared admission rules. Descriptor-first Arrival writes prepare from one CURRENT snapshot, append once against its captured full head, witness the commit, then explicitly synchronize the projection. Bypassing strict kind admission requires `admit_undeclared=True`. Deterministic IDs can be specified with `id_override`. `dry_run=True` simulates emission without storage.
 - **`preview_emission(target, kind_or_fact, payload=None, *, observer=None, origin="", ts=None, admit_undeclared=False, credentials=None, registry=None) -> EmitPreviewResult`**:
   Simulates emission against declared policies, checking fold key requirements without disk side effects. Arrival policy and fold metadata come from the same bounded effective declaration used for planning; a missing projection refuses without materializing it.
+- **`seal_fact(target, payload, *, observer, credentials, origin="", ts=None, id_override=None, registry=None) -> SealReceipt`**:
+  Appends an ordinary `seal` fact only through an explicit Arrival descriptor. The captured declaration selects its first vertex-level `BoundaryWhen(kind="seal")`; its match values are merged and conflicting caller values refuse. `sealed=True` means this invocation produced a tick named for the captured vertex, not merely a loop tick or an observed later seal. A false condition may therefore return a committed receipt with `sealed=False`.
 - **`emit_batch(target, facts, *, observer=None, origin="", credentials=None, admit_undeclared=False, registry=None) -> BatchEmitResult`**:
   Normalizes every item before resolving the target. A descriptor-first Arrival batch derives all per-item admission decisions from one current snapshot, appends the packed records under one head comparison, witnesses one shared commit, and explicitly synchronizes the projection. Each mapping item may set its own boolean `admit_undeclared`; duplicate receipts retain `stored=False`. Empty input is an explicit zero-write result. Legacy targets return the same wrapper with `atomic=False`, `atomicity="legacy-sequential"`, and no invented shared commit; `LegacyBatchPartialFailure` retains receipts if that sequential loop stops after an observable prefix.
 
@@ -420,6 +431,7 @@ retain their established serialized fields; use `read_path`, `basis`, and
 | **`DeclarationPlanResult`** | `loops.sdk/declaration-plan/v1` | Dry-run preview of a proposed declaration update. |
 | **`ReadSummary`** | `loops.sdk/read-summary/v2` | Basis-bearing inventory of facts, ticks, and kinds. |
 | **`FactPageResult`** | `loops.sdk/facts-page/v2` | Basis-bearing bounded page with continuation metadata. |
+| **`FactHistoryResult`** | `loops.sdk/facts-history/v1` | Complete selected materialization from one Arrival basis. |
 | **`FactLookupResult`** | `loops.sdk/fact-lookup/v1` | Basis-bearing exact/prefix lookup; a miss retains its basis. |
 | **`TickReadResult`** | `loops.sdk/tick-read/v1` | Basis-bearing chronological tick records. |
 | **`FoldStateResult`** | `loops.sdk/fold-state/v2` | State folded from facts and declarations in one bounded snapshot. |
@@ -427,6 +439,7 @@ retain their established serialized fields; use `read_path`, `basis`, and
 | **`TimelineResult`** | `loops.sdk/timeline-result/v1` | Interleaved chronological stream of facts and tick seals. |
 | **`SyncResult`** | `loops.sdk/sync-result/v2` | Legacy index status or Arrival captured/target/before/after projection basis. |
 | **`EmitReceipt`** | `loops.sdk/emit-receipt/v2` | Legacy receipt fields plus Arrival store, captured head, commit, witness, and projection outcome. |
+| **`SealReceipt`** | `loops.sdk/seal-receipt/v1` | Underlying emit evidence, captured boundary match, vertex name, and truthful sealing result. |
 | **`SourceRunResult`** | `loops.sdk/source-run/v1` | Captured cadence, collected bodies, tier commits, and interrupted projection/dispatch evidence. |
 | **`EmitPreviewResult`** | `loops.sdk/emit-preview/v2` | Preflight admission/fold result with descriptor and captured-head provenance. |
 | **`KindMutationResult`** | `loops.sdk/kind-mutation/v1` | Outcome of a declaration update ceremony and generation diffs. |

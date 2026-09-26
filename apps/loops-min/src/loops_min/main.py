@@ -31,6 +31,7 @@ from sdk import (
     init_vertex,
     inspect_declaration,
     preview_emission,
+    read_all_facts,
     read_fact_by_id,
     read_facts,
     read_state,
@@ -41,6 +42,7 @@ from sdk import (
     resolve_arrival_target,
     resolve_entity,
     restore_forward,
+    seal_fact,
     search_facts,
     sync_search_index,
     sync_target,
@@ -112,8 +114,10 @@ def _parser() -> argparse.ArgumentParser:
     target_command("target", "resolve an explicit Arrival descriptor")
     target_command("inspect", "inspect a declaration")
     target_command("summary", "read a target summary")
-    facts = target_command("facts", "read a bounded fact page")
-    facts.add_argument("--limit", type=int, default=50)
+    facts = target_command("facts", "read a bounded fact page or complete history")
+    facts_mode = facts.add_mutually_exclusive_group()
+    facts_mode.add_argument("--limit", type=int, default=50)
+    facts_mode.add_argument("--all", action="store_true", help="materialize complete history")
     facts.add_argument("--kind")
     facts.add_argument("--observer")
     facts.add_argument("--order", choices=("newest", "oldest"), default="newest")
@@ -172,6 +176,16 @@ def _parser() -> argparse.ArgumentParser:
 
     emission_command("emit", "emit one fact through the Arrival SDK")
     emission_command("preview", "preview one fact emission through the Arrival SDK")
+
+    seal = target_command("seal", "emit one boundary seal fact through the Arrival SDK")
+    seal_payload = seal.add_mutually_exclusive_group(required=True)
+    seal_payload.add_argument("--payload-json")
+    seal_payload.add_argument("--payload-file")
+    seal.add_argument("--observer", required=True)
+    seal.add_argument("--origin", default="")
+    seal.add_argument("--ts", type=_finite_float)
+    seal.add_argument("--id", dest="id_override")
+    mapped_credentials(seal)
 
     batch = target_command("emit-batch", "atomically emit a fact batch through the SDK")
     facts = batch.add_mutually_exclusive_group(required=True)
@@ -406,6 +420,26 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
                 credentials=_credentials(args),
             )
         )
+    if command == "seal":
+        payload = _transport_json(
+            args,
+            json_attribute="payload_json",
+            file_attribute="payload_file",
+            json_name="--payload-json",
+            file_name="--payload-file",
+            shape=dict,
+        )
+        return _as_dict(
+            seal_fact(
+                args.target,
+                payload,
+                observer=args.observer,
+                origin=args.origin,
+                ts=args.ts,
+                id_override=args.id_override,
+                credentials=_credentials(args),
+            )
+        )
     if command == "emit-batch":
         facts = _transport_json(
             args,
@@ -443,16 +477,16 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any]:
     if command == "summary":
         return _as_dict(read_summary(args.target))
     if command == "facts":
-        return _as_dict(
-            read_facts(
-                args.target,
-                limit=args.limit,
-                kind=args.kind,
-                observer=args.observer,
-                order=args.order,
-                include_internal=args.include_internal,
-            )
-        )
+        operation = read_all_facts if args.all else read_facts
+        arguments: dict[str, Any] = {
+            "kind": args.kind,
+            "observer": args.observer,
+            "order": args.order,
+            "include_internal": args.include_internal,
+        }
+        if not args.all:
+            arguments["limit"] = args.limit
+        return _as_dict(operation(args.target, **arguments))
     if command == "fact":
         return _as_dict(read_fact_by_id(args.target, args.fact_id))
     if command == "state":

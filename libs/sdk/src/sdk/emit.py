@@ -513,6 +513,109 @@ def preview_emission(
     )
 
 
+def _execute_arrival_fact(
+    target_path: Path,
+    locator: Any,
+    descriptor: Any,
+    fact: Fact,
+    *,
+    observer: str,
+    credentials: CredentialProvider,
+    registry: BackendRegistry | None,
+    id_override: str | None,
+    admit_undeclared: bool = False,
+    boundary: bool = False,
+) -> tuple[EmitReceipt, Any]:
+    """Prepare and execute one ordinary or boundary-driven Arrival fact.
+
+    Both paths share execution, normalization and post-commit evidence. All
+    boundary metadata needed for the SDK result is checked before append.
+    """
+    from engine.arrival_maintenance import sync_projection
+    from engine.runtime_write import (
+        OrdinaryWritePlan,
+        OrdinaryWritePreparationRefused,
+        execute_ordinary_write,
+        prepare_boundary_write,
+        prepare_ordinary_write,
+    )
+
+    registry = registry or BackendRegistry.with_builtin_backends()
+    planner = prepare_boundary_write if boundary else prepare_ordinary_write
+    plan: OrdinaryWritePlan | None = None
+    try:
+        plan = planner(
+            registry,
+            descriptor,
+            locator,
+            fact,
+            credentials=credentials.for_write(target_path),
+            fact_id=id_override,
+            **({} if boundary else {"admit_undeclared": admit_undeclared}),
+        )
+        if boundary and (
+            plan.effective_declaration is None
+            or plan.boundary_match is None
+            or plan.boundary_kind != fact.kind
+        ):
+            raise SdkValueError("boundary preparation returned incomplete captured evidence")
+        outcome = execute_ordinary_write(
+            registry,
+            descriptor,
+            plan,
+            after_commit=lambda head: sync_projection(registry, descriptor, through=head),
+        )
+    except OrdinaryWritePreparationRefused as exc:
+        cause = exc.cause
+        raise AdmissionFailed(
+            _preparation_refusal_reason(exc),
+            observer=getattr(cause, "observer", observer),
+            kind=getattr(cause, "kind", fact.kind),
+            vertex=getattr(cause, "vertex", exc.effective_declaration.name),
+        ) from exc
+    except SdkError:
+        raise
+    except Exception as exc:
+        from .errors import normalize_exception
+
+        context = (
+            None
+            if plan is None
+            else {
+                "captured_head": plan.captured_head,
+                "fact_id": plan.fact_id,
+                "tick_id": plan.tick_id,
+            }
+        )
+        normalized = normalize_exception(exc, context=context)
+        if normalized is not exc:
+            raise normalized from exc
+        raise EmissionFailed(f"fact emission failed: {exc}") from exc
+
+    assert plan is not None
+    fact_draft = next((draft for draft in plan.drafts if draft.kind == "fact"), None)
+    tick_draft = next((draft for draft in plan.drafts if draft.kind == "tick"), None)
+    receipt = EmitReceipt(
+        write_path="arrival",
+        store=StoreDescriptorInfo.from_descriptor(descriptor),
+        id=outcome.fact_id,
+        stored=not plan.already_present,
+        signed=(None if fact_draft is None else fact_draft.body.get("signature") is not None),
+        observer=observer,
+        tick_mark=(None if tick_draft is None else str(tick_draft.body["name"])),
+        tick_id=outcome.tick_id,
+        state_change=None,
+        affected_sections=[],
+        delta_count=None,
+        predicted_state_change=False,
+        captured_head=plan.captured_head,
+        commit=outcome.commit,
+        witnessed=None if plan.already_present else True,
+        projection=outcome.projection.value,
+    )
+    return receipt, plan
+
+
 def emit_fact(
     target: Path | str,
     kind_or_fact: str | Fact,
@@ -607,82 +710,19 @@ def emit_fact(
         )
 
     if arrival is not None:
-        from engine.arrival_maintenance import sync_projection
-        from engine.runtime_write import (
-            OrdinaryWritePlan,
-            OrdinaryWritePreparationRefused,
-            execute_ordinary_write,
-            prepare_ordinary_write,
-        )
-
         _path, locator, descriptor = arrival
-        registry = registry or BackendRegistry.with_builtin_backends()
-        cred_provider = credentials or CustodyCredentialProvider()
-        plan: OrdinaryWritePlan | None = None
-        try:
-            plan = prepare_ordinary_write(
-                registry,
-                descriptor,
-                locator,
-                fact,
-                credentials=cred_provider.for_write(target_path),
-                fact_id=id_override,
-                admit_undeclared=admit_undeclared,
-            )
-            outcome = execute_ordinary_write(
-                registry,
-                descriptor,
-                plan,
-                after_commit=lambda head: sync_projection(registry, descriptor, through=head),
-            )
-        except OrdinaryWritePreparationRefused as exc:
-            cause = exc.cause
-            raise AdmissionFailed(
-                _preparation_refusal_reason(exc),
-                observer=getattr(cause, "observer", actual_observer),
-                kind=getattr(cause, "kind", fact.kind),
-                vertex=getattr(cause, "vertex", exc.effective_declaration.name),
-            ) from exc
-        except SdkError:
-            raise
-        except Exception as exc:
-            from .errors import normalize_exception
-
-            context = (
-                None
-                if plan is None
-                else {
-                    "captured_head": plan.captured_head,
-                    "fact_id": plan.fact_id,
-                    "tick_id": plan.tick_id,
-                }
-            )
-            normalized = normalize_exception(exc, context=context)
-            if normalized is not exc:
-                raise normalized from exc
-            raise EmissionFailed(f"fact emission failed: {exc}") from exc
-
-        assert plan is not None
-        fact_draft = next((draft for draft in plan.drafts if draft.kind == "fact"), None)
-        tick_draft = next((draft for draft in plan.drafts if draft.kind == "tick"), None)
-        return EmitReceipt(
-            write_path="arrival",
-            store=StoreDescriptorInfo.from_descriptor(descriptor),
-            id=outcome.fact_id,
-            stored=not plan.already_present,
-            signed=(None if fact_draft is None else fact_draft.body.get("signature") is not None),
+        receipt, _plan = _execute_arrival_fact(
+            target_path,
+            locator,
+            descriptor,
+            fact,
             observer=actual_observer,
-            tick_mark=(None if tick_draft is None else str(tick_draft.body["name"])),
-            tick_id=outcome.tick_id,
-            state_change=None,
-            affected_sections=[],
-            delta_count=None,
-            predicted_state_change=False,
-            captured_head=plan.captured_head,
-            commit=outcome.commit,
-            witnessed=None if plan.already_present else True,
-            projection=outcome.projection.value,
+            credentials=credentials or CustodyCredentialProvider(),
+            registry=registry,
+            id_override=id_override,
+            admit_undeclared=admit_undeclared,
         )
+        return receipt
 
     _refuse_arrival_aggregate_members(target_path)
     info = resolve_target(target)

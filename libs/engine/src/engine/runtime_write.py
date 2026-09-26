@@ -93,6 +93,7 @@ __all__ = [
     "capture_runtime",
     "plan_batch_from_capture",
     "prepare_ordinary_write",
+    "prepare_boundary_write",
     "prepare_batch_write",
 ]
 
@@ -269,6 +270,12 @@ class OrdinaryWritePlan:
     tick_run: str | None = field(default=None, repr=False, compare=False)
     credential_bindings: tuple[CredentialBindingEvidence, ...] = field(
         default=(), repr=False, compare=False
+    )
+    # Present only for the boundary convenience preparation path.  These are
+    # copied from the effective declaration captured at the plan's exact head.
+    boundary_kind: str | None = field(default=None, repr=False, compare=False)
+    boundary_match: tuple[tuple[str, str], ...] | None = field(
+        default=None, repr=False, compare=False
     )
 
 
@@ -900,7 +907,10 @@ def _build_effective_arrival_candidate(
     caller vertex or legacy store can decide the next boundary.
     """
     _ensure_current_basis(snapshot, basis)
-    facts = snapshot.facts(FactRequest(limit=None, include_internal=True, order="oldest")).items
+    page = snapshot.facts(FactRequest(limit=None, include_internal=True, order="oldest"))
+    if page.truncated or page.cursor is not None or page.order != "oldest":
+        raise RuntimeWriteRefused("runtime capture requires complete receipt-ordered fact evidence")
+    facts = page.items
     from .declaration import (
         Unhistorized,
         effective_declaration_from_documents,
@@ -1379,31 +1389,15 @@ def capture_runtime(
         _close_quietly(ledger)
 
 
-def prepare_ordinary_write(
-    registry: BackendRegistry,
-    descriptor: StoreDescriptor,
-    locator: VertexFile,
+def _prepare_ordinary_from_capture(
+    capture: RuntimeCapture,
     fact: Fact,
     *,
     credentials: WriteCredentials,
     fact_id: str | None = None,
-    fold_overrides: dict[str, FoldOverride] | None = None,
     admit_undeclared: bool = False,
 ) -> OrdinaryWritePlan:
-    """Capture a CURRENT basis and prepare one retryable ordinary write.
-
-    The writer opens its own registry handles because a read consumer never
-    receives append capability.  It closes those handles before returning the
-    detached plan; execution later compares the same complete head under the
-    ledger fence and refuses any intervening append.
-    """
-    capture = capture_runtime(
-        registry,
-        descriptor,
-        locator,
-        fold_overrides=fold_overrides,
-        credentials=credentials,
-    )
+    """Plan one fact solely from a previously captured runtime view."""
     basis = capture.basis
     effective = capture.effective_declaration
     candidate = capture._candidate_copy()
@@ -1459,6 +1453,102 @@ def prepare_ordinary_write(
         custodian=capture.custodian,
         admit_undeclared=admit_undeclared,
     )
+
+
+def prepare_ordinary_write(
+    registry: BackendRegistry,
+    descriptor: StoreDescriptor,
+    locator: VertexFile,
+    fact: Fact,
+    *,
+    credentials: WriteCredentials,
+    fact_id: str | None = None,
+    fold_overrides: dict[str, FoldOverride] | None = None,
+    admit_undeclared: bool = False,
+) -> OrdinaryWritePlan:
+    """Capture a CURRENT basis and prepare one retryable ordinary write.
+
+    The writer opens its own registry handles because a read consumer never
+    receives append capability. It closes those handles before returning the
+    detached plan; execution compares the same complete head under the ledger
+    fence and refuses any intervening append.
+    """
+    capture = capture_runtime(
+        registry,
+        descriptor,
+        locator,
+        fold_overrides=fold_overrides,
+        credentials=credentials,
+    )
+    return _prepare_ordinary_from_capture(
+        capture,
+        fact,
+        credentials=credentials,
+        fact_id=fact_id,
+        admit_undeclared=admit_undeclared,
+    )
+
+
+def prepare_boundary_write(
+    registry: BackendRegistry,
+    descriptor: StoreDescriptor,
+    locator: VertexFile,
+    fact: Fact,
+    *,
+    credentials: WriteCredentials,
+    fact_id: str | None = None,
+    fold_overrides: dict[str, FoldOverride] | None = None,
+) -> OrdinaryWritePlan:
+    """Prepare a vertex-boundary fact from one captured effective declaration.
+
+    The first captured ``BoundaryWhen`` for the incoming kind is the
+    convenience selection. Its match values become required payload values;
+    conflicts are refused rather than letting a caller silently disable the
+    boundary. Conditions remain the ordinary runtime planner's responsibility.
+    """
+    from atoms import Fact as AtomFact
+    from lang.ast import BoundaryWhen
+
+    capture = capture_runtime(
+        registry,
+        descriptor,
+        locator,
+        fold_overrides=fold_overrides,
+        credentials=credentials,
+    )
+    selected = next(
+        (
+            boundary
+            for boundary in capture.effective_declaration.boundary
+            if isinstance(boundary, BoundaryWhen) and boundary.kind == fact.kind
+        ),
+        None,
+    )
+    if selected is None:
+        raise RuntimeWriteRefused(
+            f"captured vertex declaration has no boundary for kind {fact.kind!r}"
+        )
+    payload = dict(fact.payload)
+    for key, value in selected.match:
+        if key in payload and payload[key] != value:
+            raise RuntimeWriteRefused(
+                f"boundary match property {key!r} conflicts with the supplied payload"
+            )
+        payload[key] = value
+    prepared_fact = AtomFact(
+        kind=fact.kind,
+        ts=fact.ts,
+        payload=payload,
+        observer=fact.observer,
+        origin=fact.origin,
+    )
+    plan = _prepare_ordinary_from_capture(
+        capture,
+        prepared_fact,
+        credentials=credentials,
+        fact_id=fact_id,
+    )
+    return replace(plan, boundary_kind=selected.kind, boundary_match=selected.match)
 
 
 def execute_ordinary_write(

@@ -20,6 +20,7 @@ from engine.arrival_contract import (
     Continuation,
     Fact,
     FactRequest,
+    NotSupported,
     ProjectionRequirement,
     SearchRequest,
     SummaryRequest,
@@ -204,15 +205,18 @@ def _arrival_declaration(
     include_user_facts: bool = False,
     allow_aggregate: bool = False,
 ) -> tuple[Any, str, tuple[Fact, ...], str]:
-    """Resolve effective declarations from the same bounded read snapshot."""
-    facts = opened.snapshot.facts(
+    """Resolve effective declarations from the same complete bounded snapshot."""
+    page = opened.snapshot.facts(
         FactRequest(
             limit=None,
             kind=None if include_user_facts else "_decl",
             include_internal=True,
             order="oldest",
         )
-    ).items
+    )
+    if page.truncated or page.cursor is not None or page.order != "oldest":
+        raise NotSupported("effective declaration requires complete receipt-ordered evidence")
+    facts = page.items
     anchor = opened.snapshot.declaration_anchor
     documents = resolve_declaration_documents_from_snapshot(anchor, facts)
     if documents is None:

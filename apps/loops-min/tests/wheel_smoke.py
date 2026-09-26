@@ -187,6 +187,40 @@ def main() -> None:
             ("file-id", {"message": "héllo\nfile"}),
             ("stdin-id", {"message": "stdin"}),
         ]
+        bulk = _run(
+            console, environment, run_root, "emit-batch", str(target),
+            "--facts-json", json.dumps([
+                {
+                    "id": f"bulk-{number}", "kind": "item", "observer": "alice",
+                    "payload": {"number": number},
+                }
+                for number in range(49)
+            ]),
+            *credentials,
+        )
+        assert bulk["ok"] is True
+        history = _run(console, environment, run_root, "facts", str(target), "--all", "--order", "oldest")
+        assert history["ok"] is True
+        assert history["result"]["complete"] is True
+        assert history["result"]["item_count"] == 51
+        assert [item["id"] for item in history["result"]["items"]][:2] == ["file-id", "stdin-id"]
+
+        current = target.read_text(encoding="utf-8")
+        assert current.endswith("}\n")
+        proposal = root / "seal.vertex"
+        proposal.write_text(current[:-2] + '  boundary when="seal"\n}\n', encoding="utf-8")
+        declared = _run(
+            console, environment, run_root, "declaration", str(target),
+            "--proposed-file", str(proposal), "--observer", "alice", *credentials,
+        )
+        assert declared["ok"] is True
+        seal = _run(
+            console, environment, run_root, "seal", str(target), "--payload-json", "{}",
+            "--observer", "alice", "--id", "smoke-seal", *credentials,
+        )
+        assert seal["ok"] is True
+        assert seal["result"]["sealed"] is True
+        assert seal["result"]["receipt"]["tick_mark"] == "sample"
         verified = _run(console, environment, run_root, "verify", str(target))
         assert verified["ok"] is True
         assert verified["result"]["level"] == "full"

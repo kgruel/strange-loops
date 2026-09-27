@@ -48,6 +48,7 @@ def _assert_installed_entry_points(
     """Resolve root-wheel metadata without ever importing the old frontend."""
     inspection = """
 import importlib.metadata
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -64,6 +65,9 @@ resolved = {name: entry_points[name].load() for name in expected}
 from loops_min.main import main
 assert all(function is main for function in resolved.values())
 assert "loops" not in sys.modules
+assert importlib.util.find_spec("loops") is None
+assert importlib.util.find_spec("painted") is None
+assert not any(str(path).startswith("loops/") for path in distribution.files)
 
 import loops_min
 import sdk

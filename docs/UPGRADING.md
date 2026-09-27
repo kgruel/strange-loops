@@ -4,11 +4,22 @@ Release-coupled upgrade notes for the `strange-loops` package (`sl` / `loops`).
 Newest first. Read the sections between the version you are on and the version
 you are moving to.
 
-Upgrade the package the usual way:
+**Arrival source transition (unreleased):** `sl`, `loops`, and `loops-min` now
+select the JSON client, not the old command grammar. `apps/loops`, its TUI/lenses,
+and detached boundary-job dispatch are retired. Legacy DATA migration and
+provenance remain [offline APIs/scripts](../libs/migrate/README.md); source
+collection remains SDK-only. Existing installations and live stores are not
+changed by a source checkout. Before an upgrade or a path-source `uv run`/`uv sync`
+can replace executable wiring, quiesce legacy hooks/jobs and follow the
+[client handoff guidance](../apps/loops-min/README.md). The root version remains
+`0.11.0`, so inspect entry-point metadata rather than relying on version alone.
+The notes below, including the earlier unreleased fold-order section, describe
+historical commands, not JSON-client compatibility.
 
-```bash
-uv tool upgrade strange-loops     # or: pip install -U strange-loops
-```
+This checkpoint has not been released. An index-sourced `pip install -U` or
+`uv tool upgrade` may no-op or select a legacy artifact. Installing the reviewed
+root wheel, or updating from a path source, **is** the installed handoff; do not
+run it before that gate is approved.
 
 ---
 
@@ -187,7 +198,7 @@ is a location claim, not a tamper verdict.
 ### Breaking: custom lenses no longer receive `piped`
 
 Affects only vertices declaring their own lens module (`lens { fold "…" }` —
-see `apps/loops/src/loops/lenses/CLAUDE.md` for the lens contract). The CLI stopped passing the kwarg, so a lens with `piped: bool
+the retired lens contract is preserved in Git history). The CLI stopped passing the kwarg, so a lens with `piped: bool
 = False` now always sees `False` and renders TTY-style into a pipe — it fails
 silently, not loudly.
 

@@ -98,13 +98,14 @@ jobs:
           "${isolated[@]}" uv run --python 3.13 --package loops-min pytest \
             tests/test_root_console_scripts.py apps/loops-min/tests clients/claude-code/tests -q
           "${isolated[@]}" uv run --python 3.13 --package loops-min ruff check \
-            apps/loops-min/tests/wheel_smoke.py clients/claude-code tests/test_root_console_scripts.py
+            apps/loops-min/tests/wheel_smoke.py clients/claude-code tests/test_root_console_scripts.py tests/migration_wheel_smoke.py
           "${isolated[@]}" uv build --python 3.13 --wheel --out-dir "$artifact_root/wheel" .
           "${isolated[@]}" uv venv "$artifact_root/venv" --python 3.13
           "${isolated[@]}" uv pip install --python "$artifact_root/venv/bin/python" "$artifact_root"/wheel/strange_loops-*.whl
           (
             cd "$artifact_root/outside-checkout"
             "${isolated[@]}" "$artifact_root/venv/bin/python" "$GITHUB_WORKSPACE/apps/loops-min/tests/wheel_smoke.py" "$artifact_root/venv/bin/loops-min"
+            "${isolated[@]}" "$artifact_root/venv/bin/python" -I "$GITHUB_WORKSPACE/tests/migration_wheel_smoke.py"
             "${isolated[@]}" "$artifact_root/venv/bin/python" "$GITHUB_WORKSPACE/clients/claude-code/build_plugin.py" "$artifact_root/claude plugin"
             "${isolated[@]}" "$artifact_root/venv/bin/python" "$GITHUB_WORKSPACE/clients/claude-code/tests/installed_smoke.py" "$artifact_root/venv/bin/loops-min" "$artifact_root/claude plugin"
           )
@@ -116,11 +117,10 @@ jobs:
       packages: ${{ steps.discover.outputs.packages }}
     steps:
       - uses: actions/checkout@v4
-      # libs only, deliberately. apps/* is out of scope for CI: apps/loops is
-      # slated for replacement, and the focus is the core libraries it will be
-      # rebuilt on. Discovery is still a glob rather than a list, so a new
-      # library reaches CI without editing this file — the point was never to
-      # enumerate, it was to stop enumerating.
+      # Libraries are discovered here; loops-min and installed artifacts have
+      # their own delivery job above. ./dev check covers the root architecture
+      # and migration/provenance integration tests. Keep discovery derived so
+      # a new library's suite reaches CI without adding it to a list.
       - name: Discover libraries with tests
         id: discover
         run: |

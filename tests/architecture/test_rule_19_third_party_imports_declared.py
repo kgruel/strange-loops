@@ -10,7 +10,7 @@ was encountered four times:
 4. sign imported in libs/migrate/tests without being in migrate's dev group
 
 This rule enforces the invariant:
-- For every lib under libs/ and apps/loops, every top-level module imported at runtime
+- For every package under libs/ and apps/, every top-level module imported at runtime
   in src/ (excluding stdlib and the package's own root) must appear in that package's
   declared dependencies (pyproject.toml `[project].dependencies`).
 - For every package that declares a `dev` dependency group, every top-level module
@@ -26,7 +26,6 @@ import tomllib
 from pathlib import Path
 
 from ._helpers import (
-    LIBS,
     REPO_ROOT,
     _collect_imports,
     _rel,
@@ -108,10 +107,30 @@ def _test_py_files(pkg_dir: Path) -> list[Path]:
     return [p for p in tests_dir.rglob("*.py") if "__pycache__" not in p.parts]
 
 
+def _package_dirs(repo: Path) -> list[Path]:
+    """Discover package directories, not import names or a particular app."""
+    return [
+        package
+        for parent in ("libs", "apps")
+        for package in sorted((repo / parent).iterdir())
+        if package.is_dir() and not package.name.startswith(".")
+    ]
+
+
+def test_package_discovery_includes_new_apps(tmp_path: Path):
+    expected = [tmp_path / "libs" / "core", tmp_path / "apps" / "fresh-client"]
+    for package in expected:
+        package.mkdir(parents=True)
+    (tmp_path / "apps" / ".cache").mkdir()
+    (tmp_path / "apps" / "README.md").write_text("not a package")
+    assert _package_dirs(tmp_path) == expected
+
+
 def test_third_party_and_interpackage_imports_declared():
     """Every imported module must appear in pyproject.toml declared dependencies."""
-    packages = [REPO_ROOT / "apps" / "loops"] + [REPO_ROOT / "libs" / lib for lib in LIBS]
+    packages = _package_dirs(REPO_ROOT)
     violations: list[str] = []
+    scanned = 0
 
     for pkg_dir in packages:
         if not pkg_dir.is_dir():
@@ -133,6 +152,7 @@ def test_third_party_and_interpackage_imports_declared():
 
         # 1. Check production src/ against [project].dependencies
         for py_file in _src_py_files(pkg_dir):
+            scanned += 1
             rel = _rel(py_file)
             collector = _collect_imports(py_file)
             for mod, lineno in collector.runtime_modules:
@@ -172,6 +192,7 @@ def test_third_party_and_interpackage_imports_declared():
                                 f"(undeclared in {pkg_name}/pyproject.toml dependencies or dev group)"
                             )
 
+    assert scanned, "Rule 19 found no package source files"
     assert not violations, (
         "Rule 19: Undeclared import violation (imports ⊆ declared dependencies):\n"
         + "\n".join(violations)

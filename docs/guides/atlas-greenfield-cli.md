@@ -11,7 +11,8 @@ It includes source selectors and explicit unknowns; it does not establish live
 health. This walkthrough reads that file and writes a separate scratch store.
 It does not connect the Atlas browser to Loops or migrate an existing store.
 
-The commands use the `arrival/finish` implementation at checkpoint `d4e5792d`.
+The command sequence was originally rehearsed on `arrival/finish` at checkpoint
+`d4e5792d`; installation/retirement notes below describe the current source tree.
 Prerequisites: Python 3.11+, `uv`, and the two local checkouts. Copy the **six
 Bash blocks below, in order, into one script**, such as `atlas-quickstart.sh`,
 then run it with `bash atlas-quickstart.sh`. Later steps use variables and
@@ -51,8 +52,9 @@ printf 'Workspace: %s\n' "$ATLAS_WORK"
 This guide installs the workspace `loops-min` package with `--package loops-min`
 and invokes that explicit binary; it does not install or exercise root-wheel
 aliases. In a newly installed root wheel, `sl`, `loops`, and `loops-min` share
-the JSON client, while the standalone workspace `apps/loops` entry point can
-still be legacy. Each successful command below returns an envelope with
+the JSON client. The legacy `apps/loops` package has been removed from this
+source tree; existing installations can still be legacy. Each successful
+command below returns an envelope with
 `ok: true` and an SDK-owned `result`; saved JSON files retain that evidence.
 
 ## 2. Choose an observer and initialize

@@ -6,11 +6,16 @@ Facts arrive, state accumulates, boundaries fire Ticks. Start at Level 0. Only e
 
 ```
 atoms (data)  →  engine (runtime)  →  lang (grammar)  →  apps (CLI)
-Fact, Spec        Tick, Vertex         .loop/.vertex      loops read/emit
+Fact, Spec        Tick, Vertex         .loop/.vertex      SDK-backed JSON CLI
 ```
 
 Below: `libs/atoms/` defines what data looks like (Fact, Spec, Fold). Engine receives facts and runs them.
-Above: `libs/lang/` defines the DSL grammar. `apps/loops/` is the CLI. `loops emit` creates a Fact, resolves a Vertex, calls `vertex.receive()`.
+Above: `libs/lang/` defines the DSL grammar; the SDK composes runtime access for `apps/loops-min`. The old `apps/loops` frontend is retired.
+
+The recipes below include legacy engine internals, not the current CLI contract.
+Use [the SDK reference](../sdk/README.md) for Arrival routing and receipts, and
+[the JSON CLI](../../apps/loops-min/README.md) for supported commands. Frontend
+retirement does not change these library APIs or their defaults.
 
 ---
 
@@ -40,7 +45,7 @@ A Tick is what comes out when a cycle completes — the folded state at a tempor
 Tick(name="jellyfin", ts=..., payload={"healthy": 3, "total": 4}, origin="status")
 ```
 
-This is the same Tick that `loops run status.vertex` renders. Same primitive at every level.
+Source collection remains available through `sdk.run_sources`; the JSON CLI has no `run` command.
 
 **Don't reach for yet**: Vertex, Loop, Projection, Store, Peer.
 
@@ -75,7 +80,7 @@ v.receive(fact)
 v.state("decision")  # {"auth": {"topic": "auth", "position": "JWT", ...}}
 ```
 
-This is exactly what happens inside `loops emit project decision topic=auth ...` — the CLI creates a Fact, resolves the vertex, calls `receive()`.
+This is a direct engine recipe. The JSON client's emission path instead delegates to the SDK's captured write contract.
 
 **Boundaries** turn accumulated state into Ticks:
 
@@ -251,7 +256,7 @@ reader.recent_facts(5)  # last 5 facts
 reader.recent_ticks(5)  # last 5 ticks
 ```
 
-This is what `loops read project` and `loops store` use to query vertex state.
+This is a legacy internal read interface; applications use SDK reads.
 
 **Fidelity traversal** — drill from Tick to contributing facts:
 
@@ -337,4 +342,4 @@ history):
 | `observation:architecture/persistence-conceptual-spine` | Persistence is configuration; replay is folding |
 | `observation:architecture/identity-peer-as-atom-history` | Observer and gating — stance, naming, what's enforced |
 
-Read with `sl read project observation/architecture/<name> -v`.
+Read historical observations through SDK/JSON-client fact reads with an explicit target; the old `sl read` grammar is retired.

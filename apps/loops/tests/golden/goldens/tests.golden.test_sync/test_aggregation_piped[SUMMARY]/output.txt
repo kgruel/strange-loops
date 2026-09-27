@@ -1,4 +1,0 @@
-project: 13 facts (decision, network-interface-diagnostics-and-telemetry-extended)
-  ⏭ thread: fresh (last run 15m, cadence 30m)
-  ⏭ note
-No sources configured.

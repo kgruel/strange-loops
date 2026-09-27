@@ -1,3 +1,0 @@
-✓ loops/disk.loop
-✓ loops/memory.loop
-✗ loops/broken.loop: Parse error: unexpected token 'foo' at line 3

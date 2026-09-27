@@ -1,6 +1,6 @@
 # sdk — Loops Apex Composition Library
 
-`sdk` is the headless composition layer uniting `engine`, `custody`, `lang`, `store`, `atoms`, and `sign` into unified, typed operations. It serves as the single foundation for presentation layers (`apps/loops`, TUI, external agents, Python scripts) without leaking presentation logic into the core substrate.
+`sdk` is the headless composition layer uniting `engine`, `custody`, `lang`, `store`, `atoms`, and `sign` into unified, typed operations. It serves as the single foundation for presentation layers (`apps/loops-min`, external agents, Python scripts) without leaking presentation logic into the core substrate.
 
 ---
 

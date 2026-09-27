@@ -6,22 +6,16 @@ Observations, contracts, and ingress.
 
 ```
 atoms (data)  →  engine (runtime)  →  lang (grammar)  →  apps (CLI)
-Fact, Spec        Tick, Vertex         .loop/.vertex      loops read/emit
+Fact, Spec        Tick, Vertex         .loop/.vertex      SDK-backed JSON CLI
 ```
 
-Above: `libs/engine/` runs facts through vertices. `apps/loops/` provides the CLI. When you `loops emit project decision topic=auth ...`, it creates a Fact, resolves a Vertex, calls `vertex.receive()`.
+Above: `libs/engine/` runs facts through vertices. The agent-facing CLI is `apps/loops-min`, composed through the SDK. The old `apps/loops` frontend is retired.
 
 ## Current reference
 
-```bash
-loops read docs --kind contract --plain    # API contracts (Fact, Spec, Parse, Source, Boundary)
-loops read docs --kind convention --plain  # invariants (frozen types, pure apply, zero deps)
-loops read docs --kind guide --plain       # progressive workflow (observe → accumulate → shape → ingest)
-loops read docs --kind vocab --plain       # fold/parse/boundary vocabulary (30 primitives)
-loops read docs -v --plain                 # everything at detailed zoom
-```
-
-The docs vertex holds living documentation — contracts, conventions, guides, and vocabulary accumulate as facts. See `~/.config/loops/docs/` for the vertex, `~/.config/loops/lenses/docs.py` for the lens.
+See [the SDK reference](../sdk/README.md) and [JSON CLI](../../apps/loops-min/README.md).
+Historical contracts and decisions remain data in their original stores;
+reading them does not require restoring the retired CLI or its lenses.
 
 ## Build & test
 
@@ -32,7 +26,5 @@ uv run --package atoms pytest libs/atoms/tests/test_fold_typed.py  # single file
 
 ## Decisions
 
-Query project-specific atoms decisions:
-```bash
-loops read project --facts --kind decision --plain | grep atoms/
-```
+Use SDK/JSON-client fact reads with an explicit target. Do not infer a live
+store path or migrate it merely to inspect library code.

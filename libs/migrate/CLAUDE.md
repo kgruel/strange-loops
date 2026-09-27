@@ -10,7 +10,13 @@ SourceInventory, LegacySource       run_migration, verify         ArrivalLog, He
 ```
 
 Below: `libs/engine/` provides `ArrivalLog`, arrival record formats, and head journal attestation; `libs/lang/` provides `effective_store_clause` and AST validation.
-Above: `apps/loops/` provides the `loops store migrate` CLI command (importing `migrate.refusals` for typed CLI error handling).
+Callers: explicit offline Python composition and the repository rehearsal/provenance scripts. The `apps/loops` frontend and `loops store migrate` wrapper are retired. Migration is not a `loops-min` or SDK operation; see [README.md](README.md) for the supported boundary.
+
+For a fresh migration, callers must refuse candidates already naming Arrival,
+including suffix-only `store "./old.arrival"` without `backend=`. The wrapper's
+suffix pre-flight retired with it; the sidecar's explicit-descriptor guard is
+not equivalent. Only copied legacy candidates are appropriate, never live or
+already-switched descriptors. Exact explicit resume remains separate.
 
 ---
 
@@ -32,7 +38,7 @@ from migrate import run_migration, verify_migration_report, ulid_migration
 # Run a migration with injected signer
 outcome = run_migration(
     source_path=Path("data/legacy.jsonl"),
-    vertex_path=Path("project.vertex"),
+    vertex_path=Path("sandbox/project.vertex"),  # copied candidate, never the live locator
     store_dir=Path("data"),
     signer=custodian_signer,
     transform_rule=ulid_migration(),
@@ -66,7 +72,7 @@ is_valid = verify_migration_report(
    - `equivalence_rerun`: Re-derived expected rows match target records logical row-by-row
    - `inventory_equality`: Target projection matches source inventory
    - `journal_first_entry_mint`: First journal entry for lineage is `bootstrap`/`MINT`
-   (Note: The already-migrated guard is an apps-layer pre-flight in `loops/commands/store.py` (`_run_migrate`'s already-on-arrival pre-flight), not a `libs/migrate` precondition).
+   The sidecar also refuses an existing explicit descriptor, except for explicit resume of its exact already-published target. Resume re-signs/replaces the report; it is not a general recovery or adoption operation.
    Then surgically update `.vertex` store clause using `lang.effective_store_clause` with verification-by-re-parse.
 
 ---
@@ -79,5 +85,5 @@ For full architectural rationale and normative rulings, see `docs/architecture/a
 - **F3**: Arrival custody domain separation (`loops-arrival-v1`)
 - **F4**: Outer-unsigned migrated records (content preserved verbatim, sealed by hash chain)
 - **F5**: Signed migration report stored beside target (`<store_dir>/<lineage>.migration-report.json`)
-- **F6**: 5 code-level publish preconditions (`target_verify_full`, `source_unchanged`, `equivalence_rerun`, `inventory_equality`, `journal_first_entry_mint`) and apps-layer already-migrated guard
+- **F6**: 5 publish preconditions (`target_verify_full`, `source_unchanged`, `equivalence_rerun`, `inventory_equality`, `journal_first_entry_mint`) and the sidecar's explicit-descriptor guard (not the retired wrapper's suffix pre-flight)
 - **F7**: Typed domain refusals for all failure modes

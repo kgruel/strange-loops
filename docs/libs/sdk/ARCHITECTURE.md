@@ -2,7 +2,11 @@
 
 `libs/sdk` is the **apex composition layer** of the Loops substrate. It unites `atoms`, `store`, `lang`, `sign`, `custody`, and `engine` into unified, typed, headless operations.
 
-This document details the architectural rationale, the dependency DAG, dataflow sequences for all core operations, error taxonomy, and testing invariants.
+This document records the earlier SDK design. Its legacy dataflow examples and
+layer diagram are historical, not the current Arrival contract. See the
+[current SDK reference](../../../libs/sdk/README.md) and executable dependency
+rules in `tests/architecture/` for current behavior. The old `apps/loops`
+frontend is retired; `apps/loops-min` is the SDK-backed JSON client.
 
 ---
 
@@ -15,7 +19,7 @@ This created several architectural hazards:
 2. **Duplicated Ceremonies**: Admission checks, key resolution, and preflight recovery were re-implemented across command modules.
 3. **Leaky Storage Invariants**: Commands made assumptions about SQLite vs JSONL residence rather than treating storage as an authoritative append-only log.
 
-`libs/sdk` resolves this by establishing a strict **headless API floor**. Downstream presentation layers (`apps/loops`, TUI, external scripts, background agents) consume `sdk` exclusively and contain zero substrate orchestration logic.
+`libs/sdk` resolves this by establishing a strict **headless API floor**. Downstream presentation layers (`apps/loops-min`, external scripts, background agents) consume `sdk` exclusively and contain zero substrate orchestration logic.
 
 ---
 
@@ -26,7 +30,7 @@ The Loops monorepo enforces a strict directed acyclic graph (DAG) verified by `t
 ```mermaid
 graph TD
     subgraph Presentation ["Layer 6: Presentation (CLI & Apps)"]
-        APPS["apps/loops (CLI, TUI, HTTP)"]
+        APPS["apps/loops-min (JSON CLI)"]
     end
 
     subgraph Composition ["Layer 5: Apex Composition"]
@@ -87,7 +91,7 @@ graph TD
 | **3. Custody** | `libs/custody` | Identity isolation and observer private key custody. |
 | **4. Engine** | `libs/engine` | Witness cursors (`WitnessPosition`), admission policy enforcement, declaration resolution, and state folding. |
 | **5. Composition** | `libs/sdk` | **Apex headless operations**: Target resolution, read queries, signed emission, and declaration ceremonies. |
-| **6. Presentation** | `apps/loops` | CLI flag parsing, TUI rendering, table formatting, and exit code routing. |
+| **6. Presentation** | `apps/loops-min` | CLI flag parsing, SDK result serialization, and exit code routing. |
 
 ---
 

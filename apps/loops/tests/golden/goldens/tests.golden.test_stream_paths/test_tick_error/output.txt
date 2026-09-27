@@ -1,1 +1,0 @@
-Tick index 9 out of range (have 5 ticks)

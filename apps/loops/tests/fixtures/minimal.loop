@@ -1,4 +1,0 @@
-// Minimal .loop file
-source "whoami"
-kind "identity"
-observer "shell"

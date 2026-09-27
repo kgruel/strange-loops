@@ -61,7 +61,7 @@ from engine.store_reader import StoreReader
 
 # Bump when a probe's *meaning* changes (what it measures, not how fast it is).
 # Arms recorded under different instrument versions are not comparable.
-INSTRUMENT_VERSION = "1"
+INSTRUMENT_VERSION = "2"
 
 # Filling a vertex is quadratic, because `receive` is linear in the number of
 # facts of a declared kind (see LEDGER.md). A 100k band costs roughly two and a
@@ -599,21 +599,21 @@ def probe_arrival(depth: int) -> list[Sample]:
 
 
 def probe_cli() -> list[Sample]:
-    """Cold `loops --version` invocation. A failing CLI raises rather than scoring 0.0."""
+    """Cold JSON-client help invocation; failure is not a performance result."""
 
     def one_invocation() -> None:
         result = subprocess.run(
-            ["uv", "run", "loops", "--version"],
+            ["uv", "run", "loops-min", "--help"],
             capture_output=True,
             text=True,
             check=False,
         )
         if result.returncode != 0:
             raise ProbeError(
-                f"`loops --version` exited {result.returncode}: {result.stderr.strip()[:200]}"
+                f"`loops-min --help` exited {result.returncode}: {result.stderr.strip()[:200]}"
             )
 
-    return [measure("cli_cold_version", "cli", 0, one_invocation, samples=5)]
+    return [measure("cli_cold_help", "cli", 0, one_invocation, samples=5)]
 
 
 # --------------------------------------------------------------------------

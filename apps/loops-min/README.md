@@ -1,10 +1,10 @@
 # loops-min
 
-`loops-min` is the transitional JSON process client for the headless `sdk`
+`loops-min` is the agent-facing JSON process client for the headless `sdk`
 package. It provides descriptor/read operations, verification, projection and
 search maintenance, exact export, explicit restore-forward, and a mapped-only
 Arrival writer surface. Empty-receiver import, admission, a generic replicate
-command, and legacy writer retirement remain later work.
+command, and installed legacy writer cutover remain later work.
 
 Writer commands require all of `--credential-root`, `--credential-namespace`,
 and `--receipt-observer`. They never select locator-derived credentials or fall
@@ -131,10 +131,18 @@ The workspace package is available for development, but its standalone wheel is
 not covered by those installed-artifact tests.
 
 A root-only installation maps `sl`, `loops`, and `loops-min` to this JSON client.
-Existing installations and the standalone `apps/loops` distribution can still
-be legacy. Installing both distributions (for example, `uv sync --all-packages`)
-creates a last-writer-wins collision for `bin/loops`; do not use such a mixed
-environment as a stable alias binding.
+The legacy `apps/loops` distribution, its TUI/lenses, and detached boundary-job
+dispatch are retired from this source tree. Existing installations can still
+contain that distribution or an older root build. Mixing an old standalone
+`loops` distribution with the new root wheel creates a last-writer-wins collision
+for `bin/loops`; use a clean environment, not that mixed binding. The retired
+`python -m loops` and `uv run --package loops` routes are not compatibility
+entrypoints.
+
+A Git update can leave ignored caches or private state under `apps/loops`.
+Preview with `git clean -ndX apps/loops`; preserve/move aside any needed residue
+under the operator handoff plan, never blind-delete it. Dev checks tolerate
+ignored residue without treating the old directory as a workspace package.
 
 Quiesce legacy hook/job consumers **before** replacing their live executables.
 After checkout changes, `uv run`, `uv sync` or a path-source tool upgrade can
@@ -143,9 +151,17 @@ report `0.11.0`; version alone cannot distinguish them. Inspect the selected
 console script and its distribution's entry-point metadata for
 `loops_min.main:main`. An isolated test installation is not a live switch.
 
-This is not legacy command-line compatibility: source execution and legacy
-DATA migration/provenance remain SDK/scripts or pending client boundaries. The
-client has no presentation, storage, or legacy CLI dependency.
+This is not legacy command-line compatibility. Source collection remains the
+programmatic `sdk.run_sources()` operation; CLI `sync` only synchronizes derived
+indexes. No CLI command executes source collectors or detached boundary jobs.
+SDK dispatcher parameters and defaults are unchanged: without a dispatcher,
+boundary run intents remain `not-requested`.
+
+Legacy DATA migration/provenance remains the offline, signer-injected
+[`migrate` API and repository scripts](../../libs/migrate/README.md), not an SDK
+operation or a replacement `store migrate` verb. Preserve original archives;
+preparation, migration, adoption, and live publication are separate gates. The
+client has no presentation, storage, migration, or legacy CLI dependency.
 
 For a complete fresh-store example with tested commands, see
 [A fresh Loops store for Atlas observations](../../docs/guides/atlas-greenfield-cli.md).

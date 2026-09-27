@@ -1,7 +1,0 @@
-✓ loops/disk.loop
-    <ABS_PATH>
-✓ loops/memory.loop
-    <ABS_PATH>
-✗ loops/broken.loop:
-    <ABS_PATH>
-    Parse error: unexpected token 'foo' at line 3 Expected 'command' or 'kind' d

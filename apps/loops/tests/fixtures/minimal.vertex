@@ -1,9 +1,0 @@
-// Minimal .vertex file
-name "simple"
-loops {
-  counter {
-    fold {
-      count "inc"
-    }
-  }
-}

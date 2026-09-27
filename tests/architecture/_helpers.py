@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -164,23 +163,16 @@ def _rel(path: Path) -> str:
 
 def _imports_module(modules: list[tuple[str, int]], module: str) -> list[int]:
     """Line numbers where any module import starts with the given prefix."""
-    return [lineno for name, lineno in modules if name == module or name.startswith(module + ".")]
+    return [
+        lineno
+        for name, lineno in modules
+        if name == module or name.startswith(module + ".")
+    ]
 
 
 def _imports_symbol(symbols: list[tuple[str, str, int]], name: str) -> list[int]:
     """Line numbers where a specific symbol name was imported (e.g. 'StoreReader')."""
     return [lineno for _mod, sym, lineno in symbols if sym == name]
-
-
-# ---------------------------------------------------------------------------
-# Exception validation
-# ---------------------------------------------------------------------------
-
-
-def _check_exceptions(exceptions: set[str]) -> None:
-    """Assert every exception path still exists — stale exceptions must be cleaned up."""
-    for exc in exceptions:
-        assert (REPO_ROOT / exc).exists(), f"Stale exception: {exc} no longer exists"
 
 
 # ---------------------------------------------------------------------------
@@ -227,104 +219,6 @@ def _collect_unfrozen_dataclasses(path: Path) -> list[tuple[str, int]]:
     collector = _DataclassCollector()
     collector.visit(ast.parse(path.read_text(), filename=str(path)))
     return collector.unfrozen
-
-
-# ---------------------------------------------------------------------------
-# Ambiguity opt-out collector
-# ---------------------------------------------------------------------------
-
-_AMBIGUITY_PRIMITIVES = {"_find_local_vertex", "resolve_local_vertex"}
-
-
-class _OptOutCallCollector(ast.NodeVisitor):
-    """Every call to an ambiguity primitive, with its enclosing function and
-    whether it passed ``allow_ambiguous=True``."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, bool]] = []  # (func, callee, opted_out)
-        self._scope: list[str] = []
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._scope.append(node.name)
-        self.generic_visit(node)
-        self._scope.pop()
-
-    def visit_Call(self, node: ast.Call) -> None:
-        func = node.func
-        name = (
-            func.id if isinstance(func, ast.Name)
-            else func.attr if isinstance(func, ast.Attribute)
-            else None
-        )
-        if name in _AMBIGUITY_PRIMITIVES:
-            # ANY allow_ambiguous value that is not a literal False counts as
-            # an opt-out to be declared — a literal True, a variable, an
-            # expression, `1`. The rule must never be MORE permissive than the
-            # runtime: it used to recognize only literal True, so
-            # `allow_ambiguous=1` slipped past the ratchet while still opting
-            # out at runtime (sol round 3). The runtime now honors literal True
-            # only, and anything the rule cannot evaluate is flagged rather
-            # than assumed safe.
-            opted_out = any(
-                kw.arg == "allow_ambiguous"
-                and not (
-                    isinstance(kw.value, ast.Constant) and kw.value.value is False
-                )
-                for kw in node.keywords
-            )
-            scope = self._scope[-1] if self._scope else "<module>"
-            self.calls.append((scope, name, opted_out))
-        self.generic_visit(node)
-
-
-# ---------------------------------------------------------------------------
-# Call name collector
-# ---------------------------------------------------------------------------
-
-
-class _CallNameCollector(ast.NodeVisitor):
-    """Call names in a function body, resolved through the aliases in scope.
-
-    Collects ``f()`` and ``m.f()``. Each name is recorded as written AND as
-    every symbol it has been bound to, so renaming at the import site cannot
-    hide an anchor.
-    """
-
-    def __init__(self, aliases: dict[str, set[str]] | None = None) -> None:
-        self.names: set[str] = set()
-        self._aliases = aliases or {}
-
-    def _record(self, name: str) -> None:
-        self.names.add(name)
-        self.names.update(self._aliases.get(name, ()))
-
-    def visit_Call(self, node: ast.Call) -> None:
-        func = node.func
-        if isinstance(func, ast.Name):
-            self._record(func.id)
-        elif isinstance(func, ast.Attribute):
-            self._record(func.attr)
-        self.generic_visit(node)
-
-
-# ---------------------------------------------------------------------------
-# Renderer scan record
-# ---------------------------------------------------------------------------
-
-
-class _RendererScan(NamedTuple):
-    """One module's renderer= census.
-
-    ``piped`` and ``unresolvable`` are separate lists on purpose: the allowlist
-    may suppress ONLY the second. sol HIGH r2 §3 noted that a single combined
-    list let one allowlist entry silence a resolved renderer that explicitly
-    declares ``piped`` — a far broader exemption than the comment claimed.
-    """
-
-    piped: list[str]          # resolved to a def that takes `piped` — never suppressible
-    unresolvable: list[str]   # repo-local and unresolvable — suppressible, with a reason
-    resolved: int
-    external: int
 
 
 # ---------------------------------------------------------------------------
@@ -387,9 +281,12 @@ def _static_module_name(node: ast.expr) -> str | None:
         return node.value
     if isinstance(node, ast.JoinedStr) and node.values:
         first = node.values[0]
-        if isinstance(first, ast.Constant) and isinstance(first.value, str):
-            if "." in first.value:
-                return first.value
+        if (
+            isinstance(first, ast.Constant)
+            and isinstance(first.value, str)
+            and "." in first.value
+        ):
+            return first.value
     return None
 
 

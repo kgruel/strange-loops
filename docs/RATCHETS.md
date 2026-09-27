@@ -19,10 +19,10 @@ thing.
 - `dataclasses.replace(section, items=...)` instead of a field-by-field
   rebuild — a field added to `FoldSection` later can never be dropped by
   omission, because there is no enumeration to forget it from.
-- The ambiguity refusal lives *inside* `_find_local_vertex` — an ungated
-  caller is impossible because no ungated primitive exists to call.
-- `allow_ambiguous is True` (literal) — the runtime and any checker share one
-  definition of opt-out; there is no second encoding to drift.
+- In the retired frontend, the ambiguity refusal lived *inside*
+  `_find_local_vertex`; `allow_ambiguous is True` gave the runtime and checker
+  one literal definition of opt-out. Those historical examples remain in
+  Git at `9c297c51:apps/loops/src/loops/commands/resolve.py`.
 
 Construction is dissolution: the invariant collapses into the substrate and
 adds **zero ongoing surface**. This is always the first thing to try.
@@ -75,12 +75,25 @@ too. Only construction is a fixed point.
 - **Match bindings, not names**, and resolve them with lexical scope. If the
   walk re-implements a piece of Python semantics, assume the first
   implementation is wrong and get it adversarially checked.
-- **Reuse the machinery.** The call-path walk, lexical alias resolution, and
-  call-site enumeration in `tests/test_architecture.py` are the shared
-  substrate. A new detection ratchet is a new *rule* on the existing walk,
-  not a new bespoke matcher.
+- **Reuse the machinery.** Current import collectors live in
+  `tests/architecture/_helpers.py`. Reuse applicable checks rather than building
+  bespoke matchers. Retired call-path and renderer machinery is historical,
+  available in `tests/architecture/` at Git baseline `9c297c51`, not an active API.
 
-## Budget
+## Current retirement boundary
+
+Rules 9, 10, and 12 retired with `apps/loops`: no local-vertex resolver,
+disclosure renderer, or `painted.run_cli`/lens implementation remains to guard.
+Their dedicated AST helpers and synthetic evasion tests retired too, rather
+than weakening their anti-vacuity assertions to accept an empty population.
+The implementation and review history remain in Git. Rules 1, 2, and 15 now
+have no legacy-app bypass lists; Rule 19 discovers all app directories,
+including `loops-min`. SDK/engine and migration/provenance tests remain active.
+
+The budget discussion below records the earlier frontend review history, not
+an assertion that those retired rules still execute.
+
+## Historical budget
 
 Detection ratchets are counted. There are **four** (Rule 9:
 `resolve_local_vertex` caller enumeration; Rule 10: disclosure renderers

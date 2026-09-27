@@ -16,8 +16,25 @@ verified, and explicitly synced through the SDK. The new log still needs an
 explicit declaration adoption before ordinary SDK reads, declaration edits, or
 writes can proceed. Historical `_decl.*` rows are retained as migration evidence;
 the current runtime does not infer the new store's identity from them or from
-its locator file. The old `loops store migrate` wrapper is therefore not a
-complete migration-to-current-runtime workflow.
+its locator file.
+
+The supported migration boundary is this offline, signer-injected Python API
+and the repository scripts below. The legacy `loops store migrate` wrapper
+retired with `apps/loops`; there is no replacement migration verb in the JSON
+client, no `python -m migrate` adapter, and no new custody lookup in this library.
+The root wheel continues to include `migrate`. Its API defaults are unchanged
+(`run_migration` defaults to the identity transform); the retired wrapper's
+implicit `ulid-migration` rule is not carried forward. Select and review any
+historical transformation explicitly.
+
+**Fresh-migration caller pre-flight:** the retired wrapper also refused a
+suffix-only Arrival locator such as `store "./old.arrival"`. That check is
+**not** part of `run_migration`'s explicit-backend guard. Before a fresh call,
+refuse a candidate already naming an Arrival store, including `.arrival`
+clauses with no `backend=`. Use a copied legacy candidate, never an
+already-switched or live descriptor. Explicit resume of the exact published
+target is a separate operation, described below; this checkpoint does not add
+or broaden API refusals.
 
 Use isolated copies for rehearsals, with separate state/configuration and
 credential roots. Keep the original stores and descriptors untouched. SQLite

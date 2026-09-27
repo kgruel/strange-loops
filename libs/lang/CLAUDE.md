@@ -6,11 +6,11 @@ KDL parser for `.loop` and `.vertex` files. Pure grammar — no runtime types, n
 
 ```
 atoms (data)  →  engine (runtime)  →  lang (grammar)  →  apps (CLI)
-Fact, Spec        Tick, Vertex         .loop/.vertex      loops validate/run
+Fact, Spec        Tick, Vertex         .loop/.vertex      SDK-backed JSON CLI
 ```
 
 Below: `libs/engine/` compiles these AST types into runtime Vertices and Sources. `libs/atoms/` defines the data types that engine produces.
-Above: `apps/loops/` calls `parse_vertex_file()` and `validate()` for its CLI commands.
+Above: engine and SDK callers use `parse_vertex_file()` and `validate()`. The JSON CLI in `apps/loops-min` calls the SDK; `apps/loops` is retired.
 
 Only external dependency: `ckdl` (KDL parser). No cross-lib imports — lang is portable.
 
@@ -97,7 +97,7 @@ from a `lifecycle "<field>" active="<v1,v2,…>"` child-node (sibling of
 `edge`/`search`/`preview`). `LifecycleDecl(field, active)` declares which payload
 field is the entity's status and which values are ACTIVE. Grammar-only here — the
 default-view hide of inactive entities lives in the engine FoldSection build and
-`loops.surface`. Additive field on the `_decl.kind-defined` document (no protocol
+the retired frontend's `loops.surface`. Additive field on the `_decl.kind-defined` document (no protocol
 bump); see `docs/dev/lifecycle-spec-delta-090.md`.
 
 **Don't reach for yet**: Population management, KDL text manipulation.
@@ -131,7 +131,7 @@ declared `$NAME` form is what enters absorbed declaration payloads, never the
 resolved value. `$$` escapes a literal leading `$`. Partial interpolation is
 unsupported; compose via separate template params.
 
-Population management also includes KDL text manipulation — `kdl_insert_with_row()`, `kdl_remove_with_row()`, `export_to_file()`, `import_from_file()`. These edit the `.vertex` file text directly to add/remove parameter rows. The CLI (`loops ls/add/rm`) uses these.
+Population management also includes KDL text manipulation — `kdl_insert_with_row()`, `kdl_remove_with_row()`, `export_to_file()`, `import_from_file()`. These edit the `.vertex` file text directly to add/remove parameter rows. The retired CLI (`loops ls/add/rm`) used these; they are not JSON-client commands.
 
 **Name resolution**: `resolve_vertex("dev/project", home)` → `home/dev/project/project.vertex`. Slashed names use the leaf for the filename.
 

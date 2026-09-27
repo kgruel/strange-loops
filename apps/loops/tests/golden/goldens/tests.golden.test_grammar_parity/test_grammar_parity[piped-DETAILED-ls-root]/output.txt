@@ -1,6 +1,0 @@
-config — ~/.config/loops
-  grammar  instance  9 facts  4 kinds  updated 3d  ⊃ decision · session · thread
-      decision  4  items by topic
-      session   2  items by name
-      thread    2  items by name
-      log       1  collect 20

@@ -6,11 +6,11 @@ Slice, merge, search, transport for vertex store databases. Start at Level 0. On
 
 ```
 atoms (data)  →  engine (runtime)  →  store (maintenance)  →  apps (CLI)
-Fact, Spec        SqliteStore writes    slice/merge/search     loops store/export
+Fact, Spec        SqliteStore writes    slice/merge/search     SDK maintenance
 ```
 
 Below: `libs/engine/` provides `SqliteStore` (write path), `StoreReader` (read path), and — for the arrival arm of merge — `engine.admission`. This lib operates on the same SQLite databases but for bulk maintenance — extracting subsets, combining stores, cross-DB queries.
-Above: `apps/loops/` uses `export` and `store` commands that call into this lib.
+Above: SDK maintenance composition and explicit Python callers. The old `apps/loops` frontend is retired. Library APIs below are not a promise of JSON-client command parity; see [the CLI reference](../../apps/loops-min/README.md).
 
 ---
 
@@ -114,7 +114,7 @@ entity-keyed (`kind:key`) and resolve at read time.
 verifiable claim), `source_file_sha256` (forensic), `source_chain_head`
 (`engine.tick_row_hash` of the source's newest tick), rule, counts.
 
-CLI: `loops store rebirth <source> <target> --rule ulid-migration` (auto-verifies; `--check` re-verifies later).
+The former `loops store rebirth` CLI wrapper is retired; this legacy library recipe is not an Arrival migration command.
 
 **Status**: Rebirth is sqlite→sqlite only. It is superseded for migration to arrival logs by `libs/migrate` (the offline migration sidecar) and slated for slice-5 disposition. Do not grow its use or extend it to new storage formats.
 

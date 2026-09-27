@@ -14,7 +14,6 @@ requires-python = ">=3.11"
 # `uv tool install .` until it is also added here. `uv run --package` masks the
 # gap because it resolves the workspace env, not this flat wheel.
 dependencies = [
-    "painted>=0.12.1,<0.14",
     "ckdl>=1.0",
     "pyjwt[crypto]>=2.9",
     "cryptography>=43",
@@ -45,7 +44,6 @@ only-include = [
     "libs/sdk/src/sdk",
     "libs/sign/src/sign",
     "libs/store/src/store",
-    "apps/loops/src/loops",
     "apps/loops-min/src/loops_min",
     "README.md",
     "LICENSE",
@@ -61,7 +59,6 @@ packages = [
     "libs/sdk/src/sdk",
     "libs/sign/src/sign",
     "libs/store/src/store",
-    "apps/loops/src/loops",
     "apps/loops-min/src/loops_min",
 ]
 
@@ -88,6 +85,5 @@ members = [
     "libs/sdk",
     "libs/sign",
     "libs/store",
-    "apps/loops",
     "apps/loops-min",
 ]

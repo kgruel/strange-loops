@@ -1,5 +1,10 @@
 # Characterization Ledger — the loops core
 
+This is the historical version-1 ledger. Instrument version 2 replaces the
+retired `loops --version` probe with target-free `loops-min --help`, named
+`cli_cold_help`. Do not compare version-2 arms to these version-1 measurements;
+no new performance measurements are claimed by the frontend retirement.
+
 - **Instrument**: `benchmarks/characterize.py`, version 1
 - **Measured**: 2026-08-15, one machine, AC power, arms run back to back
 - **Question**: what does the core cost, and what shape does that cost have as a store grows

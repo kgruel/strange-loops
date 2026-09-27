@@ -129,7 +129,10 @@ is already the same three shapes.
 An application is a store plus a skin: a write vocabulary and a lens
 configuration for one domain. The substrate does not change.
 
-This repo runs several. A design store accumulates this system's own
+Historically this repo hosted several such skins. The old frontend and shared
+renderer described here are now retired from the source tree; these examples
+illustrate domains, not a list of currently packaged applications.
+A design store accumulates this system's own
 architecture — decisions, open threads, falsifiable predictions — and each
 working session opens by reading its fold. A homelab skin turns the same
 shapes into monitoring: services observed, boundaries firing, attention
@@ -147,6 +150,12 @@ The supported agent-facing JSON client and its root-wheel alias and hook
 transition boundary are documented in the [minimal CLI reference](./apps/loops-min/README.md).
 The [Atlas guide](./docs/guides/atlas-greenfield-cli.md) is the explicit
 workspace-client walkthrough.
+
+The old `apps/loops` frontend is retired from this source tree. Legacy data
+compatibility remains in the [offline migration/provenance tools](./libs/migrate/README.md),
+not a second agent-facing runtime. Source collection remains SDK-only. This
+source change does not replace installed consumers or migrate live stores;
+quiescence, installed handoff, and live publication require separate approval.
 
 ## Boundaries of the model
 

@@ -31,7 +31,7 @@ shift || true
 # Every workspace package that ships a test suite, discovered not enumerated.
 packages_with_tests() {
     for dir in libs/*/ apps/*/; do
-        [ -d "${dir}tests" ] || continue
+        [ -f "${dir}pyproject.toml" ] && [ -d "${dir}tests" ] || continue
         printf '%s %s\n' "$(basename "$dir")" "${dir}tests"
     done
 }

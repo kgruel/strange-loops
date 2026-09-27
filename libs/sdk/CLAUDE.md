@@ -15,7 +15,7 @@ The single composition point for loops substrate operations (`resolve_target`, `
 ## Boundaries
 
 - **Upstream Dependencies**: `atoms`, `custody`, `engine`, `lang`, `sign`, `store`.
-- **Downstream Consumers**: Presentation layers (`apps/loops`, TUI, external tools/agents) must consume `sdk` rather than composing substrate libraries directly.
+- **Downstream Consumers**: Presentation layers (`apps/loops-min`, external tools/agents) must consume `sdk` rather than composing substrate libraries directly.
 - **Invariants**: Zero CLI flag parsing or terminal ANSI escape formatting owned here.
 
 ## Testing Pyramid

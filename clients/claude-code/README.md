@@ -29,8 +29,11 @@ Staging alone is not installation or activation. The name/version guarantee
 neither that legacy hooks stay active nor that they are replaced. A marketplace
 refresh/plugin update from a source tracking this tree may replace cached
 `loops@gruel` 0.1.0; a same-name `--plugin-dir` may take session precedence.
-These host-version-dependent paths are **unrehearsed here**. Replacement without
-an explicit configuration selector can silently stop session capture because
+Marketplace refresh/update remains unrehearsed. A disposable non-interactive
+rehearsal on Claude Code 2.1.283 observed same-name override against a no-write
+legacy-name fixture; it did not exercise the legacy runtime or already-running
+sessions. Replacement without an explicit configuration selector can silently
+stop session capture because
 the Arrival adapter defaults to disabled. Other or already-running sessions may
 still have legacy writers.
 
@@ -115,8 +118,11 @@ newline-delimited JSON on stderr: a confirmed-close/seal-pending record,
 followed by a final outcome. A pending record proves neither seal attempt nor
 completion. These diagnostics are for reconciliation, not agent context;
 the host may discard output on termination. Nonzero hook failures may display
-only the first stderr line (the pending record); inspect Claude Code's debug
-log for the terminal outcome. A missing terminal outcome remains unknown.
+only the first stderr line (the pending record). Debug logs may aid reconciliation
+but are not a durable receipt sink: primary inspection of the 2.1.283 rehearsal
+found successful End diagnostics absent from captured stdout, stderr and debug
+log. A missing terminal outcome remains unknown; a
+successful Claude process exit does not prove close/seal completion.
 
 Start context is ASCII JSON bounded below Claude Code's 10,000 UTF-16-unit
 limit. If required evidence cannot fit, stdout is refused rather than clipped;
@@ -128,6 +134,14 @@ payloads are never forwarded.
 a nonempty last assistant message, it returns one neutral `additionalContext`
 reminder, which continues the conversation. It never reads a transcript or
 target.
+
+The source-side evidence is in
+`docs/scratch/arrival-break/installed-handoff-rehearsal-2026-09-27.md` in the
+same checkout (not bundled in this plugin). It covers seven synthetic host
+scenarios with a loopback model stub, including inline `--settings` hook
+composition and a cancelled SessionEnd despite host exit 0. It does not establish
+user/project settings-file hook merging, interactive resume/clear/fork behavior,
+production authentication, migrated-store readiness or writer quiescence.
 
 ## SessionEnd timeout
 

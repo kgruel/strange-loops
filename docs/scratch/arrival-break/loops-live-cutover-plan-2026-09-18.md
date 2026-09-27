@@ -11,12 +11,19 @@ cutover. Its source snapshot, prepared copy, lineage, report and credentials
 are never promoted to production. The live window starts with a new snapshot
 and independently captured pins.
 
+Updated after source retirement: the [September 27 inventory and host
+rehearsal](installed-handoff-rehearsal-2026-09-27.md) records the installed
+editable CLI, enabled legacy plugin and `loops-docs` parent-directory symlink
+sharing main's live descriptor/source. None has been switched or quiesced. Select
+the tested CPython 3.13.11 explicitly for the next rehearsal; the observed 3.14.6
+permission-preflight failure remains uninvestigated.
+
 ## Supported runtime boundary
 
 Use the descriptor-first SDK after the descriptor is published:
 
 - Reads and inspection: `inspect_declaration`, `read_summary`, `read_facts`,
-  `read_ticks`, `read_state`, `read_timeline`, `search_facts`, `sync_target`,
+  `read_all_facts`, `read_ticks`, `read_state`, `read_timeline`, `search_facts`, `sync_target`,
   and `verify_target`.
 - Writes: `preview_emission`, `emit_fact`, `emit_batch`,
   `edit_declaration`, and the SDK kind-mutation APIs, with a mapped credential
@@ -30,16 +37,20 @@ Use the descriptor-first SDK after the descriptor is published:
   only `recover_arrival_adoption(intent_path)` may reconcile it. Recovery has
   no signer or epoch argument.
 
-Do **not** use `loops emit`, `loops sync`, `loops stream`, `loops read`,
-`loops store`, `loops store absorb`, `loops store adopt`, `loops store reanchor`,
-or `loops store reindex` against the candidate or live descriptor. Those
-commands retain the legacy SQLite/canonical-store and `open_vertex` consumer
-paths. This plan has not established a refusal for each command, including
-`loops store absorb`; it makes no safety claim based on such a refusal. Keeping
-them disabled is the protection. They do not form a reviewed Arrival-v2 writer
-or reader handoff. In particular, `loops store migrate` is not the cutover
-ceremony: it has no reviewed-snapshot, provenance verification, mapped-binding,
-fresh-adoption, or recovery handoff.
+Do **not** use any command of the **installed legacy build**, including `init`,
+`emit`, `sync`, `stream`, `read` or `store`, against the candidate or live
+descriptor. Disable these routes; this plan does not establish that every legacy
+command refuses Arrival. `loops store migrate` is retired in the reviewed source,
+still present in the installed legacy build, and never the cutover ceremony.
+
+The reviewed root wheel now maps `sl`, `loops` and `loops-min` to the
+[JSON client](../../../apps/loops-min/README.md), including mapped Arrival writes
+and strict reads. Inspect entrypoint metadata, not just the shared `0.11.0`
+version. Its `sync` maintains derived indexes, **not source collectors**. The
+[Claude adapter](../../../clients/claude-code/README.md) requires an explicit
+absolute binary/target/mapped-credential configuration. Source collection remains
+SDK-only; no detached boundary-command dispatcher or old argument translation
+was added. These source/artifact capabilities do not authorize installed handoff.
 
 The legacy source and its sibling SQLite index are archival inputs after the
 swap. Neither is a fallback writer for an Arrival lineage.
@@ -87,6 +98,16 @@ service using the vertex. Disable their schedulers and prevent new sessions;
 record owners, process IDs or service revisions, and the time the stop took
 effect. Readers may stay only if they do not repair, reindex, or write local
 metadata into the cutover locations.
+
+Include the `loops-docs` symlinked view of the same descriptor/JSONL, user-level
+plugin and restoration configuration, launchers, aggregate readers, and other
+project hooks using the shared executable. Publish the canonical descriptor once;
+do not treat the symlinked view as a second migration input. Obtain approval for cross-project impact. Disable
+new launches and let/account for existing shutdown hooks **before** declaring
+quiescence. A PID/CWD census or absence of an open file is not a quiescence record.
+Do not advance main while the installed CLI remains editable against it or
+before reconciling the plugin's registered directory source there. A refresh or
+restoration can install changed plugin files independently of CLI resync.
 
 Take a new source and vertex snapshot only after that gate. The following are
 the shell primitives to record in the operations transcript; substitute the
@@ -155,6 +176,11 @@ so parsing the copied vertex resolves the store clause to exactly
 resolved path before migration. This makes the reviewed original vertex bytes
 and the published candidate differ only in controlled residence, while ensuring
 the migration consumes the prepared copy rather than an accidental sibling.
+Reject already-Arrival candidates, including suffix-only `.arrival` clauses:
+the retired CLI's suffix check is not supplied by the sidecar's explicit-backend
+guard. Do not use resume to bypass that check. The already-published resume
+exception requires the exact explicit file/authority/lineage descriptor; it is
+separate from a fresh migration of a copied legacy candidate.
 
 The existing migration API publishes only into the vertex it receives, so using
 a candidate keeps the live declaration unchanged during migration and adoption
@@ -266,67 +292,40 @@ There are two distinct publication points:
    a separately named prepublication backup under `ARCHIVE_ORIGINAL` (for
    example `project.vertex.prepublish`); do not overwrite it on a retry.
 
-Prepare the final replacement file in `LIVE_VERTEX.parent` so the final
-`os.replace` is same-directory. Under the already-held quiescence lock, a small
-one-shot publication procedure must do the following in order:
+Use the implemented, reviewed offline primitive
+`migrate.publication.publish_candidate_descriptor(PublicationRequest(...))`,
+not a new hand-written replacement fragment. Its
+[contract](../../../libs/migrate/README.md#offline-descriptor-publication)
+requires six absolute `Path` values: live vertex, candidate vertex, legacy live
+source, final Arrival store, exclusive backup and exclusive receipt. Supply four
+independently captured SHA-256 pins (original live vertex, final candidate,
+original live source and Arrival bytes at A), the full reviewed adoption `Head`
+A, and retained provenance/quiescence references. Review the exact request and
+rehearse it on disposable inputs before authorizing production execution.
 
-1. Read `LIVE_VERTEX` and `CANDIDATE_VERTEX`; require their SHA-256 values to
-   equal the recorded original and candidate pins. Re-parse the candidate and
-   require its descriptor to name the final absolute `ARRIVAL_STORE`, the
-   pinned lineage, and authority role.
-2. Create and `fsync` the separately named prepublication backup exclusively,
-   or, on a retry, require its existing hash to equal the original pin. Then
-   create `LIVE_VERTEX.parent / ".<name>.arrival-cutover"` exclusively with
-   the candidate bytes, `fsync` it, reread/hash it, and require the candidate
-   hash again. An existing stage path refuses.
-3. Reread and hash `LIVE_VERTEX` one final time. If it no longer equals the
-   original pin, remove only the uninstalled stage file and refuse.
-4. Call `os.replace(stage_path, LIVE_VERTEX)`, then open and `fsync` the parent
-   directory. Reread/hash the new live vertex and require the candidate pin.
+The primitive checks aliases and pinned descriptor semantics, streams source
+and store hashes, creates an exclusive backup and same-directory stage, and
+rechecks before `os.replace`. It fsyncs directories, verifies published bytes
+and POSIX mode, and writes a private receipt. Ownership, ACLs and extended
+attributes are not copied; account for them explicitly. Existing stage/receipt
+paths refuse; only a matching backup can be reused. Failed artifacts are retained,
+not automatically deleted. This is atomic replacement under caller-held
+quiescence, **not compare-and-swap**. Alias checks cover only the request's named
+roles, not every external consumer or hard link. Leaf symlinks refuse, but parent
+symlinks are not rejected: choosing the canonical live path is operator discipline,
+not enforced by the primitive. The candidate's absolute store location must
+match the supplied `arrival_store` spelling exactly, not merely resolve to it.
 
-This is an atomic same-directory replacement under quiescence; it is not an
-atomic compare-and-swap. Quiescence is the guarantee against a concurrent
-editor; the two live-byte checks detect drift observed before replacement. The
-procedure's receipt binds the old and candidate hashes, A, stable Arrival path,
-backup hash, and replacement result.
+It does not open the Arrival protocol, verify signatures/provenance, consult
+witness state, adopt a declaration or prove quiescence. The receipt labels A,
+provenance and quiescence as **caller assertions**, not independently verified
+claims. Those earlier gates remain mandatory.
 
-```python
-def publish_vertex(live: Path, candidate: Path, backup: Path) -> tuple[str, str]:
-    old = live.read_bytes()
-    replacement = candidate.read_bytes()
-    old_hash = hashlib.sha256(old).hexdigest()
-    replacement_hash = hashlib.sha256(replacement).hexdigest()
-    if old_hash != ORIGINAL_VERTEX_SHA256 or replacement_hash != CANDIDATE_VERTEX_SHA256:
-        raise RuntimeError("cutover input hash changed")
-    stage = live.parent / f".{live.name}.arrival-cutover"
-    if backup.exists():
-        if hashlib.sha256(backup.read_bytes()).hexdigest() != old_hash:
-            raise RuntimeError("existing prepublication backup hash mismatch")
-    else:
-        _write_exclusive_and_fsync(backup, old)
-    if hashlib.sha256(backup.read_bytes()).hexdigest() != old_hash:
-        raise RuntimeError("original backup hash mismatch")
-    if stage.exists():
-        raise RuntimeError("exclusive live-directory stage already exists")
-    _write_exclusive_and_fsync(stage, replacement)
-    if hashlib.sha256(stage.read_bytes()).hexdigest() != replacement_hash:
-        raise RuntimeError("staged candidate changed")
-    if live.read_bytes() != old:  # quiescence check immediately before replace
-        stage.unlink(missing_ok=True)
-        raise RuntimeError("live vertex changed during publication")
-    os.replace(stage, live)
-    _fsync_directory(live.parent)
-    if hashlib.sha256(live.read_bytes()).hexdigest() != replacement_hash:
-        raise RuntimeError("published vertex hash mismatch")
-    return old_hash, replacement_hash
-```
-
-This is illustrative algorithm text, not an implemented cutover command.
-`_write_exclusive_and_fsync` opens with exclusive creation, writes, flushes and
-calls `os.fsync`; `_fsync_directory` opens the directory read-only and calls
-`os.fsync`. Before use, the cutover transcript must add the step-1 descriptor
-reparse and receipt serialization, then record a disposable-directory rehearsal
-of the exact fragment.
+Preserve every `PublicationError`'s phase/effect/paths/pins. `not_attempted`
+refers only to descriptor replacement and may leave backup/stage files;
+`replace_entered_unknown` and `replace_returned_unverified` require reconciliation.
+Even `known_published` can accompany receipt failure. No failure is permission
+to retry blindly or to assume the old descriptor is still live.
 
 Keep writers stopped through the replacement, reopen the descriptor only with
 the SDK operations above, and repeat `verify_target`, `sync_target`,
@@ -346,8 +345,17 @@ Only then hand each inventoried writer to a descriptor-first SDK integration:
 - declaration management: `edit_declaration` and its recovery API;
 - source/cadence jobs: `run_sources` with the production collector factory,
   dispatcher, observer, mapped provider, and `CUTOVER_STATE` environment;
-- CLI-only workflows: remain disabled until they have a reviewed adapter to
-  those descriptor-first SDK calls.
+- CLI-only workflows: use only the reviewed JSON root-wheel client with explicit
+  paths and mapped credentials after their own handoff; old grammar, source
+  runners and presentation workflows remain disabled until explicitly retired
+  or replaced.
+
+For Claude, reconcile separate settings hooks as well as plugin selection.
+Record an explicit tested SessionEnd budget; plugin timeout alone does not raise
+it. The host can return success while shutdown capture is cancelled and can
+omit successful hook diagnostics from captured output. The demonstrated terminal
+evidence route is ledger read-back; no durable host receipt sink was established.
+Reconcile without automatic retries; process success is not session-closure proof.
 
 The handoff receipt names every enabled writer and its SDK version, plus how
 each excluded legacy command or scheduled job was disabled. No legacy or raw
@@ -377,8 +385,11 @@ writers and source jobs are stopped:
   live vertex hash to equal that original pin.
 
 If any condition fails, restoration is forbidden and disposition is forward
-only. When it succeeds, retain the candidate Arrival lineage and adoption
-anchor; this is a service-routing reversal, never a history deletion.
+only. After a successful authorized restoration, retain the candidate Arrival
+lineage and adoption anchor; this is a service-routing reversal, never a history
+deletion. The one-way publication primitive does not perform rollback: any
+routing reversal needs a separately reviewed exact procedure and authorization
+under these conditions.
 
 After the first post-A write, do not restore the legacy vertex as a writable
 fallback. It would conceal new authoritative facts. Stop writers, retain the
@@ -390,20 +401,21 @@ source.
 
 ## Remaining blockers and decisions
 
-1. Provenance implementation, review and the loops-copy pass are complete. A
-   new production snapshot still requires its own independently pinned receipt.
-2. The illustrative same-directory publication algorithm needs its descriptor
-   reparse, receipt serialization, and disposable-directory rehearsal completed
-   before use. The existing migration publisher cannot replace a distinct live
-   vertex.
-3. Every production writer must either have a descriptor-first SDK handoff or
-   remain disabled. `run_sources` is available for source jobs, but the current
-   CLI emit/sync/source workflows have no supported Arrival-v2 adapter today.
-   Refusal behavior for legacy CLI commands, including `store absorb`, is
-   unverified; disablement is the safety gate, not an assumed refusal.
-4. The maintenance owner must complete the real writer inventory and obtain a
-   quiescence record. A new source hash after snapshot requires a new candidate
-   rather than a policy choice.
+1. Approve installed-retirement scope across shared aliases, plugin settings,
+   additional locators, launchers and other projects; finish the writer inventory
+   and establish recorded quiescence. The September 27 observation is not that
+   record.
+2. Repeat migration, signed-report verification, provenance, fresh adoption and
+   recovery against a new coherent snapshot with independent pins. A changed
+   source after snapshot requires a new candidate, not a policy choice.
+3. Rehearse and approve the exact installed JSON-client/host/credential/state
+   handoff for the actual target declaration. The synthetic host pass does not
+   cover migrated production inputs or authorize legacy route replacement.
+4. Rehearse and approve the exact request to the implemented offline publication
+   primitive, disposition of aliases and metadata not copied by it, and the
+   separately authorized maintenance window. A retained stage blocks re-execution
+   until explicitly dispositioned. Do not reimplement the publisher or infer
+   permission from its tests.
 
 The selected policy decisions are already fixed: use the audited
 `legacy/unattributed` preparation, fresh runtime epoch, preserved historical

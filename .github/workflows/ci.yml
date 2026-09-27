@@ -80,20 +80,34 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Test loops-min and Claude Arrival adapter
-        run: uv run --package loops-min pytest apps/loops-min/tests clients/claude-code/tests -q
-
-      - name: Lint Claude Arrival adapter
-        run: uv run --package loops-min ruff check clients/claude-code
-
-      - name: Build root wheel and smoke installed loops-min
+      - name: Test, lint, and smoke client delivery artifacts
+        shell: bash
         run: |
-          artifact_root=$(mktemp -d "$RUNNER_TEMP/loops-min-root-wheel.XXXXXX")
-          uv build --wheel --out-dir "$artifact_root" .
-          uv venv "$artifact_root/venv" --python 3.13
-          uv pip install --python "$artifact_root/venv/bin/python" "$artifact_root"/strange_loops-*.whl
-          "$artifact_root/venv/bin/python" apps/loops-min/tests/wheel_smoke.py "$artifact_root/venv/bin/loops-min"
-          "$artifact_root/venv/bin/python" clients/claude-code/tests/installed_smoke.py "$artifact_root/venv/bin/loops-min" "$GITHUB_WORKSPACE/clients/claude-code/hooks/arrival_session.py"
+          set -euo pipefail
+          artifact_root=$(mktemp -d "$RUNNER_TEMP/loops-min-delivery-artifacts.XXXXXX")
+          mkdir -p "$artifact_root/home" "$artifact_root/outside-checkout"
+          isolated=(
+            env -i
+            "PATH=$PATH" "HOME=$artifact_root/home" "UV_CACHE_DIR=$artifact_root/uv-cache"
+            "UV_PROJECT_ENVIRONMENT=$artifact_root/uv-project" "LOOPS_HOME=$artifact_root/loops-home"
+            "XDG_STATE_HOME=$artifact_root/state" "XDG_CONFIG_HOME=$artifact_root/config"
+            "XDG_DATA_HOME=$artifact_root/data" "XDG_CACHE_HOME=$artifact_root/cache"
+            # setup-python may need its shared-library path on Linux.
+            "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:-}"
+          )
+          "${isolated[@]}" uv run --python 3.13 --package loops-min pytest \
+            tests/test_root_console_scripts.py apps/loops-min/tests clients/claude-code/tests -q
+          "${isolated[@]}" uv run --python 3.13 --package loops-min ruff check \
+            apps/loops-min/tests/wheel_smoke.py clients/claude-code tests/test_root_console_scripts.py
+          "${isolated[@]}" uv build --python 3.13 --wheel --out-dir "$artifact_root/wheel" .
+          "${isolated[@]}" uv venv "$artifact_root/venv" --python 3.13
+          "${isolated[@]}" uv pip install --python "$artifact_root/venv/bin/python" "$artifact_root"/wheel/strange_loops-*.whl
+          (
+            cd "$artifact_root/outside-checkout"
+            "${isolated[@]}" "$artifact_root/venv/bin/python" "$GITHUB_WORKSPACE/apps/loops-min/tests/wheel_smoke.py" "$artifact_root/venv/bin/loops-min"
+            "${isolated[@]}" "$artifact_root/venv/bin/python" "$GITHUB_WORKSPACE/clients/claude-code/build_plugin.py" "$artifact_root/claude plugin"
+            "${isolated[@]}" "$artifact_root/venv/bin/python" "$GITHUB_WORKSPACE/clients/claude-code/tests/installed_smoke.py" "$artifact_root/venv/bin/loops-min" "$artifact_root/claude plugin"
+          )
 
   discover:
     name: Discover Packages

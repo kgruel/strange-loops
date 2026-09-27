@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.scripts]
-sl = "loops.main:main"
-loops = "loops.main:main"
+sl = "loops_min.main:main"
+loops = "loops_min.main:main"
 loops-min = "loops_min.main:main"
 
 [build-system]

@@ -26,7 +26,7 @@ def test_plugin_registers_one_adapter_per_event_without_legacy_loading() -> None
     hooks = json.loads(
         (PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8")
     )["hooks"]
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == "0.2.0"
     assert set(hooks) == {"SessionStart", "SessionEnd", "Stop"}
     matcher = hooks["SessionStart"][0]["matcher"]
     assert all(

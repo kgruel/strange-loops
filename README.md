@@ -141,6 +141,13 @@ one semantic renderer serves every skin's lenses.
 The stores differ only in what their observers care about. The shapes
 never change.
 
+## Client and operator guidance
+
+The supported agent-facing JSON client and its root-wheel alias and hook
+transition boundary are documented in the [minimal CLI reference](./apps/loops-min/README.md).
+The [Atlas guide](./docs/guides/atlas-greenfield-cli.md) is the explicit
+workspace-client walkthrough.
+
 ## Boundaries of the model
 
 It is not a database of state. It never stores "the world is X" — that row

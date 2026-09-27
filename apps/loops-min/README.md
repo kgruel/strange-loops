@@ -125,17 +125,33 @@ outcome evidence supplied by the SDK. A credential-binding incomplete result
 has a binding token and phase rather than a ledger Commit or fact IDs; an
 unknown phase does not prove that a durable binding intent exists.
 
-The executable is deliberately named `loops-min` while the legacy `loops`
-application remains in the workspace. The root distribution also installs the
-same `loops-min` console entry point; `sl` and `loops` remain legacy aliases.
-It has no presentation, storage, or legacy CLI dependency.
+For hooks, prefer the absolute `loops-min` binary from a **root-wheel**
+installation: that is the installed artifact covered by the CLI/adapter smokes.
+The workspace package is available for development, but its standalone wheel is
+not covered by those installed-artifact tests.
+
+A root-only installation maps `sl`, `loops`, and `loops-min` to this JSON client.
+Existing installations and the standalone `apps/loops` distribution can still
+be legacy. Installing both distributions (for example, `uv sync --all-packages`)
+creates a last-writer-wins collision for `bin/loops`; do not use such a mixed
+environment as a stable alias binding.
+
+Quiesce legacy hook/job consumers **before** replacing their live executables.
+After checkout changes, `uv run`, `uv sync` or a path-source tool upgrade can
+regenerate aliases without a separate manual install. Both root builds can
+report `0.11.0`; version alone cannot distinguish them. Inspect the selected
+console script and its distribution's entry-point metadata for
+`loops_min.main:main`. An isolated test installation is not a live switch.
+
+This is not legacy command-line compatibility: source execution and legacy
+DATA migration/provenance remain SDK/scripts or pending client boundaries. The
+client has no presentation, storage, or legacy CLI dependency.
 
 For a complete fresh-store example with tested commands, see
 [A fresh Loops store for Atlas observations](../../docs/guides/atlas-greenfield-cli.md).
 
 The global `--pretty` option may appear before or after a command. Argument
-errors also use the JSON envelope and exit with status 2. A built-wheel smoke
-can be run from a clean environment by building `loops-min`, installing it
-alongside the local SDK dependency wheels, and invoking `loops-min --help` and
-one temporary Arrival `summary`; the package does not require a repository
-checkout at runtime.
+errors also use the JSON envelope and exit with status 2. A built-root-wheel
+smoke installs the root wheel in a clean environment and exercises all three
+aliases against a temporary Arrival store; no repository checkout is needed at
+runtime.

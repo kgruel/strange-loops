@@ -48,9 +48,12 @@ cp architecture.json "$ATLAS_WORK/architecture.json"
 printf 'Workspace: %s\n' "$ATLAS_WORK"
 ```
 
-Use `loops-min`, the new JSON CLI. The legacy `loops` executable is a different
-application. Each successful command below returns an envelope with `ok: true`
-and an SDK-owned `result`; saved JSON files retain that evidence.
+This guide installs the workspace `loops-min` package with `--package loops-min`
+and invokes that explicit binary; it does not install or exercise root-wheel
+aliases. In a newly installed root wheel, `sl`, `loops`, and `loops-min` share
+the JSON client, while the standalone workspace `apps/loops` entry point can
+still be legacy. Each successful command below returns an envelope with
+`ok: true` and an SDK-owned `result`; saved JSON files retain that evidence.
 
 ## 2. Choose an observer and initialize
 

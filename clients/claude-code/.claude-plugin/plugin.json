@@ -1,7 +1,7 @@
 {
   "name": "loops",
   "description": "Explicitly configured Arrival session hooks for Claude Code.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "Kyle Gruel" },
   "homepage": "https://github.com/kgruel/strange-loops",
   "keywords": ["loops", "arrival", "session", "hooks"]

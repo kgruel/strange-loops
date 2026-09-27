@@ -41,10 +41,13 @@ def _ok(
 def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit(
-            "usage: installed_smoke.py INSTALLED_LOOPS_MIN ARRIVAL_SESSION_HOOK"
+            "usage: installed_smoke.py INSTALLED_LOOPS_MIN PLUGIN_DIRECTORY"
         )
-    console, hook = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
-    assert console.is_file() and hook.is_file()
+    console, plugin = Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()
+    assert console.is_file() and (plugin / "hooks" / "arrival_session.py").is_file()
+    hooks = json.loads((plugin / "hooks" / "hooks.json").read_text(encoding="utf-8"))[
+        "hooks"
+    ]
     installed_python = console.with_name("python")
     assert installed_python.is_file()
     with tempfile.TemporaryDirectory(prefix="loops-claude-adapter-smoke-") as temporary:
@@ -54,7 +57,7 @@ def main() -> None:
         environment = {
             key: value
             for key, value in os.environ.items()
-            if key != "PYTHONPATH"
+            if key not in {"PYTHONPATH", "PYTHONHOME"}
             and key != "LOOPS_CLAUDE_HOOK_CONFIG"
             and not key.startswith("HOOK_")
         }
@@ -65,6 +68,9 @@ def main() -> None:
                 "XDG_CONFIG_HOME": str(root / "config"),
                 "XDG_DATA_HOME": str(root / "data"),
                 "XDG_CACHE_HOME": str(root / "cache"),
+                "CLAUDE_PLUGIN_ROOT": str(plugin),
+                # Exercise the registered python3 lookup, not a rewritten command.
+                "PATH": str(console.parent) + os.pathsep + environment.get("PATH", ""),
             }
         )
         imports = subprocess.run(
@@ -161,11 +167,11 @@ def main() -> None:
         )
         environment["LOOPS_CLAUDE_HOOK_CONFIG"] = str(config)
         start = _run(
-            installed_python,
+            Path("/bin/sh"),
             environment,
             outside,
-            str(hook),
-            "start",
+            "-c",
+            hooks["SessionStart"][0]["hooks"][0]["command"],
             stdin='{"hook_event_name":"SessionStart"}',
         )
         assert start.returncode == 0, start.stdout + start.stderr
@@ -179,11 +185,11 @@ def main() -> None:
         assert context["activity"]["items"][0]["origin"] == ""
         assert context["open"]["signed"] is True
         end = _run(
-            installed_python,
+            Path("/bin/sh"),
             environment,
             outside,
-            str(hook),
-            "end",
+            "-c",
+            hooks["SessionEnd"][0]["hooks"][0]["command"],
             stdin='{"hook_event_name":"SessionEnd"}',
         )
         assert end.returncode == 0, end.stdout + end.stderr
@@ -197,6 +203,18 @@ def main() -> None:
             receipt["seal"]["tick_mark"] == "adapter-smoke"
             and receipt["seal"]["tick_id"]
         )
+        before_stop = ledger.read_bytes()
+        stop = _run(
+            Path("/bin/sh"),
+            environment,
+            outside,
+            "-c",
+            hooks["Stop"][0]["hooks"][0]["command"],
+            stdin='{"hook_event_name":"Stop","last_assistant_message":"Finished."}',
+        )
+        assert stop.returncode == 0, stop.stdout + stop.stderr
+        assert stop.stdout == stop.stderr == ""
+        assert ledger.read_bytes() == before_stop
         assert (
             _ok(console, environment, outside, "verify", str(target))["level"] == "full"
         )

@@ -1,24 +1,62 @@
 # loops — Claude Code plugin
 
-This development plugin provides one explicitly configured Arrival adapter for
-`SessionStart`, `SessionEnd`, and `Stop`. It has no commands, skills, target
-discovery, identity defaults, CLI PATH lookup, legacy CLI fallback, retry, or
-exactly-once guarantee. The host resolves `python3` through PATH; Python 3.11
-or newer is required.
+This development plugin (version `0.2.0`) provides one explicitly configured
+Arrival adapter for `SessionStart`, `SessionEnd`, and `Stop`. It has no
+commands, skills, target discovery, identity defaults, CLI PATH lookup, legacy
+CLI fallback, retry, or exactly-once guarantee. The host resolves `python3`
+through PATH; Python 3.11 or newer is required.
 
-## Local development and configuration
+## Staging a plugin directory
 
-Launch Claude Code with this checkout's plugin while developing it:
+From a checkout, stage the fixed plugin files into a **new** output directory
+whose parent already exists:
 
 ```bash
-claude --plugin-dir "$PWD/clients/claude-code"
+PLUGIN_DIR=/absolute/path/to/new-loops-plugin
+python3 clients/claude-code/build_plugin.py "$PLUGIN_DIR"
+```
+
+The builder copies only `.claude-plugin/plugin.json`, `hooks/hooks.json`,
+`hooks/arrival_session.py`, and this README. It refuses any existing output,
+including a dangling symlink, and never installs, enables, refreshes, or
+removes a plugin. Treat a fresh output as immutable by convention: stage
+another new directory for another build. **Any nonzero builder exit means the
+output must not be activated**, even if all four files are present: copying or
+post-copy verification may have failed. Inspect/remove failed output explicitly
+or choose a different fresh path.
+
+Staging alone is not installation or activation. The name/version guarantee
+neither that legacy hooks stay active nor that they are replaced. A marketplace
+refresh/plugin update from a source tracking this tree may replace cached
+`loops@gruel` 0.1.0; a same-name `--plugin-dir` may take session precedence.
+These host-version-dependent paths are **unrehearsed here**. Replacement without
+an explicit configuration selector can silently stop session capture because
+the Arrival adapter defaults to disabled. Other or already-running sessions may
+still have legacy writers.
+
+Check the marketplace's registered path/ref before advancing it to this tree.
+Do not refresh/update `loops@gruel` from a tracking source or launch a same-name
+plugin override before legacy routes are retired/quiesced. Explicitly reconcile
+cached plugins, user/project hooks and skills; a version bump proves no
+merged-hook exclusivity. Host lifecycle rehearsal and live cutover remain
+separate operator gates.
+
+## Configuration
+
+After retiring or quiescing other writer routes, use the staged `PLUGIN_DIR`
+above. For source-checkout development only, it can instead be set to
+`"$PWD/clients/claude-code"`. The adapter stays disabled without an explicit
+configuration selector:
+
+```bash
+claude --plugin-dir "$PLUGIN_DIR"
 ```
 
 Save the following JSON configuration at an absolute path, then select it explicitly:
 
 ```bash
 export LOOPS_CLAUDE_HOOK_CONFIG=/absolute/path/to/claude-arrival.json
-claude --plugin-dir "$PWD/clients/claude-code"
+claude --plugin-dir "$PLUGIN_DIR"
 ```
 
 ```json
@@ -41,8 +79,9 @@ disables the adapter before stdin, target, or child-process IO. `enabled: false`
 reads only the selected configuration file.
 
 Provision an initialized/adopted Arrival authority with a current projection
-and mapped credentials separately; see the
-[loops-min operator guide](../../apps/loops-min/README.md). The target must
+and mapped credentials separately; see `apps/loops-min/README.md` in the **same
+source revision** used to stage this plugin. Retain that revision and any local
+diff with your artifact; the operator guide is not bundled. The target must
 admit the configured observer's `session` and `seal` facts. End requires a
 vertex-level `boundary when="seal"`; declare a `session` fold keyed by `name`
 if you want folded observer-keyed session state. Conditional boundaries can
@@ -97,7 +136,7 @@ Set the exact environment variable in the launch environment when an operator
 chooses a larger budget, for example:
 
 ```bash
-CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=5000 claude --plugin-dir "$PWD/clients/claude-code"
+CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=5000 claude --plugin-dir "$PLUGIN_DIR"
 ```
 
 The plugin sets its own SessionEnd timeout to 60 seconds so older hosts do not
